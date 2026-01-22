@@ -61,6 +61,10 @@ enum BootstrapState {
 /// # Examples
 /// - "90000.12" with exponent -2 → 9000012
 /// - "1.50000000" with exponent -8 → 150000000
+pub fn parse_to_mantissa_from_str(s: &str, exponent: i8) -> Result<i64> {
+    parse_to_mantissa_pure(s, exponent)
+}
+
 fn parse_to_mantissa_pure(s: &str, exponent: i8) -> Result<i64> {
     let s = s.trim();
     if s.is_empty() {
@@ -188,6 +192,16 @@ fn snapshot_to_depth_event(
         integrity_tier: IntegrityTier::Certified,
         source: Some("binance_sbe_depth_capture".to_string()),
     })
+}
+
+/// Convert SBE DepthUpdate to DepthEvent (public API for paper trading).
+pub fn sbe_depth_to_event_pub(
+    update: &DepthUpdate,
+    symbol: &str,
+    price_exponent: i8,
+    qty_exponent: i8,
+) -> DepthEvent {
+    sbe_depth_to_event(update, symbol, price_exponent, qty_exponent)
 }
 
 /// Convert SBE DepthUpdate to DepthEvent.
@@ -564,6 +578,284 @@ impl std::fmt::Display for CaptureStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::io::{BufRead, BufReader};
+
+    /// Deterministic integer-based LOB for replay verification.
+    /// Uses BTreeMap with i64 keys to avoid f64 drift.
+    #[derive(Debug, Default)]
+    struct DeterministicLob {
+        bids: BTreeMap<i64, i64>,  // price_mantissa -> qty_mantissa
+        asks: BTreeMap<i64, i64>,
+        last_update_id: u64,
+    }
+
+    impl DeterministicLob {
+        fn apply_event(&mut self, event: &DepthEvent) -> Result<()> {
+            // Sequence validation
+            if !event.is_snapshot && event.first_update_id != self.last_update_id + 1 {
+                bail!(
+                    "Sequence gap: expected {}, got {}",
+                    self.last_update_id + 1,
+                    event.first_update_id
+                );
+            }
+
+            if event.is_snapshot {
+                // Snapshot replaces entire book
+                self.bids.clear();
+                self.asks.clear();
+                for level in &event.bids {
+                    if level.qty > 0 {
+                        self.bids.insert(level.price, level.qty);
+                    }
+                }
+                for level in &event.asks {
+                    if level.qty > 0 {
+                        self.asks.insert(level.price, level.qty);
+                    }
+                }
+            } else {
+                // Diff updates: qty=0 removes level, qty>0 sets level
+                for level in &event.bids {
+                    if level.qty == 0 {
+                        self.bids.remove(&level.price);
+                    } else {
+                        self.bids.insert(level.price, level.qty);
+                    }
+                }
+                for level in &event.asks {
+                    if level.qty == 0 {
+                        self.asks.remove(&level.price);
+                    } else {
+                        self.asks.insert(level.price, level.qty);
+                    }
+                }
+            }
+
+            self.last_update_id = event.last_update_id;
+            Ok(())
+        }
+
+        /// Compute deterministic state hash.
+        /// Format: sorted bids (descending price) + sorted asks (ascending price)
+        fn state_hash(&self) -> String {
+            let mut hasher = Sha256::new();
+
+            // Bids: descending price order
+            let mut bid_prices: Vec<_> = self.bids.keys().copied().collect();
+            bid_prices.sort_by(|a, b| b.cmp(a)); // Descending
+            for price in bid_prices {
+                let qty = self.bids[&price];
+                hasher.update(format!("B:{}:{}", price, qty).as_bytes());
+            }
+
+            // Asks: ascending price order
+            let mut ask_prices: Vec<_> = self.asks.keys().copied().collect();
+            ask_prices.sort(); // Ascending
+            for price in ask_prices {
+                let qty = self.asks[&price];
+                hasher.update(format!("A:{}:{}", price, qty).as_bytes());
+            }
+
+            hex::encode(hasher.finalize())
+        }
+    }
+
+    /// Process a JSONL file and return the final LOB state hash.
+    fn process_depth_file(path: &std::path::Path) -> Result<String> {
+        let file = fs::File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut lob = DeterministicLob::default();
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: DepthEvent = serde_json::from_str(&line)?;
+            lob.apply_event(&event)?;
+        }
+
+        Ok(lob.state_hash())
+    }
+
+    #[test]
+    fn test_golden_depth_determinism() {
+        // Golden fixture path
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let fixture_path = std::path::Path::new(&manifest_dir)
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // QuantLaxmi/
+            .join("tests/fixtures/crypto/golden_depth.jsonl");
+
+        // Process the fixture
+        let hash = process_depth_file(&fixture_path)
+            .expect("Failed to process golden fixture");
+
+        // Expected hash (computed once, then hardcoded for regression)
+        // This hash represents the deterministic final state of the LOB
+        // after processing all events in golden_depth.jsonl
+        const EXPECTED_HASH: &str = "ec58fe1b7d9a7d770a56351b287ab07723cf701f10f948725d7d14a5217a32a9";
+
+        // Assert the hash matches expected value
+        assert_eq!(
+            hash, EXPECTED_HASH,
+            "Determinism failure: LOB state hash mismatch. \
+             If golden_depth.jsonl was intentionally changed, update EXPECTED_HASH."
+        );
+
+        // Also verify the hash is consistent across multiple runs
+        let hash2 = process_depth_file(&fixture_path)
+            .expect("Failed to process golden fixture second time");
+        assert_eq!(hash, hash2, "Determinism failure: different hashes on same fixture");
+    }
+
+    #[test]
+    fn test_bootstrap_correctness() {
+        // This test verifies that processing snapshot + diffs produces
+        // the expected LOB state. It tests the bootstrap protocol:
+        // 1. Snapshot replaces entire book
+        // 2. Diffs update incrementally
+        // 3. qty=0 removes levels
+
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let fixture_path = std::path::Path::new(&manifest_dir)
+            .parent().unwrap()
+            .parent().unwrap()
+            .join("tests/fixtures/crypto/golden_depth.jsonl");
+
+        // Process and get final LOB state
+        let file = fs::File::open(&fixture_path).unwrap();
+        let reader = BufReader::new(file);
+        let mut lob = DeterministicLob::default();
+
+        for line in reader.lines() {
+            let line = line.unwrap();
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: DepthEvent = serde_json::from_str(&line).unwrap();
+            lob.apply_event(&event).unwrap();
+        }
+
+        // Verify final LOB state matches expected from golden_depth.jsonl
+        // After processing:
+        // - Snapshot (id=1000): bids=[9000000, 8999500, 8999000], asks=[9000100, 9000500, 9001000]
+        // - Diff 1001: bid 9000000 qty changed
+        // - Diff 1002: bid 9000050 added, ask 9000100 removed (qty=0)
+        // - Diff 1003: bid 9000050 removed, bid 9000000 qty changed, ask 9000150 added
+        // - Diff 1004: bid 9000025 added, ask 9000150 qty changed
+
+        // Final expected bids (descending): 9000025, 9000000, 8999500, 8999000
+        assert_eq!(lob.bids.len(), 4, "Expected 4 bid levels");
+        assert!(lob.bids.contains_key(&9000025), "Expected bid at 9000025");
+        assert!(lob.bids.contains_key(&9000000), "Expected bid at 9000000");
+        assert!(lob.bids.contains_key(&8999500), "Expected bid at 8999500");
+        assert!(lob.bids.contains_key(&8999000), "Expected bid at 8999000");
+
+        // Final expected asks (ascending): 9000150, 9000500, 9001000
+        assert_eq!(lob.asks.len(), 3, "Expected 3 ask levels");
+        assert!(lob.asks.contains_key(&9000150), "Expected ask at 9000150");
+        assert!(lob.asks.contains_key(&9000500), "Expected ask at 9000500");
+        assert!(lob.asks.contains_key(&9001000), "Expected ask at 9001000");
+        assert!(!lob.asks.contains_key(&9000100), "Ask at 9000100 should be removed");
+
+        // Verify specific quantities
+        assert_eq!(lob.bids[&9000025], 50000000, "Wrong qty for bid at 9000025");
+        assert_eq!(lob.bids[&9000000], 180000000, "Wrong qty for bid at 9000000");
+        assert_eq!(lob.asks[&9000150], 110000000, "Wrong qty for ask at 9000150");
+
+        // Verify last update ID
+        assert_eq!(lob.last_update_id, 1004, "Wrong last_update_id");
+    }
+
+    #[test]
+    fn test_sequence_gap_detection() {
+        // Create events with a gap
+        let snapshot = DepthEvent {
+            ts: chrono::Utc::now(),
+            tradingsymbol: "BTCUSDT".to_string(),
+            first_update_id: 100,
+            last_update_id: 100,
+            price_exponent: -2,
+            qty_exponent: -8,
+            bids: vec![DepthLevel { price: 9000000, qty: 100000000 }],
+            asks: vec![DepthLevel { price: 9000100, qty: 100000000 }],
+            is_snapshot: true,
+            integrity_tier: IntegrityTier::Certified,
+            source: None,
+        };
+
+        let diff_with_gap = DepthEvent {
+            ts: chrono::Utc::now(),
+            tradingsymbol: "BTCUSDT".to_string(),
+            first_update_id: 105,  // Gap! Should be 101
+            last_update_id: 105,
+            price_exponent: -2,
+            qty_exponent: -8,
+            bids: vec![DepthLevel { price: 9000000, qty: 110000000 }],
+            asks: vec![],
+            is_snapshot: false,
+            integrity_tier: IntegrityTier::Certified,
+            source: None,
+        };
+
+        let mut lob = DeterministicLob::default();
+        lob.apply_event(&snapshot).unwrap();
+
+        // Gap should cause failure
+        let result = lob.apply_event(&diff_with_gap);
+        assert!(result.is_err(), "Should fail on sequence gap");
+        assert!(result.unwrap_err().to_string().contains("Sequence gap"));
+    }
+
+    #[test]
+    fn test_lob_level_removal() {
+        let mut lob = DeterministicLob::default();
+
+        // Snapshot with multiple levels
+        let snapshot = DepthEvent {
+            ts: chrono::Utc::now(),
+            tradingsymbol: "BTCUSDT".to_string(),
+            first_update_id: 100,
+            last_update_id: 100,
+            price_exponent: -2,
+            qty_exponent: -8,
+            bids: vec![
+                DepthLevel { price: 9000000, qty: 100000000 },
+                DepthLevel { price: 8999500, qty: 200000000 },
+            ],
+            asks: vec![
+                DepthLevel { price: 9000100, qty: 150000000 },
+            ],
+            is_snapshot: true,
+            integrity_tier: IntegrityTier::Certified,
+            source: None,
+        };
+        lob.apply_event(&snapshot).unwrap();
+        assert_eq!(lob.bids.len(), 2);
+
+        // Diff that removes a level (qty=0)
+        let diff = DepthEvent {
+            ts: chrono::Utc::now(),
+            tradingsymbol: "BTCUSDT".to_string(),
+            first_update_id: 101,
+            last_update_id: 101,
+            price_exponent: -2,
+            qty_exponent: -8,
+            bids: vec![DepthLevel { price: 8999500, qty: 0 }],  // Remove this level
+            asks: vec![],
+            is_snapshot: false,
+            integrity_tier: IntegrityTier::Certified,
+            source: None,
+        };
+        lob.apply_event(&diff).unwrap();
+        assert_eq!(lob.bids.len(), 1);
+        assert!(!lob.bids.contains_key(&8999500));
+    }
 
     #[test]
     fn test_parse_to_mantissa_pure() {

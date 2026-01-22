@@ -22,6 +22,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Enforce single CI authority (migration policy)
+        working-directory: .
+        run: |
+          # Root CI must fail if any legacy CI files exist
+          # See MIGRATION_POLICY.md section 2
+          if [ -d "QuantKubera1/.github" ]; then
+            echo "ERROR: Legacy CI detected at QuantKubera1/.github"
+            echo "This violates the single CI authority rule."
+            exit 1
+          fi
+          if [ -d "QuantLaxmi/.github" ]; then
+            echo "ERROR: Nested CI detected at QuantLaxmi/.github"
+            echo "All workflows must live at root level."
+            exit 1
+          fi
+          echo "✓ CI authority check passed"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:

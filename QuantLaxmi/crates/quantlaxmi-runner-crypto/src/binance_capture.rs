@@ -54,11 +54,23 @@ fn ms_to_dt(ms: i64) -> DateTime<Utc> {
         .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap())
 }
 
+/// Statistics from bookTicker capture.
+#[derive(Debug, Default)]
+pub struct CaptureStats {
+    pub events_written: usize,
+}
+
+impl std::fmt::Display for CaptureStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "events={}", self.events_written)
+    }
+}
+
 pub async fn capture_book_ticker_jsonl(
     symbol: &str,
     out_path: &Path,
     duration_secs: u64,
-) -> Result<()> {
+) -> Result<CaptureStats> {
     let sym = symbol.to_lowercase();
     let url = format!("wss://stream.binance.com:9443/ws/{}@bookTicker", sym);
 
@@ -70,12 +82,14 @@ pub async fn capture_book_ticker_jsonl(
 
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
-        .append(true)
+        .truncate(true)
+        .write(true)
         .open(out_path)
         .await
         .with_context(|| format!("open output: {:?}", out_path))?;
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
+    let mut stats = CaptureStats::default();
 
     while tokio::time::Instant::now() < deadline {
         let msg = tokio::time::timeout(std::time::Duration::from_secs(5), read.next()).await;
@@ -114,8 +128,9 @@ pub async fn capture_book_ticker_jsonl(
         let line = serde_json::to_string(&q)?;
         file.write_all(line.as_bytes()).await?;
         file.write_all(b"\n").await?;
+        stats.events_written += 1;
     }
 
     file.flush().await?;
-    Ok(())
+    Ok(stats)
 }

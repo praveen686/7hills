@@ -68,3 +68,8 @@ uuid = { workspace = true }
 
 # Binary encoding
 byteorder = { workspace = true }
+
+[dev-dependencies]
+# Determinism testing
+sha2 = "0.10"
+hex = "0.4"

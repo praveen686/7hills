@@ -19,20 +19,22 @@
 pub mod binance_capture;
 pub mod binance_exchange_info;
 pub mod binance_sbe_depth_capture;
+pub mod paper_trading;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use tracing::{error, info};
 
 pub use quantlaxmi_runner_common::{
     AppState, RunnerConfig, SymbolState,
+    artifact::{ArtifactBuilder, ArtifactFamily, FileHash, RunManifest, RunProfile},
     circuit_breakers::TradingCircuitBreakers,
     create_runtime, init_observability, report, tui,
     web_server::{ServerState, start_server},
 };
 
-use kubera_core::ExecutionMode;
+// ExecutionMode used by paper_trading module
 
 #[derive(Parser, Debug)]
 #[command(name = "quantlaxmi-crypto")]
@@ -81,6 +83,11 @@ pub enum Commands {
         /// Quantity exponent for scaled integers (e.g., -8 for 8 decimal places)
         #[arg(long, default_value_t = -8)]
         qty_exponent: i8,
+
+        /// Strict sequencing mode (default: true). Fails capture if sequence gaps detected.
+        /// Gaps break deterministic replay, so certified captures must have strict=true.
+        #[arg(long, default_value_t = true)]
+        strict: bool,
     },
 
     /// Fetch exchange info for symbols
@@ -90,19 +97,31 @@ pub enum Commands {
         symbols: String,
     },
 
-    /// Run paper trading mode
+    /// Run paper trading mode with live capture + WAL + PaperVenue
     Paper {
-        /// Path to configuration file
-        #[arg(short, long, default_value = "configs/paper_crypto.toml")]
-        config: String,
+        /// Symbol to trade, e.g. BTCUSDT
+        #[arg(long)]
+        symbol: String,
 
-        /// Run in headless mode (no TUI)
-        #[arg(long, default_value_t = false)]
-        headless: bool,
+        /// Output directory for WAL and session data
+        #[arg(long, default_value = "data/paper")]
+        out_dir: String,
+
+        /// Price exponent for scaled integers (e.g., -2 for 2 decimal places)
+        #[arg(long, default_value_t = -2)]
+        price_exponent: i8,
+
+        /// Quantity exponent for scaled integers (e.g., -8 for 8 decimal places)
+        #[arg(long, default_value_t = -8)]
+        qty_exponent: i8,
 
         /// Initial capital (USD)
         #[arg(long, default_value_t = 10000.0)]
         initial_capital: f64,
+
+        /// Run in headless mode (no TUI)
+        #[arg(long, default_value_t = true)]
+        headless: bool,
     },
 
     /// Run live trading mode
@@ -141,15 +160,19 @@ async fn async_main() -> anyhow::Result<()> {
             duration_secs,
             price_exponent,
             qty_exponent,
+            strict,
         } => {
-            run_capture_sbe_depth(&symbol, &out, duration_secs, price_exponent, qty_exponent).await
+            run_capture_sbe_depth(&symbol, &out, duration_secs, price_exponent, qty_exponent, strict).await
         }
         Commands::ExchangeInfo { symbols } => run_exchange_info(&symbols).await,
         Commands::Paper {
-            config,
-            headless,
+            symbol,
+            out_dir,
+            price_exponent,
+            qty_exponent,
             initial_capital,
-        } => run_paper_mode(&config, headless, initial_capital).await,
+            headless,
+        } => run_paper_mode(&symbol, &out_dir, price_exponent, qty_exponent, initial_capital, headless).await,
         Commands::Live {
             config,
             initial_capital,
@@ -167,8 +190,61 @@ async fn run_capture_binance(symbol: &str, out: &str, duration_secs: u64) -> any
         "Capturing Binance {} bookTicker for {} seconds...",
         symbol, duration_secs
     );
-    binance_capture::capture_book_ticker_jsonl(symbol, out_path, duration_secs).await?;
-    println!("Capture complete: {}", out);
+    let stats = binance_capture::capture_book_ticker_jsonl(symbol, out_path, duration_secs).await?;
+    println!("Capture complete: {} ({})", out, stats);
+
+    // Emit RunManifest (Research profile - bookTicker is not the authoritative path)
+    let manifest_dir = out_path.parent().unwrap_or(std::path::Path::new("."));
+    emit_bookticker_manifest(manifest_dir, out_path, symbol, &stats)?;
+
+    Ok(())
+}
+
+/// Emit RunManifest for bookTicker capture.
+/// BookTicker uses Research profile (not Certified - SBE depth is authoritative).
+fn emit_bookticker_manifest(
+    manifest_dir: &std::path::Path,
+    quotes_path: &std::path::Path,
+    symbol: &str,
+    stats: &binance_capture::CaptureStats,
+) -> anyhow::Result<()> {
+    let mut manifest = RunManifest::new(ArtifactFamily::Crypto, RunProfile::Research);
+
+    // Record input hash (the captured quotes file)
+    manifest.inputs.quotes = Some(FileHash::from_file(quotes_path)?);
+
+    // NOT certified - bookTicker is JSON WebSocket, not SBE
+    manifest.determinism.certified = false;
+
+    // Compute input hash
+    manifest.compute_input_hash();
+
+    // Add capture metadata
+    manifest.diagnostics.regime_transitions.push(
+        quantlaxmi_runner_common::artifact::RegimeTransition {
+            timestamp: chrono::Utc::now(),
+            previous_regime: "capture_start".to_string(),
+            new_regime: "capture_complete".to_string(),
+            confidence: 1.0,
+            features: serde_json::json!({
+                "symbol": symbol,
+                "events_written": stats.events_written,
+                "integrity_tier": "Uncertified",
+                "source": "binance_bookticker_capture",
+                "note": "Use capture-sbe-depth for certified replay"
+            }),
+        },
+    );
+
+    // Finish and write manifest
+    manifest.finish();
+    let manifest_path = manifest_dir.join("manifest.json");
+    let json = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, json)?;
+
+    println!("Manifest written: {:?}", manifest_path);
+    println!("  Run ID: {}", manifest.run_id);
+    println!("  ⚠️  Profile: Research (not Certified - use capture-sbe-depth for deterministic replay)");
 
     Ok(())
 }
@@ -179,6 +255,7 @@ async fn run_capture_sbe_depth(
     duration_secs: u64,
     price_exponent: i8,
     qty_exponent: i8,
+    strict: bool,
 ) -> anyhow::Result<()> {
     let out_path = std::path::Path::new(out);
     if let Some(parent) = out_path.parent() {
@@ -190,8 +267,8 @@ async fn run_capture_sbe_depth(
         .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
 
     println!(
-        "Capturing Binance SBE {} depth stream for {} seconds (price_exp={}, qty_exp={})...",
-        symbol, duration_secs, price_exponent, qty_exponent
+        "Capturing Binance SBE {} depth stream for {} seconds (price_exp={}, qty_exp={}, strict={})...",
+        symbol, duration_secs, price_exponent, qty_exponent, strict
     );
 
     let stats = binance_sbe_depth_capture::capture_sbe_depth_jsonl(
@@ -205,6 +282,109 @@ async fn run_capture_sbe_depth(
     .await?;
 
     println!("Capture complete: {} ({})", out, stats);
+
+    // In strict mode (default), fail if any sequence gaps detected
+    // Gaps break deterministic replay, so certified captures must have no gaps
+    if strict && stats.gaps_detected > 0 {
+        // Clean up the output file since it's not usable for certified replay
+        let _ = std::fs::remove_file(out_path);
+        return Err(anyhow::anyhow!(
+            "STRICT MODE FAILURE: {} sequence gaps detected. \
+             Deterministic replay requires continuous sequencing. \
+             Re-run capture or use --strict=false for research-only data.",
+            stats.gaps_detected
+        ));
+    }
+
+    // Always emit RunManifest for audit-grade reproducibility
+    let manifest_dir = out_path.parent().unwrap_or(std::path::Path::new("."));
+    emit_capture_manifest(
+        manifest_dir,
+        out_path,
+        symbol,
+        &stats,
+        price_exponent,
+        qty_exponent,
+        strict,
+    )?;
+
+    Ok(())
+}
+
+/// Emit RunManifest for a capture operation.
+/// SBE depth captures with strict=true are Certified profile.
+fn emit_capture_manifest(
+    manifest_dir: &std::path::Path,
+    depth_events_path: &std::path::Path,
+    symbol: &str,
+    stats: &binance_sbe_depth_capture::CaptureStats,
+    price_exponent: i8,
+    qty_exponent: i8,
+    strict: bool,
+) -> anyhow::Result<()> {
+    // Profile depends on strict mode: Certified if strict, Research otherwise
+    let profile = if strict {
+        RunProfile::Certified
+    } else {
+        RunProfile::Research
+    };
+    let mut manifest = RunManifest::new(ArtifactFamily::Crypto, profile);
+
+    // Record input hash (the captured depth events file)
+    manifest.inputs.depth_events = Some(FileHash::from_file(depth_events_path)?);
+
+    // Mark as certified only if strict mode (no gaps allowed)
+    manifest.determinism.certified = strict;
+
+    // Compute input hash for reproducibility tracking
+    manifest.compute_input_hash();
+
+    // Add capture metadata to diagnostics
+    manifest.diagnostics.context_validation.validation_passed = stats.snapshot_written;
+    manifest.diagnostics.context_validation.validation_errors = if stats.gaps_detected > 0 {
+        vec![format!(
+            "Sequence gaps detected: {} (replay may fail)",
+            stats.gaps_detected
+        )]
+    } else {
+        vec![]
+    };
+
+    // Add custom metadata as JSON in regime_transitions (repurposed for capture metadata)
+    let integrity_tier = if strict { "Certified" } else { "Research" };
+    manifest.diagnostics.regime_transitions.push(
+        quantlaxmi_runner_common::artifact::RegimeTransition {
+            timestamp: chrono::Utc::now(),
+            previous_regime: "capture_start".to_string(),
+            new_regime: "capture_complete".to_string(),
+            confidence: 1.0,
+            features: serde_json::json!({
+                "symbol": symbol,
+                "events_written": stats.events_written,
+                "snapshot_written": stats.snapshot_written,
+                "gaps_detected": stats.gaps_detected,
+                "price_exponent": price_exponent,
+                "qty_exponent": qty_exponent,
+                "strict_mode": strict,
+                "integrity_tier": integrity_tier,
+                "source": "binance_sbe_depth_capture"
+            }),
+        },
+    );
+
+    // Finish and write manifest
+    manifest.finish();
+    let manifest_path = manifest_dir.join("manifest.json");
+    let json = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, json)?;
+
+    println!("Manifest written: {:?}", manifest_path);
+    println!("  Run ID: {}", manifest.run_id);
+    println!("  Watermark: {}", manifest.watermark);
+    if let Some(ref hash) = manifest.determinism.input_hash {
+        println!("  Input hash: {}", &hash[..16]);
+    }
+
     Ok(())
 }
 
@@ -246,47 +426,217 @@ async fn run_exchange_info(symbols: &str) -> anyhow::Result<()> {
 }
 
 async fn run_paper_mode(
-    config_path: &str,
-    headless: bool,
+    symbol: &str,
+    out_dir: &str,
+    price_exponent: i8,
+    qty_exponent: i8,
     initial_capital: f64,
+    headless: bool,
 ) -> anyhow::Result<()> {
+    use futures_util::{SinkExt, StreamExt};
+    use kubera_models::IntegrityTier;
+    use kubera_options::replay::DepthEvent;
+    use kubera_sbe::{BinanceSbeDecoder, SBE_HEADER_SIZE, SbeHeader};
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::protocol::Message;
+    use url::Url;
+
     info!("QuantLaxmi Crypto - Paper Trading Mode");
-    info!("Loading configuration from: {}", config_path);
-
-    let config = RunnerConfig::load(config_path)?;
-
-    let kill_switch = Arc::new(AtomicBool::new(false));
-    let is_indian_fno = false; // Always false for Crypto runner
-
-    let app_state = Arc::new(std::sync::Mutex::new(AppState::new(
-        config.mode.symbols.clone(),
-        initial_capital,
-        ExecutionMode::Paper,
-        headless,
-        kill_switch.clone(),
-        is_indian_fno,
-    )));
+    info!("Symbol: {}", symbol);
+    info!("Initial capital: ${:.2}", initial_capital);
 
     if headless {
         tui::print_headless_banner("QuantLaxmi Crypto Paper Trading", initial_capital);
     }
 
+    // Requires BINANCE_API_KEY_ED25519 env var for SBE stream access
+    let api_key = std::env::var("BINANCE_API_KEY_ED25519")
+        .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
+
+    // Create paper session with WAL
+    let out_path = std::path::Path::new(out_dir);
+    let mut session = paper_trading::PaperSession::new(
+        out_path,
+        symbol,
+        price_exponent,
+        qty_exponent,
+    )
+    .await?;
+
+    info!("Paper session created: {:?}", session.wal.session_dir());
+
+    // Connect to SBE stream
+    let sym_lower = symbol.to_lowercase();
+    let url_str = "wss://stream-sbe.binance.com:9443/stream";
+    info!("Connecting to Binance SBE stream: {}", url_str);
+
+    let url = Url::parse(url_str)?;
+    let mut request = url.into_client_request()?;
+    request
+        .headers_mut()
+        .insert("X-MBX-APIKEY", api_key.parse()?);
+    request
+        .headers_mut()
+        .insert("Sec-WebSocket-Protocol", "binance-sbe".parse()?);
+
+    let (ws_stream, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .context("connect SBE websocket")?;
+
+    info!("Connected to SBE stream");
+
+    let (mut write, mut read) = ws_stream.split();
+
+    // Subscribe to depth stream
+    let sub = serde_json::json!({
+        "method": "SUBSCRIBE",
+        "params": [format!("{}@depth", sym_lower)],
+        "id": 1
+    });
+    write.send(Message::Text(sub.to_string())).await?;
+
+    // Fetch initial snapshot
+    info!("Fetching depth snapshot...");
+    let snapshot_url = format!(
+        "https://api.binance.com/api/v3/depth?symbol={}&limit=1000",
+        symbol.to_uppercase()
+    );
+    let snapshot_resp: serde_json::Value = reqwest::get(&snapshot_url).await?.json().await?;
+    let snapshot_last_id = snapshot_resp["lastUpdateId"].as_u64().unwrap_or(0);
+    info!("Snapshot lastUpdateId: {}", snapshot_last_id);
+
+    // Create snapshot event
+    let snapshot_bids: Vec<kubera_options::replay::DepthLevel> = snapshot_resp["bids"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|b| {
+            let price_str = b[0].as_str()?;
+            let qty_str = b[1].as_str()?;
+            let price = binance_sbe_depth_capture::parse_to_mantissa_from_str(price_str, price_exponent).ok()?;
+            let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent).ok()?;
+            Some(kubera_options::replay::DepthLevel { price, qty })
+        })
+        .collect();
+
+    let snapshot_asks: Vec<kubera_options::replay::DepthLevel> = snapshot_resp["asks"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|a| {
+            let price_str = a[0].as_str()?;
+            let qty_str = a[1].as_str()?;
+            let price = binance_sbe_depth_capture::parse_to_mantissa_from_str(price_str, price_exponent).ok()?;
+            let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent).ok()?;
+            Some(kubera_options::replay::DepthLevel { price, qty })
+        })
+        .collect();
+
+    let snapshot_event = DepthEvent {
+        ts: chrono::Utc::now(),
+        tradingsymbol: symbol.to_uppercase(),
+        first_update_id: snapshot_last_id,
+        last_update_id: snapshot_last_id,
+        price_exponent,
+        qty_exponent,
+        bids: snapshot_bids,
+        asks: snapshot_asks,
+        is_snapshot: true,
+        integrity_tier: IntegrityTier::Certified,
+        source: Some("paper_trading".to_string()),
+    };
+
+    // Process snapshot through session
+    session.process_depth_event(snapshot_event).await?;
+    info!("Snapshot applied to paper venue");
+
     // Start web server
     let (web_tx, _) = tokio::sync::broadcast::channel(100);
     let web_state = Arc::new(ServerState { tx: web_tx.clone() });
-    tokio::spawn(start_server(web_state, 8081)); // Different port from India
+    tokio::spawn(start_server(web_state, 8081));
 
-    info!("Paper trading mode initialized");
-    info!("Symbols: {:?}", config.mode.symbols);
-    info!("Initial capital: ${:.2}", initial_capital);
-    info!("Press Ctrl+C to stop");
+    info!("Paper trading active. Press Ctrl+C to stop.");
 
-    tokio::signal::ctrl_c().await?;
+    let mut last_status_time = std::time::Instant::now();
 
-    // Log final state before shutdown
-    let state = app_state.lock().unwrap();
-    info!("Final equity: ${:.2}", state.equity);
-    info!("Shutting down...");
+    // Process messages until Ctrl+C
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                info!("Shutdown signal received");
+                break;
+            }
+            msg = tokio::time::timeout(std::time::Duration::from_secs(30), read.next()) => {
+                match msg {
+                    Ok(Some(Ok(Message::Binary(bin)))) => {
+                        if bin.len() >= SBE_HEADER_SIZE
+                            && let Ok(header) = SbeHeader::decode(&bin[..SBE_HEADER_SIZE])
+                            && header.template_id == 10003
+                            && let Ok(update) = BinanceSbeDecoder::decode_depth_update(
+                                &header,
+                                &bin[SBE_HEADER_SIZE..],
+                            )
+                        {
+                            let event = binance_sbe_depth_capture::sbe_depth_to_event_pub(
+                                &update,
+                                symbol,
+                                price_exponent,
+                                qty_exponent,
+                            );
+                            let fills = session.process_depth_event(event).await?;
+
+                            for fill in fills {
+                                info!("FILL: {} {} @ {:.2}",
+                                    fill.side, fill.fill_qty, fill.fill_price);
+                            }
+                        }
+                    }
+                    Ok(Some(Ok(Message::Ping(p)))) => {
+                        let _ = write.send(Message::Pong(p)).await;
+                    }
+                    Ok(Some(Ok(_))) => {}
+                    Ok(Some(Err(e))) => {
+                        error!("WebSocket error: {}", e);
+                        break;
+                    }
+                    Ok(None) => {
+                        info!("WebSocket closed");
+                        break;
+                    }
+                    Err(_) => {
+                        // Timeout - print status
+                        info!("Waiting for market data...");
+                    }
+                }
+            }
+        }
+
+        // Print status every 10 seconds
+        if last_status_time.elapsed() > std::time::Duration::from_secs(10) {
+            let summary = session.summary().await;
+            info!(
+                "Status: events={}, fills={}, position={:.4}, pnl=${:.2}, bid={:?}, ask={:?}",
+                summary.events_processed,
+                summary.fills_count,
+                summary.position,
+                summary.realized_pnl,
+                summary.best_bid,
+                summary.best_ask,
+            );
+            last_status_time = std::time::Instant::now();
+        }
+    }
+
+    // Final flush and summary
+    session.flush().await?;
+    let summary = session.summary().await;
+
+    info!("=== Paper Trading Session Complete ===");
+    info!("  Events processed: {}", summary.events_processed);
+    info!("  Fills: {}", summary.fills_count);
+    info!("  Final position: {:.4}", summary.position);
+    info!("  Realized PnL: ${:.2}", summary.realized_pnl);
+    info!("  WAL saved to: {:?}", session.wal.session_dir());
 
     Ok(())
 }
