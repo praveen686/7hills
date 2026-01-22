@@ -587,7 +587,7 @@ mod tests {
     /// Uses BTreeMap with i64 keys to avoid f64 drift.
     #[derive(Debug, Default)]
     struct DeterministicLob {
-        bids: BTreeMap<i64, i64>,  // price_mantissa -> qty_mantissa
+        bids: BTreeMap<i64, i64>, // price_mantissa -> qty_mantissa
         asks: BTreeMap<i64, i64>,
         last_update_id: u64,
     }
@@ -687,18 +687,20 @@ mod tests {
         // Golden fixture path
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let fixture_path = std::path::Path::new(&manifest_dir)
-            .parent().unwrap()  // crates/
-            .parent().unwrap()  // QuantLaxmi/
+            .parent()
+            .unwrap() // crates/
+            .parent()
+            .unwrap() // QuantLaxmi/
             .join("tests/fixtures/crypto/golden_depth.jsonl");
 
         // Process the fixture
-        let hash = process_depth_file(&fixture_path)
-            .expect("Failed to process golden fixture");
+        let hash = process_depth_file(&fixture_path).expect("Failed to process golden fixture");
 
         // Expected hash (computed once, then hardcoded for regression)
         // This hash represents the deterministic final state of the LOB
         // after processing all events in golden_depth.jsonl
-        const EXPECTED_HASH: &str = "ec58fe1b7d9a7d770a56351b287ab07723cf701f10f948725d7d14a5217a32a9";
+        const EXPECTED_HASH: &str =
+            "ec58fe1b7d9a7d770a56351b287ab07723cf701f10f948725d7d14a5217a32a9";
 
         // Assert the hash matches expected value
         assert_eq!(
@@ -710,7 +712,10 @@ mod tests {
         // Also verify the hash is consistent across multiple runs
         let hash2 = process_depth_file(&fixture_path)
             .expect("Failed to process golden fixture second time");
-        assert_eq!(hash, hash2, "Determinism failure: different hashes on same fixture");
+        assert_eq!(
+            hash, hash2,
+            "Determinism failure: different hashes on same fixture"
+        );
     }
 
     #[test]
@@ -723,8 +728,10 @@ mod tests {
 
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let fixture_path = std::path::Path::new(&manifest_dir)
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("tests/fixtures/crypto/golden_depth.jsonl");
 
         // Process and get final LOB state
@@ -761,12 +768,21 @@ mod tests {
         assert!(lob.asks.contains_key(&9000150), "Expected ask at 9000150");
         assert!(lob.asks.contains_key(&9000500), "Expected ask at 9000500");
         assert!(lob.asks.contains_key(&9001000), "Expected ask at 9001000");
-        assert!(!lob.asks.contains_key(&9000100), "Ask at 9000100 should be removed");
+        assert!(
+            !lob.asks.contains_key(&9000100),
+            "Ask at 9000100 should be removed"
+        );
 
         // Verify specific quantities
         assert_eq!(lob.bids[&9000025], 50000000, "Wrong qty for bid at 9000025");
-        assert_eq!(lob.bids[&9000000], 180000000, "Wrong qty for bid at 9000000");
-        assert_eq!(lob.asks[&9000150], 110000000, "Wrong qty for ask at 9000150");
+        assert_eq!(
+            lob.bids[&9000000], 180000000,
+            "Wrong qty for bid at 9000000"
+        );
+        assert_eq!(
+            lob.asks[&9000150], 110000000,
+            "Wrong qty for ask at 9000150"
+        );
 
         // Verify last update ID
         assert_eq!(lob.last_update_id, 1004, "Wrong last_update_id");
@@ -782,8 +798,14 @@ mod tests {
             last_update_id: 100,
             price_exponent: -2,
             qty_exponent: -8,
-            bids: vec![DepthLevel { price: 9000000, qty: 100000000 }],
-            asks: vec![DepthLevel { price: 9000100, qty: 100000000 }],
+            bids: vec![DepthLevel {
+                price: 9000000,
+                qty: 100000000,
+            }],
+            asks: vec![DepthLevel {
+                price: 9000100,
+                qty: 100000000,
+            }],
             is_snapshot: true,
             integrity_tier: IntegrityTier::Certified,
             source: None,
@@ -792,11 +814,14 @@ mod tests {
         let diff_with_gap = DepthEvent {
             ts: chrono::Utc::now(),
             tradingsymbol: "BTCUSDT".to_string(),
-            first_update_id: 105,  // Gap! Should be 101
+            first_update_id: 105, // Gap! Should be 101
             last_update_id: 105,
             price_exponent: -2,
             qty_exponent: -8,
-            bids: vec![DepthLevel { price: 9000000, qty: 110000000 }],
+            bids: vec![DepthLevel {
+                price: 9000000,
+                qty: 110000000,
+            }],
             asks: vec![],
             is_snapshot: false,
             integrity_tier: IntegrityTier::Certified,
@@ -825,12 +850,19 @@ mod tests {
             price_exponent: -2,
             qty_exponent: -8,
             bids: vec![
-                DepthLevel { price: 9000000, qty: 100000000 },
-                DepthLevel { price: 8999500, qty: 200000000 },
+                DepthLevel {
+                    price: 9000000,
+                    qty: 100000000,
+                },
+                DepthLevel {
+                    price: 8999500,
+                    qty: 200000000,
+                },
             ],
-            asks: vec![
-                DepthLevel { price: 9000100, qty: 150000000 },
-            ],
+            asks: vec![DepthLevel {
+                price: 9000100,
+                qty: 150000000,
+            }],
             is_snapshot: true,
             integrity_tier: IntegrityTier::Certified,
             source: None,
@@ -846,7 +878,10 @@ mod tests {
             last_update_id: 101,
             price_exponent: -2,
             qty_exponent: -8,
-            bids: vec![DepthLevel { price: 8999500, qty: 0 }],  // Remove this level
+            bids: vec![DepthLevel {
+                price: 8999500,
+                qty: 0,
+            }], // Remove this level
             asks: vec![],
             is_snapshot: false,
             integrity_tier: IntegrityTier::Certified,

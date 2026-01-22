@@ -109,8 +109,8 @@ pub struct PaperOrder {
     pub id: u64,
     pub symbol: String,
     pub side: Side,
-    pub price: i64,        // Mantissa
-    pub qty: i64,          // Mantissa
+    pub price: i64, // Mantissa
+    pub qty: i64,   // Mantissa
     pub created_at: chrono::DateTime<Utc>,
 }
 
@@ -233,10 +233,7 @@ impl PaperVenue {
 
         info!(
             "Paper order submitted: {:?} {} @ {} (id={})",
-            side,
-            qty,
-            price,
-            order_id
+            side, qty, price, order_id
         );
 
         self.orders.push(order);
@@ -295,12 +292,14 @@ impl PaperVenue {
                     Side::Buy => {
                         if self.position >= 0.0 {
                             // Adding to long or opening long
-                            let new_cost = self.position * self.avg_entry_price + fill_price * fill_qty;
+                            let new_cost =
+                                self.position * self.avg_entry_price + fill_price * fill_qty;
                             self.position += fill_qty;
                             self.avg_entry_price = new_cost / self.position;
                         } else {
                             // Covering short
-                            let pnl = (self.avg_entry_price - fill_price) * fill_qty.min(-self.position);
+                            let pnl =
+                                (self.avg_entry_price - fill_price) * fill_qty.min(-self.position);
                             self.realized_pnl += pnl;
                             self.position += fill_qty;
                             if self.position > 0.0 {
@@ -317,7 +316,8 @@ impl PaperVenue {
                             self.avg_entry_price = new_cost / (-self.position);
                         } else {
                             // Closing long
-                            let pnl = (fill_price - self.avg_entry_price) * fill_qty.min(self.position);
+                            let pnl =
+                                (fill_price - self.avg_entry_price) * fill_qty.min(self.position);
                             self.realized_pnl += pnl;
                             self.position -= fill_qty;
                             if self.position < 0.0 {

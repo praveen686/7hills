@@ -162,7 +162,15 @@ async fn async_main() -> anyhow::Result<()> {
             qty_exponent,
             strict,
         } => {
-            run_capture_sbe_depth(&symbol, &out, duration_secs, price_exponent, qty_exponent, strict).await
+            run_capture_sbe_depth(
+                &symbol,
+                &out,
+                duration_secs,
+                price_exponent,
+                qty_exponent,
+                strict,
+            )
+            .await
         }
         Commands::ExchangeInfo { symbols } => run_exchange_info(&symbols).await,
         Commands::Paper {
@@ -172,7 +180,17 @@ async fn async_main() -> anyhow::Result<()> {
             qty_exponent,
             initial_capital,
             headless,
-        } => run_paper_mode(&symbol, &out_dir, price_exponent, qty_exponent, initial_capital, headless).await,
+        } => {
+            run_paper_mode(
+                &symbol,
+                &out_dir,
+                price_exponent,
+                qty_exponent,
+                initial_capital,
+                headless,
+            )
+            .await
+        }
         Commands::Live {
             config,
             initial_capital,
@@ -244,7 +262,9 @@ fn emit_bookticker_manifest(
 
     println!("Manifest written: {:?}", manifest_path);
     println!("  Run ID: {}", manifest.run_id);
-    println!("  ⚠️  Profile: Research (not Certified - use capture-sbe-depth for deterministic replay)");
+    println!(
+        "  ⚠️  Profile: Research (not Certified - use capture-sbe-depth for deterministic replay)"
+    );
 
     Ok(())
 }
@@ -455,13 +475,8 @@ async fn run_paper_mode(
 
     // Create paper session with WAL
     let out_path = std::path::Path::new(out_dir);
-    let mut session = paper_trading::PaperSession::new(
-        out_path,
-        symbol,
-        price_exponent,
-        qty_exponent,
-    )
-    .await?;
+    let mut session =
+        paper_trading::PaperSession::new(out_path, symbol, price_exponent, qty_exponent).await?;
 
     info!("Paper session created: {:?}", session.wal.session_dir());
 
@@ -513,8 +528,11 @@ async fn run_paper_mode(
         .filter_map(|b| {
             let price_str = b[0].as_str()?;
             let qty_str = b[1].as_str()?;
-            let price = binance_sbe_depth_capture::parse_to_mantissa_from_str(price_str, price_exponent).ok()?;
-            let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent).ok()?;
+            let price =
+                binance_sbe_depth_capture::parse_to_mantissa_from_str(price_str, price_exponent)
+                    .ok()?;
+            let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent)
+                .ok()?;
             Some(kubera_options::replay::DepthLevel { price, qty })
         })
         .collect();
@@ -526,8 +544,11 @@ async fn run_paper_mode(
         .filter_map(|a| {
             let price_str = a[0].as_str()?;
             let qty_str = a[1].as_str()?;
-            let price = binance_sbe_depth_capture::parse_to_mantissa_from_str(price_str, price_exponent).ok()?;
-            let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent).ok()?;
+            let price =
+                binance_sbe_depth_capture::parse_to_mantissa_from_str(price_str, price_exponent)
+                    .ok()?;
+            let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent)
+                .ok()?;
             Some(kubera_options::replay::DepthLevel { price, qty })
         })
         .collect();
