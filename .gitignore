@@ -1,0 +1,56 @@
+# Build artifacts
+target/
+*.rlib
+*.rmeta
+*.d
+
+# Cargo lock (keep for apps, but workspace has its own)
+# Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.pem
+*.key
+
+# Logs
+*.log
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Data files (keep small samples)
+*.parquet
+*.arrow
+!tests/fixtures/**/*.parquet
+
+# Large data files (over 100MB GitHub limit)
+**/market_data.csv
+**/market_data.jsonl
+**/*.csv.gz
+**/*.jsonl.gz
+
+# Large binary files
+*.zip
+*.tar.gz
+*.7z
+
+# Credentials
+credentials.json
+secrets.toml

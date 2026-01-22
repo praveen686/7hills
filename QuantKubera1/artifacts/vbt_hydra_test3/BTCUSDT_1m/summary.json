@@ -1,0 +1,16 @@
+{
+  "created_at": "2026-01-21T14:45:07.458225+00:00",
+  "engine": "vectorbtpro",
+  "mode": "hydra_lite",
+  "fees_bps": 1.0,
+  "slippage_bps": 0.5,
+  "threshold": 0.05,
+  "stats": {
+    "Total Return [%]": -3.9739721994213535,
+    "Sharpe Ratio": -28.77827361377935,
+    "Max Drawdown [%]": 4.956104286672887,
+    "Total Trades": 19.0,
+    "Win Rate [%]": 55.55555555555556,
+    "Profit Factor": 0.1702478248114888
+  }
+}

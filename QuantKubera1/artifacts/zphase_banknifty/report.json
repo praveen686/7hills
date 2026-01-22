@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-01-22T07:14:11.072341427Z",
+  "engine": "KiteSim",
+  "venue": "NSE-Zerodha-Sim",
+  "dataset": "data/replay/BANKNIFTY/2026-01-22/quotes.jsonl",
+  "fill": {
+    "orders_total": 2,
+    "legs_total": 4,
+    "legs_filled": 4,
+    "legs_partially_filled": 0,
+    "legs_rejected": 0,
+    "legs_cancelled": 0,
+    "rollbacks": 0,
+    "timeouts": 0,
+    "hedges_attempted": 0,
+    "hedges_filled": 0,
+    "slippage_bps_p50": 15.005000000000267,
+    "slippage_bps_p90": 15.005000000000292,
+    "slippage_bps_p99": 15.005000000000292
+  },
+  "inputs": {
+    "replay_sha256": "73cce8ab782baf71cb88f1584fa44f56b34ad93b271bbdfc491da396c233d096",
+    "orders_sha256": "46af55bb7281b4a33d30b0feab2cbb49777cf609fb556f24665fe0518ba5bb1b",
+    "intents_sha256": "53976c31e0a353fc35533f6c3e94ef6f3c7c839186d766669dc5669d25123b42"
+  },
+  "notes": [
+    "strategy=HYDRA_BANKNIFTY_STRADDLE",
+    "intents_file=data/orders/zerodha_hydra/straddle_intents.json",
+    "venue=zerodha",
+    "qty_scale=1"
+  ]
+}

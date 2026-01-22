@@ -1,0 +1,28 @@
+{
+  "strategy": "hydra",
+  "created_at": "2026-01-22T08:57:24.790841960+00:00",
+  "files": [
+    [
+      "market_data.csv",
+      "artifacts/hydra_d5_diag/vectorbt/market_data.csv"
+    ],
+    [
+      "market_data.jsonl",
+      "artifacts/hydra_d5_diag/vectorbt/market_data.jsonl"
+    ],
+    [
+      "fills.csv",
+      "artifacts/hydra_d5_diag/vectorbt/fills.csv"
+    ],
+    [
+      "fills.jsonl",
+      "artifacts/hydra_d5_diag/vectorbt/fills.jsonl"
+    ],
+    [
+      "summary.json",
+      "artifacts/hydra_d5_diag/vectorbt/summary.json"
+    ]
+  ],
+  "market_points": 78975,
+  "fill_count": 0
+}

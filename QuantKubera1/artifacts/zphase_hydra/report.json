@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-01-22T07:12:28.704366696Z",
+  "engine": "KiteSim",
+  "venue": "Binance-Spot-Sim",
+  "dataset": "data/replay/binance/hydra_pipeline_quotes.jsonl",
+  "fill": {
+    "orders_total": 2,
+    "legs_total": 2,
+    "legs_filled": 2,
+    "legs_partially_filled": 0,
+    "legs_rejected": 0,
+    "legs_cancelled": 0,
+    "rollbacks": 0,
+    "timeouts": 0,
+    "hedges_attempted": 0,
+    "hedges_filled": 0,
+    "slippage_bps_p50": 5.000554565812583,
+    "slippage_bps_p90": 5.000554565812583,
+    "slippage_bps_p99": 5.000554565812583
+  },
+  "inputs": {
+    "replay_sha256": "4f0340bcde178c9ed46fe200200d64e61e70b2acdac558245eec8062cfdcadde",
+    "orders_sha256": "284c0f74e13a1a24ca7ae4fcef6b479a407559db140197cc06b02a651940a22c",
+    "intents_sha256": "440762a84c9678118fe277df445b4bc2820795e90aa13b723cf7a61b35bc1ddf"
+  },
+  "notes": [
+    "strategy=HYDRA_ZPHASE_TEST",
+    "intents_file=artifacts/hydra_pipeline/BTCUSDT_1m/aligned_intents.json",
+    "venue=binance",
+    "qty_scale=1000000"
+  ]
+}

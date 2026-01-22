@@ -1,0 +1,11 @@
+{
+  "net_pnl": -31206.2537070482,
+  "open_positions": 6,
+  "realized_pnl": -18518.048942673195,
+  "strategy": "hydra",
+  "total_fees": 12688.204764375003,
+  "total_notional": 0.0,
+  "total_pnl": -18518.048942673195,
+  "total_trades": 128,
+  "unrealized_pnl": -465558.20105732814
+}

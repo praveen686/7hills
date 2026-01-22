@@ -1,0 +1,124 @@
+{
+  "strategy_name": "HYDRA",
+  "intents": [
+    {
+      "ts": "2026-01-21T16:02:00+00:00",
+      "order": {
+        "strategy_name": "HYDRA",
+        "legs": [
+          {
+            "tradingsymbol": "BTCUSDT",
+            "exchange": "BINANCE",
+            "side": "Buy",
+            "quantity": 100,
+            "order_type": "Market",
+            "price": null
+          }
+        ],
+        "total_margin_required": 0.0
+      }
+    },
+    {
+      "ts": "2026-01-21T16:05:00+00:00",
+      "order": {
+        "strategy_name": "HYDRA",
+        "legs": [
+          {
+            "tradingsymbol": "BTCUSDT",
+            "exchange": "BINANCE",
+            "side": "Buy",
+            "quantity": 100,
+            "order_type": "Market",
+            "price": null
+          }
+        ],
+        "total_margin_required": 0.0
+      }
+    },
+    {
+      "ts": "2026-01-21T16:14:00+00:00",
+      "order": {
+        "strategy_name": "HYDRA",
+        "legs": [
+          {
+            "tradingsymbol": "BTCUSDT",
+            "exchange": "BINANCE",
+            "side": "Buy",
+            "quantity": 100,
+            "order_type": "Market",
+            "price": null
+          }
+        ],
+        "total_margin_required": 0.0
+      }
+    },
+    {
+      "ts": "2026-01-21T16:17:00+00:00",
+      "order": {
+        "strategy_name": "HYDRA",
+        "legs": [
+          {
+            "tradingsymbol": "BTCUSDT",
+            "exchange": "BINANCE",
+            "side": "Buy",
+            "quantity": 100,
+            "order_type": "Market",
+            "price": null
+          }
+        ],
+        "total_margin_required": 0.0
+      }
+    },
+    {
+      "ts": "2026-01-21T16:20:00+00:00",
+      "order": {
+        "strategy_name": "HYDRA",
+        "legs": [
+          {
+            "tradingsymbol": "BTCUSDT",
+            "exchange": "BINANCE",
+            "side": "Buy",
+            "quantity": 100,
+            "order_type": "Market",
+            "price": null
+          }
+        ],
+        "total_margin_required": 0.0
+      }
+    },
+    {
+      "ts": "2026-01-21T16:23:00+00:00",
+      "order": {
+        "strategy_name": "HYDRA",
+        "legs": [
+          {
+            "tradingsymbol": "BTCUSDT",
+            "exchange": "BINANCE",
+            "side": "Buy",
+            "quantity": 100,
+            "order_type": "Market",
+            "price": null
+          }
+        ],
+        "total_margin_required": 0.0
+      }
+    },
+    {
+      "ts": "2026-01-21T16:34:00+00:00",
+      "order": {
+        "strategy_name": "HYDRA",
+        "legs": [
+          {
+            "tradingsymbol": "BTCUSDT",
+            "exchange": "BINANCE",
+            "side": "Buy",
+            "quantity": 100,
+            "order_type": "Market",
+            "price": null
+          }
+        ],
+        "total_margin_required": 0.0
+      }
+    }
+  ]
+}

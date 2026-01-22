@@ -1,0 +1,8 @@
+{
+  "per_symbol_quote_pnl": {
+    "BTCUSDT": -2.2278830000277416e-7
+  },
+  "qty_scale": 1000000,
+  "total_quote_pnl": -2.2278830000277416e-7,
+  "venue": "binance"
+}
