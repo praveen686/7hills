@@ -16,23 +16,25 @@
 //! - Report assembly helpers
 //! - VectorBT export utilities
 
-pub mod circuit_breakers;
-pub mod web_server;
-pub mod config;
-pub mod tui;
-pub mod report;
 pub mod artifact;
+pub mod circuit_breakers;
+pub mod config;
+pub mod report;
+pub mod tui;
 pub mod vectorbt;
+pub mod web_server;
 
-pub use circuit_breakers::{TradingCircuitBreakers, CircuitBreakerStatus, RateLimiter, LatencyCircuitBreaker};
-pub use web_server::{WebMessage, ServerState, start_server};
-pub use config::{RunnerConfig, ModeInfo, RiskInfo, ExecutionInfo, StrategyConfig};
+pub use circuit_breakers::{
+    CircuitBreakerStatus, LatencyCircuitBreaker, RateLimiter, TradingCircuitBreakers,
+};
+pub use config::{ExecutionInfo, ModeInfo, RiskInfo, RunnerConfig, StrategyConfig};
+pub use web_server::{ServerState, WebMessage, start_server};
 
-use kubera_core::{TradingMetrics, MetricsConfig};
-use kubera_data::Level2Book;
 use kubera_core::ExecutionMode;
-use std::sync::{Arc, Mutex};
+use kubera_core::{MetricsConfig, TradingMetrics};
+use kubera_data::Level2Book;
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use tracing::info;
 
 /// Volatile state for a single instrument tracking.
@@ -67,12 +69,15 @@ impl AppState {
     ) -> Self {
         let mut symbols_state = std::collections::HashMap::new();
         for s in &symbols {
-            symbols_state.insert(s.clone(), SymbolState {
-                last_price: 0.0,
-                position: 0.0,
-                book: Level2Book::new(s.clone()),
-                strategy_active: headless,
-            });
+            symbols_state.insert(
+                s.clone(),
+                SymbolState {
+                    last_price: 0.0,
+                    position: 0.0,
+                    book: Level2Book::new(s.clone()),
+                    strategy_active: headless,
+                },
+            );
         }
 
         let metrics_config = MetricsConfig {
@@ -92,7 +97,10 @@ impl AppState {
             } else {
                 TradingCircuitBreakers::new(initial_capital, kill_switch)
             };
-            info!("[RUNNER] Circuit breakers enabled (Indian F&O: {})", is_indian_fno);
+            info!(
+                "[RUNNER] Circuit breakers enabled (Indian F&O: {})",
+                is_indian_fno
+            );
             Some(cb)
         } else {
             None
@@ -115,7 +123,9 @@ impl AppState {
 /// Initialize observability (metrics + tracing)
 pub fn init_observability(service_name: &str) {
     let metrics_port = std::env::var("METRICS_PORT").unwrap_or_else(|_| "9000".to_string());
-    let metrics_addr = format!("0.0.0.0:{}", metrics_port).parse().expect("Invalid metrics address");
+    let metrics_addr = format!("0.0.0.0:{}", metrics_port)
+        .parse()
+        .expect("Invalid metrics address");
     kubera_core::observability::init_metrics(metrics_addr);
     kubera_core::observability::init_tracing(service_name);
 }

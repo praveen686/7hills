@@ -26,18 +26,18 @@
 //! - WebSocket Binary Format: <https://kite.trade/docs/connect/v3/websocket/>
 
 use async_trait::async_trait;
-use kubera_core::connector::MarketConnector;
+use chrono::{Datelike, NaiveDate, Timelike, Utc, Weekday};
 use kubera_core::EventBus;
-use kubera_models::{MarketEvent, MarketPayload, Side, L2Update, L2Level};
+use kubera_core::connector::MarketConnector;
+use kubera_models::{L2Level, L2Update, MarketEvent, MarketPayload, Side};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::collections::HashMap;
 use std::time::Duration;
-use tracing::{info, warn, error, debug, instrument};
-use std::process::Command;
-use serde::{Deserialize, Serialize};
-use chrono::{Utc, NaiveDate, Datelike, Weekday, Timelike};
-use tokio::time::{sleep, Instant};
+use tokio::time::{Instant, sleep};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Base URL for Kite Connect REST API.
 const KITE_API_URL: &str = "https://api.kite.trade";
@@ -155,7 +155,11 @@ impl ZerodhaConnector {
     }
 
     /// Creates a connector with custom reconnection configuration.
-    pub fn with_reconnect_config(bus: Arc<EventBus>, symbols: Vec<String>, config: ReconnectConfig) -> Self {
+    pub fn with_reconnect_config(
+        bus: Arc<EventBus>,
+        symbols: Vec<String>,
+        config: ReconnectConfig,
+    ) -> Self {
         Self {
             bus,
             symbols,
@@ -209,109 +213,147 @@ impl ZerodhaConnector {
     /// # Returns
     /// HashMap of instrument identifier to quote data.
     #[allow(dead_code)]
-    async fn fetch_quotes(&self, api_key: &str, access_token: &str, instruments: &[String]) -> anyhow::Result<HashMap<String, KiteQuote>> {
+    async fn fetch_quotes(
+        &self,
+        api_key: &str,
+        access_token: &str,
+        instruments: &[String],
+    ) -> anyhow::Result<HashMap<String, KiteQuote>> {
         let client = reqwest::Client::new();
-        
+
         // Build query params: i=NSE:NIFTY 50&i=NSE:BANKNIFTY
-        let params: Vec<(&str, &str)> = instruments.iter()
-            .map(|s| ("i", s.as_str()))
-            .collect();
-        
+        let params: Vec<(&str, &str)> = instruments.iter().map(|s| ("i", s.as_str())).collect();
+
         let url = format!("{}/quote", KITE_API_URL);
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .query(&params)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", api_key, access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", api_key, access_token),
+            )
             .send()
             .await?
             .error_for_status()?;
-        
+
         let quote_resp: KiteQuoteResponse = response.json().await?;
-        
+
         if quote_resp.status != "success" {
             return Err(anyhow::anyhow!("Kite API returned non-success status"));
         }
-        
+
         Ok(quote_resp.data)
     }
-    
+
     /// Fetches instrument tokens for given symbols from Kite instruments list.
-    async fn get_instrument_tokens(&self, api_key: &str, access_token: &str, symbols: &[String]) -> anyhow::Result<Vec<(String, u32)>> {
+    async fn get_instrument_tokens(
+        &self,
+        api_key: &str,
+        access_token: &str,
+        symbols: &[String],
+    ) -> anyhow::Result<Vec<(String, u32)>> {
         let client = reqwest::Client::new();
-        
+
         // Determine exchange based on symbol type
         let mut tokens = Vec::new();
-        
+
         for symbol in symbols {
-            let exchange = if symbol.contains("FUT") || symbol.contains("CE") || symbol.contains("PE") {
-                "NFO"
-            } else {
-                "NSE"
-            };
-            
+            let exchange =
+                if symbol.contains("FUT") || symbol.contains("CE") || symbol.contains("PE") {
+                    "NFO"
+                } else {
+                    "NSE"
+                };
+
             // Fetch quote to get instrument token
             let url = format!("{}/quote", KITE_API_URL);
             let instrument = format!("{}:{}", exchange, symbol);
-            
-            let response = client.get(&url)
+
+            let response = client
+                .get(&url)
                 .query(&[("i", &instrument)])
                 .header("X-Kite-Version", "3")
-                .header("Authorization", format!("token {}:{}", api_key, access_token))
+                .header(
+                    "Authorization",
+                    format!("token {}:{}", api_key, access_token),
+                )
                 .send()
                 .await?;
-            
+
             if let Ok(quote_resp) = response.json::<KiteQuoteResponse>().await {
                 if quote_resp.status == "success" {
                     for (key, _) in quote_resp.data {
                         // Key contains the instrument token info
                         // We need to fetch it from instruments API
-                        tokens.push((symbol.clone(), self.lookup_token(&key, api_key, access_token).await.unwrap_or(0)));
+                        tokens.push((
+                            symbol.clone(),
+                            self.lookup_token(&key, api_key, access_token)
+                                .await
+                                .unwrap_or(0),
+                        ));
                     }
                 }
             }
         }
-        
+
         // Filter out zero tokens
         let valid_tokens: Vec<_> = tokens.into_iter().filter(|(_, t)| *t > 0).collect();
-        
+
         if valid_tokens.is_empty() {
             // Fallback: fetch from instruments master
-            return self.fetch_tokens_from_master(api_key, access_token, symbols).await;
+            return self
+                .fetch_tokens_from_master(api_key, access_token, symbols)
+                .await;
         }
-        
+
         Ok(valid_tokens)
     }
-    
+
     /// Lookup token from instruments master file
-    async fn lookup_token(&self, _key: &str, _api_key: &str, _access_token: &str) -> anyhow::Result<u32> {
+    async fn lookup_token(
+        &self,
+        _key: &str,
+        _api_key: &str,
+        _access_token: &str,
+    ) -> anyhow::Result<u32> {
         // The key format is "exchange:tradingsymbol"
         // For now, return 0 to trigger fallback
         Ok(0)
     }
-    
+
     /// Fetch tokens from instruments master file
-    async fn fetch_tokens_from_master(&self, api_key: &str, access_token: &str, symbols: &[String]) -> anyhow::Result<Vec<(String, u32)>> {
+    async fn fetch_tokens_from_master(
+        &self,
+        api_key: &str,
+        access_token: &str,
+        symbols: &[String],
+    ) -> anyhow::Result<Vec<(String, u32)>> {
         let client = reqwest::Client::new();
-        
+
         // Fetch NFO instruments
         let url = format!("{}/instruments/NFO", KITE_API_URL);
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", api_key, access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", api_key, access_token),
+            )
             .send()
             .await?
             .text()
             .await?;
-        
+
         let mut tokens = Vec::new();
-        
+
         // Parse CSV (header: instrument_token,exchange_token,tradingsymbol,...)
         for line in response.lines().skip(1) {
             let parts: Vec<&str> = line.split(',').collect();
             if parts.len() >= 3 {
                 let token: u32 = parts[0].parse().unwrap_or(0);
                 let tradingsymbol = parts[2];
-                
+
                 for symbol in symbols {
                     if tradingsymbol == symbol {
                         tokens.push((symbol.clone(), token));
@@ -320,10 +362,10 @@ impl ZerodhaConnector {
                 }
             }
         }
-        
+
         Ok(tokens)
     }
-    
+
     /// Parse binary tick data from Kite WebSocket.
     ///
     /// # Kite Binary Format
@@ -339,7 +381,11 @@ impl ZerodhaConnector {
     /// - quantity: i32 (4 bytes)
     /// - price: i32 (4 bytes, divide by 100)
     /// - orders: i16 (2 bytes) + padding (2 bytes)
-    fn parse_binary_ticks(&self, data: &[u8], token_map: &HashMap<u32, String>) -> Option<Vec<ParsedTick>> {
+    fn parse_binary_ticks(
+        &self,
+        data: &[u8],
+        token_map: &HashMap<u32, String>,
+    ) -> Option<Vec<ParsedTick>> {
         if data.len() < 4 {
             return None; // Heartbeat or too short
         }
@@ -401,7 +447,9 @@ impl ZerodhaConnector {
                     let level_offset = depth_start + (i * 12);
                     if level_offset + 12 <= packet_len {
                         let qty = BigEndian::read_i32(&packet[level_offset..level_offset + 4]);
-                        let price = BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8]) as f64 / 100.0;
+                        let price = BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8])
+                            as f64
+                            / 100.0;
                         // Note: orders count at offset +8 (2 bytes) not used in L2Level
 
                         if qty > 0 && price > 0.0 {
@@ -418,7 +466,9 @@ impl ZerodhaConnector {
                     let level_offset = depth_start + 60 + (i * 12); // 60 = 5 * 12 bytes for bids
                     if level_offset + 12 <= packet_len {
                         let qty = BigEndian::read_i32(&packet[level_offset..level_offset + 4]);
-                        let price = BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8]) as f64 / 100.0;
+                        let price = BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8])
+                            as f64
+                            / 100.0;
                         // Note: orders count at offset +8 (2 bytes) not used in L2Level
 
                         if qty > 0 && price > 0.0 {
@@ -450,13 +500,10 @@ impl ZerodhaConnector {
         }
 
         // Update message counter
-        self.message_count.fetch_add(ticks.len() as u64, Ordering::Relaxed);
+        self.message_count
+            .fetch_add(ticks.len() as u64, Ordering::Relaxed);
 
-        if ticks.is_empty() {
-            None
-        } else {
-            Some(ticks)
-        }
+        if ticks.is_empty() { None } else { Some(ticks) }
     }
 }
 
@@ -482,16 +529,22 @@ impl MarketConnector for ZerodhaConnector {
         info!("Zerodha authenticated successfully.");
 
         // Get instrument tokens for symbols
-        let instrument_tokens = self.get_instrument_tokens(&api_key, &access_token, &self.symbols).await?;
+        let instrument_tokens = self
+            .get_instrument_tokens(&api_key, &access_token, &self.symbols)
+            .await?;
 
         if instrument_tokens.is_empty() {
-            return Err(anyhow::anyhow!("No valid instrument tokens found for: {:?}", self.symbols));
+            return Err(anyhow::anyhow!(
+                "No valid instrument tokens found for: {:?}",
+                self.symbols
+            ));
         }
 
         info!(tokens = ?instrument_tokens, "Starting Zerodha WebSocket streaming");
 
         // Create token to symbol map
-        let token_to_symbol: HashMap<u32, String> = instrument_tokens.iter()
+        let token_to_symbol: HashMap<u32, String> = instrument_tokens
+            .iter()
             .map(|(s, t)| (*t, s.clone()))
             .collect();
 
@@ -500,7 +553,15 @@ impl MarketConnector for ZerodhaConnector {
         let mut current_delay = self.reconnect_config.initial_delay_ms;
 
         while self.running.load(Ordering::SeqCst) {
-            match self.connect_and_stream(&api_key, &access_token, &instrument_tokens, &token_to_symbol).await {
+            match self
+                .connect_and_stream(
+                    &api_key,
+                    &access_token,
+                    &instrument_tokens,
+                    &token_to_symbol,
+                )
+                .await
+            {
                 Ok(()) => {
                     // Clean shutdown
                     info!("WebSocket connection closed cleanly");
@@ -510,8 +571,13 @@ impl MarketConnector for ZerodhaConnector {
                     error!(error = %e, retry = retry_count, "WebSocket connection failed");
 
                     // Check if we should retry
-                    if self.reconnect_config.max_retries > 0 && retry_count >= self.reconnect_config.max_retries {
-                        error!("Max reconnection attempts ({}) reached, giving up", self.reconnect_config.max_retries);
+                    if self.reconnect_config.max_retries > 0
+                        && retry_count >= self.reconnect_config.max_retries
+                    {
+                        error!(
+                            "Max reconnection attempts ({}) reached, giving up",
+                            self.reconnect_config.max_retries
+                        );
                         return Err(e);
                     }
 
@@ -524,8 +590,9 @@ impl MarketConnector for ZerodhaConnector {
                     sleep(Duration::from_millis(current_delay)).await;
 
                     // Increase delay for next retry
-                    current_delay = ((current_delay as f64 * self.reconnect_config.backoff_multiplier) as u64)
-                        .min(self.reconnect_config.max_delay_ms);
+                    current_delay =
+                        ((current_delay as f64 * self.reconnect_config.backoff_multiplier) as u64)
+                            .min(self.reconnect_config.max_delay_ms);
                     retry_count += 1;
                 }
             }
@@ -535,7 +602,10 @@ impl MarketConnector for ZerodhaConnector {
     }
 
     fn stop(&self) {
-        info!("Stopping Zerodha connector (received {} messages)", self.message_count());
+        info!(
+            "Stopping Zerodha connector (received {} messages)",
+            self.message_count()
+        );
         self.running.store(false, Ordering::SeqCst);
     }
 
@@ -557,7 +627,10 @@ impl ZerodhaConnector {
         use tokio_tungstenite::tungstenite::Message;
 
         // WebSocket URL with auth
-        let ws_url = format!("wss://ws.kite.trade/?api_key={}&access_token={}", api_key, access_token);
+        let ws_url = format!(
+            "wss://ws.kite.trade/?api_key={}&access_token={}",
+            api_key, access_token
+        );
 
         let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url).await?;
         let (mut write, mut read) = ws_stream.split();
@@ -615,7 +688,8 @@ impl ZerodhaConnector {
 
                     if let Some(ticks) = self.parse_binary_ticks(&data, token_to_symbol) {
                         for tick in ticks {
-                            let symbol = token_to_symbol.get(&tick.token)
+                            let symbol = token_to_symbol
+                                .get(&tick.token)
                                 .cloned()
                                 .unwrap_or_else(|| format!("TOKEN:{}", tick.token));
 
@@ -702,8 +776,8 @@ impl ZerodhaConnector {
 #[serde(rename_all = "lowercase")]
 pub enum OrderVariety {
     Regular,
-    Amo,      // After-market order
-    Co,       // Cover order
+    Amo, // After-market order
+    Co,  // Cover order
     Iceberg,
     Auction,
 }
@@ -714,8 +788,8 @@ pub enum OrderVariety {
 pub enum OrderType {
     Market,
     Limit,
-    Sl,       // Stop-loss
-    SlM,      // Stop-loss market
+    Sl,  // Stop-loss
+    SlM, // Stop-loss market
 }
 
 /// Transaction type
@@ -730,9 +804,9 @@ pub enum TransactionType {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ProductType {
-    Nrml,     // Normal F&O
-    Mis,      // Intraday
-    Cnc,      // Cash and Carry (equity delivery)
+    Nrml, // Normal F&O
+    Mis,  // Intraday
+    Cnc,  // Cash and Carry (equity delivery)
 }
 
 /// Order request for Zerodha
@@ -862,7 +936,7 @@ impl ZerodhaExecutionClient {
         };
 
         let url = format!("{}/orders/{}", KITE_API_URL, variety_str);
-        
+
         info!(
             tradingsymbol = %order.tradingsymbol,
             exchange = %order.exchange,
@@ -870,14 +944,25 @@ impl ZerodhaExecutionClient {
             "Placing Zerodha order"
         );
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .form(&[
                 ("tradingsymbol", order.tradingsymbol.as_str()),
                 ("exchange", order.exchange.as_str()),
-                ("transaction_type", &format!("{:?}", order.transaction_type).to_uppercase()),
-                ("order_type", &format!("{:?}", order.order_type).to_uppercase()),
+                (
+                    "transaction_type",
+                    &format!("{:?}", order.transaction_type).to_uppercase(),
+                ),
+                (
+                    "order_type",
+                    &format!("{:?}", order.order_type).to_uppercase(),
+                ),
                 ("quantity", &order.quantity.to_string()),
                 ("product", &format!("{:?}", order.product).to_uppercase()),
                 ("validity", &order.validity),
@@ -894,7 +979,8 @@ impl ZerodhaExecutionClient {
             return Err(anyhow::anyhow!("Order failed: {}", msg));
         }
 
-        let order_id = resp.data
+        let order_id = resp
+            .data
             .ok_or_else(|| anyhow::anyhow!("No order ID in response"))?
             .order_id;
 
@@ -914,12 +1000,17 @@ impl ZerodhaExecutionClient {
         };
 
         let url = format!("{}/orders/{}/{}", KITE_API_URL, variety_str, order_id);
-        
+
         info!(order_id = %order_id, "Cancelling Zerodha order");
 
-        let response = self.client.delete(&url)
+        let response = self
+            .client
+            .delete(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?;
 
@@ -938,10 +1029,15 @@ impl ZerodhaExecutionClient {
     #[instrument(skip(self))]
     pub async fn get_orders(&self) -> anyhow::Result<serde_json::Value> {
         let url = format!("{}/orders", KITE_API_URL);
-        
-        let response = self.client.get(&url)
+
+        let response = self
+            .client
+            .get(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?;
 
@@ -954,9 +1050,14 @@ impl ZerodhaExecutionClient {
     pub async fn get_positions(&self) -> anyhow::Result<serde_json::Value> {
         let url = format!("{}/portfolio/positions", KITE_API_URL);
 
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?;
 
@@ -975,7 +1076,7 @@ impl ZerodhaExecutionClient {
 pub struct NfoInstrument {
     pub instrument_token: u32,
     pub tradingsymbol: String,
-    pub name: String,  // NIFTY, BANKNIFTY, etc.
+    pub name: String, // NIFTY, BANKNIFTY, etc.
     pub expiry: NaiveDate,
     pub strike: f64,
     pub instrument_type: String, // CE or PE
@@ -999,7 +1100,7 @@ impl Default for AutoDiscoveryConfig {
     fn default() -> Self {
         Self {
             underlying: "NIFTY".to_string(),
-            strikes_around_atm: 1,  // ATM and 1 strike each side
+            strikes_around_atm: 1, // ATM and 1 strike each side
             strike_interval: 50.0,
             weekly_only: true,
         }
@@ -1062,17 +1163,25 @@ impl ZerodhaAutoDiscovery {
         };
 
         let url = format!("{}/quote", KITE_API_URL);
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .query(&[("i", symbol)])
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?;
 
         let quote_resp: KiteQuoteResponse = response.json().await?;
 
         if quote_resp.status != "success" {
-            return Err(anyhow::anyhow!("Failed to fetch spot price for {}", underlying));
+            return Err(anyhow::anyhow!(
+                "Failed to fetch spot price for {}",
+                underlying
+            ));
         }
 
         for (_, quote) in quote_resp.data {
@@ -1088,9 +1197,14 @@ impl ZerodhaAutoDiscovery {
 
         info!("[AUTO-DISCOVERY] Fetching NFO instruments master...");
 
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?
             .text()
@@ -1136,7 +1250,10 @@ impl ZerodhaAutoDiscovery {
             });
         }
 
-        info!("[AUTO-DISCOVERY] Loaded {} NFO option instruments", instruments.len());
+        info!(
+            "[AUTO-DISCOVERY] Loaded {} NFO option instruments",
+            instruments.len()
+        );
         Ok(instruments)
     }
 
@@ -1144,7 +1261,9 @@ impl ZerodhaAutoDiscovery {
     pub fn next_weekly_expiry() -> NaiveDate {
         let today = Utc::now().date_naive();
         let days_until_thursday = (Weekday::Thu.num_days_from_monday() as i64
-            - today.weekday().num_days_from_monday() as i64 + 7) % 7;
+            - today.weekday().num_days_from_monday() as i64
+            + 7)
+            % 7;
 
         if days_until_thursday == 0 {
             // If today is Thursday, use today if before market close, otherwise next week
@@ -1166,10 +1285,16 @@ impl ZerodhaAutoDiscovery {
 
     /// Auto-discover ATM options based on configuration
     /// Returns a list of (tradingsymbol, instrument_token) pairs
-    pub async fn discover_symbols(&self, config: &AutoDiscoveryConfig) -> anyhow::Result<Vec<(String, u32)>> {
+    pub async fn discover_symbols(
+        &self,
+        config: &AutoDiscoveryConfig,
+    ) -> anyhow::Result<Vec<(String, u32)>> {
         // 1. Get current spot price
         let spot = self.get_spot_price(&config.underlying).await?;
-        info!("[AUTO-DISCOVERY] {} spot price: {:.2}", config.underlying, spot);
+        info!(
+            "[AUTO-DISCOVERY] {} spot price: {:.2}",
+            config.underlying, spot
+        );
 
         // 2. Calculate ATM strike
         let atm = Self::atm_strike(spot, config.strike_interval);
@@ -1183,14 +1308,16 @@ impl ZerodhaAutoDiscovery {
         let instruments = self.fetch_nfo_instruments().await?;
 
         // 5. Filter to matching underlying and expiry
-        let matching: Vec<_> = instruments.iter()
+        let matching: Vec<_> = instruments
+            .iter()
             .filter(|i| i.name == config.underlying)
             .filter(|i| i.expiry == target_expiry)
             .collect();
 
         if matching.is_empty() {
             // Try finding next available expiry if exact match not found
-            let available_expiries: Vec<_> = instruments.iter()
+            let available_expiries: Vec<_> = instruments
+                .iter()
                 .filter(|i| i.name == config.underlying)
                 .filter(|i| i.expiry >= Utc::now().date_naive())
                 .map(|i| i.expiry)
@@ -1199,14 +1326,24 @@ impl ZerodhaAutoDiscovery {
                 .collect();
 
             if let Some(nearest) = available_expiries.into_iter().min() {
-                info!("[AUTO-DISCOVERY] Exact expiry {} not found, using nearest: {}", target_expiry, nearest);
-                return self.discover_symbols_for_expiry(config, spot, atm, nearest, &instruments).await;
+                info!(
+                    "[AUTO-DISCOVERY] Exact expiry {} not found, using nearest: {}",
+                    target_expiry, nearest
+                );
+                return self
+                    .discover_symbols_for_expiry(config, spot, atm, nearest, &instruments)
+                    .await;
             }
 
-            return Err(anyhow::anyhow!("No options found for {} expiry {}", config.underlying, target_expiry));
+            return Err(anyhow::anyhow!(
+                "No options found for {} expiry {}",
+                config.underlying,
+                target_expiry
+            ));
         }
 
-        self.discover_symbols_for_expiry(config, spot, atm, target_expiry, &instruments).await
+        self.discover_symbols_for_expiry(config, spot, atm, target_expiry, &instruments)
+            .await
     }
 
     async fn discover_symbols_for_expiry(
@@ -1232,18 +1369,27 @@ impl ZerodhaAutoDiscovery {
         );
 
         // Find matching instruments
-        for instr in instruments.iter()
+        for instr in instruments
+            .iter()
             .filter(|i| i.name == config.underlying)
             .filter(|i| i.expiry == expiry)
         {
-            if target_strikes.iter().any(|&s| (instr.strike - s).abs() < 0.01) {
+            if target_strikes
+                .iter()
+                .any(|&s| (instr.strike - s).abs() < 0.01)
+            {
                 // Compute moneyness for audit trail
                 let moneyness = instr.strike / spot;
                 let otm_pct = ((instr.strike - spot) / spot * 100.0).abs();
                 info!(
                     "[AUTO-DISCOVERY] Found: {} (token={}, strike={}, type={}, lot={}, moneyness={:.4}, OTM%={:.2})",
-                    instr.tradingsymbol, instr.instrument_token, instr.strike,
-                    instr.instrument_type, instr.lot_size, moneyness, otm_pct
+                    instr.tradingsymbol,
+                    instr.instrument_token,
+                    instr.strike,
+                    instr.instrument_type,
+                    instr.lot_size,
+                    moneyness,
+                    otm_pct
                 );
                 result.push((instr.tradingsymbol.clone(), instr.instrument_token));
             }
@@ -1252,14 +1398,20 @@ impl ZerodhaAutoDiscovery {
         if result.is_empty() {
             return Err(anyhow::anyhow!(
                 "No options found for {} at strikes {:?} expiry {}",
-                config.underlying, target_strikes, expiry
+                config.underlying,
+                target_strikes,
+                expiry
             ));
         }
 
         // Sort by strike and type for consistent ordering
         result.sort_by(|a, b| a.0.cmp(&b.0));
 
-        info!("[AUTO-DISCOVERY] Discovered {} symbols for {}", result.len(), config.underlying);
+        info!(
+            "[AUTO-DISCOVERY] Discovered {} symbols for {}",
+            result.len(),
+            config.underlying
+        );
         Ok(result)
     }
 
@@ -1290,7 +1442,11 @@ impl ZerodhaAutoDiscovery {
 
                 match self.discover_symbols(&config).await {
                     Ok(discovered) => {
-                        info!("[AUTO-DISCOVERY] Resolved {} -> {} symbols", symbol, discovered.len());
+                        info!(
+                            "[AUTO-DISCOVERY] Resolved {} -> {} symbols",
+                            symbol,
+                            discovered.len()
+                        );
                         result.extend(discovered);
                     }
                     Err(e) => {

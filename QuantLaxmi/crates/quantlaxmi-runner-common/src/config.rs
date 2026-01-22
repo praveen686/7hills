@@ -48,8 +48,7 @@ impl RunnerConfig {
             .or_else(|_| std::fs::read_to_string(format!("../../{}", path)))
             .map_err(|_| anyhow::anyhow!("Could not find config file: {}", path))?;
 
-        toml::from_str(&config_str)
-            .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))
+        toml::from_str(&config_str).map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))
     }
 
     /// Get default config path for a given execution mode

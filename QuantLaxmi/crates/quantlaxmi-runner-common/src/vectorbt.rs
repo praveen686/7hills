@@ -374,13 +374,11 @@ impl VectorBTExporter {
         let expectancy = (win_rate * avg_win) - ((1.0 - win_rate) * avg_loss);
 
         // Time range
-        if let (Some(first), Some(last)) = (
-            self.trade_rows.first(),
-            self.trade_rows.last()
-        ) {
+        if let (Some(first), Some(last)) = (self.trade_rows.first(), self.trade_rows.last()) {
             self.summary.start_time = first.entry_time;
             self.summary.end_time = last.exit_time;
-            self.summary.duration_days = (last.exit_time - first.entry_time).num_seconds() as f64 / 86400.0;
+            self.summary.duration_days =
+                (last.exit_time - first.entry_time).num_seconds() as f64 / 86400.0;
         }
 
         self.summary.initial_capital = initial_capital;

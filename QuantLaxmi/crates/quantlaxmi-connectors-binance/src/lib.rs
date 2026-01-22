@@ -15,5 +15,7 @@
 pub mod binance;
 pub mod sbe;
 
-pub use binance::{BinanceConnector, ConnectorStats, DepthResponse, fetch_depth_snapshot, depth_to_snapshot};
-pub use sbe::{SbeHeader, BinanceSbeDecoder, AggTrade, DepthUpdate, TradeEntry, SBE_HEADER_SIZE};
+pub use binance::{
+    BinanceConnector, ConnectorStats, DepthResponse, depth_to_snapshot, fetch_depth_snapshot,
+};
+pub use sbe::{AggTrade, BinanceSbeDecoder, DepthUpdate, SBE_HEADER_SIZE, SbeHeader, TradeEntry};

@@ -8,29 +8,26 @@
 //! for remote control of the trading system.
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
     routing::get,
-    Router,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// WebSocket message types for client communication
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "payload")]
 pub enum WebMessage {
     /// Basic status update (legacy)
-    Status {
-        equity: f64,
-        realized_pnl: f64,
-    },
+    Status { equity: f64, realized_pnl: f64 },
 
     /// Per-symbol price and position update
     SymbolUpdate {
@@ -40,15 +37,10 @@ pub enum WebMessage {
     },
 
     /// Order execution log message
-    OrderLog {
-        message: String,
-    },
+    OrderLog { message: String },
 
     /// Command from UI (actions)
-    Command {
-        action: String,
-        target: String,
-    },
+    Command { action: String, target: String },
 
     /// Comprehensive trading metrics snapshot
     MetricsSnapshot {
@@ -109,9 +101,7 @@ pub enum WebMessage {
     },
 
     /// Expert weight update (from Hydra meta-allocator)
-    ExpertWeights {
-        weights: Vec<(String, f64)>,
-    },
+    ExpertWeights { weights: Vec<(String, f64)> },
 
     /// Kill switch status
     KillSwitch {
@@ -174,8 +164,13 @@ pub async fn start_server(state: Arc<ServerState>, port: u16) {
         .route("/metrics", get(metrics_handler))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
-    info!("Web control server listening on {}", listener.local_addr().unwrap());
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
+        .unwrap();
+    info!(
+        "Web control server listening on {}",
+        listener.local_addr().unwrap()
+    );
     info!("  WebSocket: ws://localhost:{}/ws", port);
     info!("  Health:    http://localhost:{}/health", port);
     info!("  Metrics:   http://localhost:{}/metrics", port);
@@ -233,7 +228,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
         while let Some(Ok(Message::Text(text))) = receiver.next().await {
             match serde_json::from_str::<WebMessage>(&text) {
                 Ok(WebMessage::Command { action, target }) => {
-                    info!("Received command from UI: action={}, target={}", action, target);
+                    info!(
+                        "Received command from UI: action={}, target={}",
+                        action, target
+                    );
 
                     // Echo acknowledgment
                     let _ = tx_for_commands.send(WebMessage::OrderLog {

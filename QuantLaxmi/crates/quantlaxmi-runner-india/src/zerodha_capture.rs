@@ -16,15 +16,15 @@
 //! - Python sidecar for TOTP authentication
 
 use anyhow::{Context, Result, bail};
+use byteorder::{BigEndian, ByteOrder};
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use tokio::io::AsyncWriteExt;
 use tokio_tungstenite::tungstenite::Message;
-use byteorder::{BigEndian, ByteOrder};
-use serde::Deserialize;
 
 use kubera_options::replay::QuoteEvent;
 
@@ -53,7 +53,11 @@ pub struct CaptureStats {
 
 impl std::fmt::Display for CaptureStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "events={}, symbols={}", self.events_written, self.symbols_active)
+        write!(
+            f,
+            "events={}, symbols={}",
+            self.events_written, self.symbols_active
+        )
     }
 }
 
@@ -70,8 +74,8 @@ fn authenticate() -> Result<(String, String)> {
         bail!("Zerodha authentication failed: {}", err);
     }
 
-    let auth: AuthOutput = serde_json::from_slice(&output.stdout)
-        .context("Failed to parse auth response")?;
+    let auth: AuthOutput =
+        serde_json::from_slice(&output.stdout).context("Failed to parse auth response")?;
 
     println!("✅ Authenticated with Zerodha");
     Ok((auth.api_key, auth.access_token))
@@ -87,9 +91,13 @@ async fn fetch_instrument_tokens(
 
     // Fetch NFO instruments master
     let url = format!("{}/instruments/NFO", KITE_API_URL);
-    let response = client.get(&url)
+    let response = client
+        .get(&url)
         .header("X-Kite-Version", "3")
-        .header("Authorization", format!("token {}:{}", api_key, access_token))
+        .header(
+            "Authorization",
+            format!("token {}:{}", api_key, access_token),
+        )
         .send()
         .await?
         .text()
@@ -173,7 +181,8 @@ fn parse_tick(data: &[u8]) -> Option<Vec<(u32, f64, f64, u32, u32)>> {
             for i in 0..5 {
                 let level_offset = depth_start + (i * 12);
                 let qty = BigEndian::read_i32(&packet[level_offset..level_offset + 4]);
-                let price = BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8]) as f64 / 100.0;
+                let price =
+                    BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8]) as f64 / 100.0;
                 if qty > 0 && price > 0.0 && price > best_bid_price {
                     best_bid_price = price;
                     best_bid_qty = qty as u32;
@@ -186,7 +195,8 @@ fn parse_tick(data: &[u8]) -> Option<Vec<(u32, f64, f64, u32, u32)>> {
             for i in 0..5 {
                 let level_offset = depth_start + 60 + (i * 12);
                 let qty = BigEndian::read_i32(&packet[level_offset..level_offset + 4]);
-                let price = BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8]) as f64 / 100.0;
+                let price =
+                    BigEndian::read_i32(&packet[level_offset + 4..level_offset + 8]) as f64 / 100.0;
                 if qty > 0 && price > 0.0 && price < best_ask_price {
                     best_ask_price = price;
                     best_ask_qty = qty as u32;
@@ -201,27 +211,51 @@ fn parse_tick(data: &[u8]) -> Option<Vec<(u32, f64, f64, u32, u32)>> {
                 && best_ask_price < ltp * 1.5;
 
             if valid_depth {
-                ticks.push((token, best_bid_price, best_ask_price, best_bid_qty, best_ask_qty));
+                ticks.push((
+                    token,
+                    best_bid_price,
+                    best_ask_price,
+                    best_bid_qty,
+                    best_ask_qty,
+                ));
             } else if ltp > 0.0 {
                 // Fallback: use LTP with synthetic spread (0.1%) and synthetic quantity
                 // Use 150 as synthetic qty (~10 lots for BANKNIFTY options)
                 let spread = ltp * 0.001;
                 let synthetic_qty = 150u32;
-                ticks.push((token, ltp - spread, ltp + spread, synthetic_qty, synthetic_qty));
+                ticks.push((
+                    token,
+                    ltp - spread,
+                    ltp + spread,
+                    synthetic_qty,
+                    synthetic_qty,
+                ));
             }
         } else if packet_len >= 44 {
             // Quote mode - use LTP with synthetic spread
             if ltp > 0.0 {
                 let spread = ltp * 0.001;
                 let synthetic_qty = 150u32;
-                ticks.push((token, ltp - spread, ltp + spread, synthetic_qty, synthetic_qty));
+                ticks.push((
+                    token,
+                    ltp - spread,
+                    ltp + spread,
+                    synthetic_qty,
+                    synthetic_qty,
+                ));
             }
         } else if packet_len >= 8 {
             // LTP mode - use LTP with synthetic spread
             if ltp > 0.0 {
                 let spread = ltp * 0.001;
                 let synthetic_qty = 150u32;
-                ticks.push((token, ltp - spread, ltp + spread, synthetic_qty, synthetic_qty));
+                ticks.push((
+                    token,
+                    ltp - spread,
+                    ltp + spread,
+                    synthetic_qty,
+                    synthetic_qty,
+                ));
             }
         }
 
@@ -241,11 +275,17 @@ pub async fn capture_zerodha_quotes(
     let (api_key, access_token) = authenticate()?;
 
     // Step 2: Get instrument tokens
-    println!("Fetching instrument tokens for {} symbols...", symbols.len());
+    println!(
+        "Fetching instrument tokens for {} symbols...",
+        symbols.len()
+    );
     let tokens = fetch_instrument_tokens(&api_key, &access_token, symbols).await?;
 
     if tokens.is_empty() {
-        bail!("No valid instrument tokens found for symbols: {:?}", symbols);
+        bail!(
+            "No valid instrument tokens found for symbols: {:?}",
+            symbols
+        );
     }
 
     println!("Found {} instrument tokens:", tokens.len());
@@ -254,9 +294,8 @@ pub async fn capture_zerodha_quotes(
     }
 
     // Build token -> symbol map
-    let token_to_symbol: HashMap<u32, String> = tokens.iter()
-        .map(|(s, t)| (*t, s.clone()))
-        .collect();
+    let token_to_symbol: HashMap<u32, String> =
+        tokens.iter().map(|(s, t)| (*t, s.clone())).collect();
 
     // Step 3: Connect to WebSocket
     let ws_url = format!(

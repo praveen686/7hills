@@ -2,18 +2,17 @@
 //!
 //! Shared terminal UI components for QuantLaxmi runners.
 
-use ratatui::{
-    backend::CrosstermBackend,
-    widgets::{Block, Borders, List, ListItem, Paragraph, Table, Row, Cell},
-    layout::{Layout, Constraint, Direction, Rect},
-    Terminal,
-    style::{Style, Color, Modifier},
-    Frame,
-};
 use crossterm::{
     event::{self, Event as CEvent, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use ratatui::{
+    Frame, Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table},
 };
 use std::io::Stdout;
 use std::time::Duration;
@@ -74,10 +73,7 @@ pub fn render_status_panel(
 
     let pnl_color = if pnl >= 0.0 { Color::Green } else { Color::Red };
 
-    let text = format!(
-        "Mode: {}\nEquity: ${:.2}\nP&L: ${:.2}",
-        mode, equity, pnl
-    );
+    let text = format!("Mode: {}\nEquity: ${:.2}\nP&L: ${:.2}", mode, equity, pnl);
 
     let paragraph = Paragraph::new(text)
         .block(block)
@@ -93,7 +89,8 @@ pub fn render_order_log(frame: &mut Frame, area: Rect, logs: &[String]) {
         .borders(Borders::ALL)
         .style(Style::default().fg(Color::Yellow));
 
-    let items: Vec<ListItem> = logs.iter()
+    let items: Vec<ListItem> = logs
+        .iter()
         .rev()
         .take(10)
         .map(|log| ListItem::new(log.as_str()))

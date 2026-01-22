@@ -17,25 +17,23 @@
 //! - `live` - Run live trading
 
 pub mod binance_capture;
-pub mod binance_sbe_depth_capture;
 pub mod binance_exchange_info;
+pub mod binance_sbe_depth_capture;
 
 use clap::{Parser, Subcommand};
-use tracing::{info, error};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use tracing::{error, info};
 
 pub use quantlaxmi_runner_common::{
-    AppState, SymbolState, RunnerConfig,
+    AppState, RunnerConfig, SymbolState,
     circuit_breakers::TradingCircuitBreakers,
+    create_runtime, init_observability, report, tui,
     web_server::{ServerState, start_server},
-    tui,
-    report,
-    init_observability, create_runtime,
 };
 
-use quantlaxmi_connectors_binance::BinanceConnector;
 use kubera_core::ExecutionMode;
+use quantlaxmi_connectors_binance::BinanceConnector;
 
 #[derive(Parser, Debug)]
 #[command(name = "quantlaxmi-crypto")]
@@ -133,21 +131,30 @@ async fn async_main() -> anyhow::Result<()> {
     init_observability("quantlaxmi-crypto");
 
     match cli.command {
-        Commands::CaptureBinance { symbol, out, duration_secs } => {
-            run_capture_binance(&symbol, &out, duration_secs).await
-        }
-        Commands::CaptureSbeDepth { symbol, out, duration_secs, price_exponent, qty_exponent } => {
+        Commands::CaptureBinance {
+            symbol,
+            out,
+            duration_secs,
+        } => run_capture_binance(&symbol, &out, duration_secs).await,
+        Commands::CaptureSbeDepth {
+            symbol,
+            out,
+            duration_secs,
+            price_exponent,
+            qty_exponent,
+        } => {
             run_capture_sbe_depth(&symbol, &out, duration_secs, price_exponent, qty_exponent).await
         }
-        Commands::ExchangeInfo { symbols } => {
-            run_exchange_info(&symbols).await
-        }
-        Commands::Paper { config, headless, initial_capital } => {
-            run_paper_mode(&config, headless, initial_capital).await
-        }
-        Commands::Live { config, initial_capital } => {
-            run_live_mode(&config, initial_capital).await
-        }
+        Commands::ExchangeInfo { symbols } => run_exchange_info(&symbols).await,
+        Commands::Paper {
+            config,
+            headless,
+            initial_capital,
+        } => run_paper_mode(&config, headless, initial_capital).await,
+        Commands::Live {
+            config,
+            initial_capital,
+        } => run_live_mode(&config, initial_capital).await,
     }
 }
 
@@ -157,7 +164,10 @@ async fn run_capture_binance(symbol: &str, out: &str, duration_secs: u64) -> any
         std::fs::create_dir_all(parent)?;
     }
 
-    println!("Capturing Binance {} bookTicker for {} seconds...", symbol, duration_secs);
+    println!(
+        "Capturing Binance {} bookTicker for {} seconds...",
+        symbol, duration_secs
+    );
     binance_capture::capture_book_ticker_jsonl(symbol, out_path, duration_secs).await?;
     println!("Capture complete: {}", out);
 
@@ -180,8 +190,10 @@ async fn run_capture_sbe_depth(
     let api_key = std::env::var("BINANCE_API_KEY_ED25519")
         .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
 
-    println!("Capturing Binance SBE {} depth stream for {} seconds (price_exp={}, qty_exp={})...",
-        symbol, duration_secs, price_exponent, qty_exponent);
+    println!(
+        "Capturing Binance SBE {} depth stream for {} seconds (price_exp={}, qty_exp={})...",
+        symbol, duration_secs, price_exponent, qty_exponent
+    );
 
     let stats = binance_sbe_depth_capture::capture_sbe_depth_jsonl(
         symbol,
@@ -190,29 +202,39 @@ async fn run_capture_sbe_depth(
         price_exponent,
         qty_exponent,
         &api_key,
-    ).await?;
+    )
+    .await?;
 
     println!("Capture complete: {} ({})", out, stats);
     Ok(())
 }
 
 async fn run_exchange_info(symbols: &str) -> anyhow::Result<()> {
-    let symbol_list: std::collections::HashSet<String> = symbols.split(',')
+    let symbol_list: std::collections::HashSet<String> = symbols
+        .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
     if symbol_list.is_empty() {
-        return Err(anyhow::anyhow!("No symbols provided. Use --symbols BTCUSDT,ETHUSDT"));
+        return Err(anyhow::anyhow!(
+            "No symbols provided. Use --symbols BTCUSDT,ETHUSDT"
+        ));
     }
 
-    println!("Fetching exchange info for {} symbols...", symbol_list.len());
+    println!(
+        "Fetching exchange info for {} symbols...",
+        symbol_list.len()
+    );
 
     match binance_exchange_info::fetch_spot_specs(&symbol_list) {
         Ok(specs) => {
             println!("\n=== Binance Exchange Info ===");
             for (sym, (tick_size, qty_scale)) in specs {
-                println!("  {}: tick_size={}, qty_scale={}", sym, tick_size, qty_scale);
+                println!(
+                    "  {}: tick_size={}, qty_scale={}",
+                    sym, tick_size, qty_scale
+                );
             }
         }
         Err(e) => {
@@ -224,7 +246,11 @@ async fn run_exchange_info(symbols: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_paper_mode(config_path: &str, headless: bool, initial_capital: f64) -> anyhow::Result<()> {
+async fn run_paper_mode(
+    config_path: &str,
+    headless: bool,
+    initial_capital: f64,
+) -> anyhow::Result<()> {
     info!("QuantLaxmi Crypto - Paper Trading Mode");
     info!("Loading configuration from: {}", config_path);
 

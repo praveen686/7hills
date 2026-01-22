@@ -38,7 +38,7 @@ enum Filter {
 /// Count decimal places in a Binance step/tick string like "0.00100000".
 fn decimals_from_str(s: &str) -> u32 {
     if let Some(dot) = s.find('.') {
-        let frac = &s[dot+1..];
+        let frac = &s[dot + 1..];
         let trimmed = frac.trim_end_matches('0');
         trimmed.len() as u32
     } else {
@@ -47,7 +47,8 @@ fn decimals_from_str(s: &str) -> u32 {
 }
 
 fn parse_f64(s: &str) -> Result<f64> {
-    Ok(s.parse::<f64>().with_context(|| format!("parse f64: {}", s))?)
+    Ok(s.parse::<f64>()
+        .with_context(|| format!("parse f64: {}", s))?)
 }
 
 /// Compute qty_scale from LOT_SIZE stepSize.
@@ -69,7 +70,10 @@ pub fn fetch_spot_specs(symbols: &HashSet<String>) -> Result<HashMap<String, (f6
     let sym_json = serde_json::to_string(&sym_list)?;
     let sym_encoded = urlencoding::encode(&sym_json);
 
-    let url = format!("https://api.binance.com/api/v3/exchangeInfo?symbols={}", sym_encoded);
+    let url = format!(
+        "https://api.binance.com/api/v3/exchangeInfo?symbols={}",
+        sym_encoded
+    );
 
     let resp = reqwest::blocking::get(&url)
         .with_context(|| format!("GET {}", url))?

@@ -6,20 +6,22 @@
 //! Uses a per-symbol actor model where each instrument is managed by its
 //! own isolated task and WebSocket connection to minimize "head-of-line" blocking.
 
-use crate::sbe::{SbeHeader, BinanceSbeDecoder};
+use crate::sbe::{BinanceSbeDecoder, SbeHeader};
 use async_trait::async_trait;
+use chrono::Utc;
+use futures::{SinkExt, StreamExt};
 use kubera_core::EventBus;
-use kubera_models::{MarketEvent, MarketPayload, Side, L2Update, L2Snapshot, L2Level};
+use kubera_models::{L2Level, L2Snapshot, L2Update, MarketEvent, MarketPayload, Side};
+use serde::Deserialize;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message, tungstenite::client::IntoClientRequest};
-use futures::{StreamExt, SinkExt};
+use tokio_tungstenite::{
+    connect_async, tungstenite::client::IntoClientRequest, tungstenite::protocol::Message,
+};
+use tracing::{debug, error, info, instrument, warn};
 use url::Url;
-use tracing::{info, error, warn, debug, instrument};
-use chrono::Utc;
-use serde::Deserialize;
 
 const REST_API_URL: &str = "https://api.binance.com";
 
@@ -204,8 +206,12 @@ impl SymbolHandler {
         info!(symbol = %self.symbol, url = %url, "Connecting to Binance SBE Stream");
 
         let mut request = url.into_client_request()?;
-        request.headers_mut().insert("X-MBX-APIKEY", self.api_key.parse()?);
-        request.headers_mut().insert("Sec-WebSocket-Protocol", "binance-sbe".parse()?);
+        request
+            .headers_mut()
+            .insert("X-MBX-APIKEY", self.api_key.parse()?);
+        request
+            .headers_mut()
+            .insert("Sec-WebSocket-Protocol", "binance-sbe".parse()?);
 
         let (ws_stream, _) = connect_async(request).await?;
         let (mut write, mut read) = ws_stream.split();
@@ -232,52 +238,73 @@ impl SymbolHandler {
 
             match sync_state {
                 SyncState::Buffering => {
-                    if depth_buffer.len() >= 10 || (depth_buffer.len() > 0 && last_pong.elapsed() > Duration::from_secs(2)) {
+                    if depth_buffer.len() >= 10
+                        || (depth_buffer.len() > 0 && last_pong.elapsed() > Duration::from_secs(2))
+                    {
                         info!(symbol = %self.symbol, buffered = depth_buffer.len(), "Fetching snapshot for synchronization");
                         match self.fetch_snapshot().await {
                             Ok((sid, snapshot)) => {
                                 snapshot_update_id = sid;
-                                let _ = self.bus.publish_market(MarketEvent {
-                                    exchange_time: Utc::now(),
-                                    local_time: Utc::now(),
-                                    symbol: self.symbol.clone(),
-                                    payload: MarketPayload::L2Snapshot(snapshot),
-                                }).await;
+                                let _ = self
+                                    .bus
+                                    .publish_market(MarketEvent {
+                                        exchange_time: Utc::now(),
+                                        local_time: Utc::now(),
+                                        symbol: self.symbol.clone(),
+                                        payload: MarketPayload::L2Snapshot(snapshot),
+                                    })
+                                    .await;
                                 sync_state = SyncState::Synchronizing;
                             }
-                            Err(e) => error!(symbol = %self.symbol, error = %e, "Failed to fetch snapshot"),
+                            Err(e) => {
+                                error!(symbol = %self.symbol, error = %e, "Failed to fetch snapshot")
+                            }
                         }
                     }
                 }
                 SyncState::Synchronizing => {
                     while let Some(buffered) = depth_buffer.pop_front() {
                         if buffered.last_update_id <= snapshot_update_id {
-                            self.stats.depth_updates_dropped.fetch_add(1, Ordering::Relaxed);
+                            self.stats
+                                .depth_updates_dropped
+                                .fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
 
                         if !first_event_processed {
                             let target = snapshot_update_id + 1;
-                            if buffered.first_update_id <= target && buffered.last_update_id >= target {
+                            if buffered.first_update_id <= target
+                                && buffered.last_update_id >= target
+                            {
                                 first_event_processed = true;
                                 last_applied_u = buffered.last_update_id;
-                                self.publish_depth_update(buffered.update, buffered.exchange_time).await;
-                                self.stats.depth_updates_applied.fetch_add(1, Ordering::Relaxed);
+                                self.publish_depth_update(buffered.update, buffered.exchange_time)
+                                    .await;
+                                self.stats
+                                    .depth_updates_applied
+                                    .fetch_add(1, Ordering::Relaxed);
                             } else {
-                                self.stats.depth_updates_dropped.fetch_add(1, Ordering::Relaxed);
+                                self.stats
+                                    .depth_updates_dropped
+                                    .fetch_add(1, Ordering::Relaxed);
                             }
                         } else {
                             if buffered.first_update_id == last_applied_u + 1 {
                                 last_applied_u = buffered.last_update_id;
-                                self.publish_depth_update(buffered.update, buffered.exchange_time).await;
-                                self.stats.depth_updates_applied.fetch_add(1, Ordering::Relaxed);
+                                self.publish_depth_update(buffered.update, buffered.exchange_time)
+                                    .await;
+                                self.stats
+                                    .depth_updates_applied
+                                    .fetch_add(1, Ordering::Relaxed);
                             } else if buffered.first_update_id > last_applied_u + 1 {
                                 warn!(symbol = %self.symbol, expected = last_applied_u + 1, got = buffered.first_update_id, "Sequence gap detected in buffered updates");
                                 self.stats.sequence_gaps.fetch_add(1, Ordering::Relaxed);
                                 sync_state = SyncState::Resync;
                                 break;
                             } else {
-                                self.stats.depth_updates_dropped.fetch_add(1, Ordering::Relaxed);
+                                self.stats
+                                    .depth_updates_dropped
+                                    .fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
@@ -304,7 +331,9 @@ impl SymbolHandler {
                 Ok(Some(Ok(Message::Binary(bin)))) => {
                     last_pong = Instant::now();
                     self.stats.messages_received.fetch_add(1, Ordering::Relaxed);
-                    if bin.len() < 8 { continue; }
+                    if bin.len() < 8 {
+                        continue;
+                    }
 
                     if let Ok(header) = SbeHeader::decode(&bin[0..8]) {
                         debug!(symbol = %self.symbol, template_id = header.template_id, len = bin.len(), "SBE message received");
@@ -322,17 +351,32 @@ impl SymbolHandler {
                                     snapshot_update_id,
                                     &mut last_applied_u,
                                     first_event_processed,
-                                ).await;
+                                )
+                                .await;
                             }
-                            _ => debug!(symbol = %self.symbol, template_id = header.template_id, "Unhandled SBE template"),
+                            _ => {
+                                debug!(symbol = %self.symbol, template_id = header.template_id, "Unhandled SBE template")
+                            }
                         }
                     }
                 }
-                Ok(Some(Ok(Message::Ping(p)))) => { let _ = write.send(Message::Pong(p)).await; }
-                Ok(Some(Ok(Message::Pong(_)))) => { last_pong = Instant::now(); }
-                Ok(Some(Err(e))) => { error!(symbol = %self.symbol, error = %e, "WebSocket error"); break; }
-                Ok(None) => { info!(symbol = %self.symbol, "WebSocket stream ended"); break; }
-                Err(_) => { let _ = write.send(Message::Ping(vec![])).await; }
+                Ok(Some(Ok(Message::Ping(p)))) => {
+                    let _ = write.send(Message::Pong(p)).await;
+                }
+                Ok(Some(Ok(Message::Pong(_)))) => {
+                    last_pong = Instant::now();
+                }
+                Ok(Some(Err(e))) => {
+                    error!(symbol = %self.symbol, error = %e, "WebSocket error");
+                    break;
+                }
+                Ok(None) => {
+                    info!(symbol = %self.symbol, "WebSocket stream ended");
+                    break;
+                }
+                Err(_) => {
+                    let _ = write.send(Message::Ping(vec![])).await;
+                }
                 _ => {}
             }
         }
@@ -344,23 +388,29 @@ impl SymbolHandler {
             Ok(trade) => {
                 self.stats.trades_decoded.fetch_add(1, Ordering::Relaxed);
 
-                let aggressor_side = if trade.is_buyer_maker { Side::Sell } else { Side::Buy };
+                let aggressor_side = if trade.is_buyer_maker {
+                    Side::Sell
+                } else {
+                    Side::Buy
+                };
                 let exchange_time = trade.exchange_time();
                 let now = Utc::now();
 
                 let bus = self.bus.clone();
                 let symbol = self.symbol.clone();
                 tokio::spawn(async move {
-                    let _ = bus.publish_market(MarketEvent {
-                        exchange_time,
-                        local_time: now,
-                        symbol,
-                        payload: MarketPayload::Tick {
-                            price: trade.price,
-                            size: trade.quantity,
-                            side: aggressor_side,
-                        }
-                    }).await;
+                    let _ = bus
+                        .publish_market(MarketEvent {
+                            exchange_time,
+                            local_time: now,
+                            symbol,
+                            payload: MarketPayload::Tick {
+                                price: trade.price,
+                                size: trade.quantity,
+                                side: aggressor_side,
+                            },
+                        })
+                        .await;
                 });
             }
             Err(e) => {
@@ -382,7 +432,9 @@ impl SymbolHandler {
     ) {
         match BinanceSbeDecoder::decode_depth_update(header, body) {
             Ok(depth) => {
-                self.stats.depth_updates_decoded.fetch_add(1, Ordering::Relaxed);
+                self.stats
+                    .depth_updates_decoded
+                    .fetch_add(1, Ordering::Relaxed);
 
                 let exchange_time = depth.exchange_time();
                 let update = L2Update {
@@ -394,30 +446,40 @@ impl SymbolHandler {
 
                 match *sync_state {
                     SyncState::Buffering | SyncState::Synchronizing => {
-                        self.stats.depth_updates_buffered.fetch_add(1, Ordering::Relaxed);
+                        self.stats
+                            .depth_updates_buffered
+                            .fetch_add(1, Ordering::Relaxed);
                         depth_buffer.push_back(BufferedDepthUpdate {
                             first_update_id: depth.first_update_id,
                             last_update_id: depth.last_update_id,
                             update,
                             exchange_time,
                         });
-                        if depth_buffer.len() > 10000 { depth_buffer.pop_front(); }
+                        if depth_buffer.len() > 10000 {
+                            depth_buffer.pop_front();
+                        }
                     }
                     SyncState::Synchronized => {
                         if depth.last_update_id <= snapshot_update_id {
-                            self.stats.depth_updates_dropped.fetch_add(1, Ordering::Relaxed);
+                            self.stats
+                                .depth_updates_dropped
+                                .fetch_add(1, Ordering::Relaxed);
                             return;
                         }
                         if depth.first_update_id == *last_applied_u + 1 {
                             *last_applied_u = depth.last_update_id;
                             self.publish_depth_update(update, exchange_time).await;
-                            self.stats.depth_updates_applied.fetch_add(1, Ordering::Relaxed);
+                            self.stats
+                                .depth_updates_applied
+                                .fetch_add(1, Ordering::Relaxed);
                         } else if depth.first_update_id > *last_applied_u + 1 {
                             warn!(symbol = %self.symbol, expected = *last_applied_u + 1, got = depth.first_update_id, "Sequence gap detected, triggering resync");
                             self.stats.sequence_gaps.fetch_add(1, Ordering::Relaxed);
                             *sync_state = SyncState::Resync;
                         } else {
-                            self.stats.depth_updates_dropped.fetch_add(1, Ordering::Relaxed);
+                            self.stats
+                                .depth_updates_dropped
+                                .fetch_add(1, Ordering::Relaxed);
                         }
                     }
                     _ => {}
@@ -434,12 +496,14 @@ impl SymbolHandler {
         let bus = self.bus.clone();
         let symbol = self.symbol.clone();
         tokio::spawn(async move {
-            let _ = bus.publish_market(MarketEvent {
-                exchange_time,
-                local_time: Utc::now(),
-                symbol,
-                payload: MarketPayload::L2Update(update),
-            }).await;
+            let _ = bus
+                .publish_market(MarketEvent {
+                    exchange_time,
+                    local_time: Utc::now(),
+                    symbol,
+                    payload: MarketPayload::L2Update(update),
+                })
+                .await;
         });
     }
 }
@@ -457,24 +521,32 @@ pub struct DepthResponse {
 
 /// Retrieves a full L2 snapshot for a specific instrument.
 pub async fn fetch_depth_snapshot(symbol: &str, limit: u32) -> anyhow::Result<DepthResponse> {
-    let url = format!("{}/api/v3/depth?symbol={}&limit={}", REST_API_URL, symbol.to_uppercase(), limit);
+    let url = format!(
+        "{}/api/v3/depth?symbol={}&limit={}",
+        REST_API_URL,
+        symbol.to_uppercase(),
+        limit
+    );
     info!("Fetching depth snapshot: {}", url);
 
     let client = reqwest::Client::new();
-    let response = client.get(&url)
-        .send()
-        .await?
-        .error_for_status()?;
+    let response = client.get(&url).send().await?.error_for_status()?;
 
     let depth: DepthResponse = response.json().await?;
-    info!("Received depth snapshot: lastUpdateId={}, {} bids, {} asks",
-          depth.last_update_id, depth.bids.len(), depth.asks.len());
+    info!(
+        "Received depth snapshot: lastUpdateId={}, {} bids, {} asks",
+        depth.last_update_id,
+        depth.bids.len(),
+        depth.asks.len()
+    );
     Ok(depth)
 }
 
 /// Deserializes raw string-based API response into numeric `L2Snapshot`.
 pub fn depth_to_snapshot(depth: &DepthResponse) -> L2Snapshot {
-    let bids: Vec<L2Level> = depth.bids.iter()
+    let bids: Vec<L2Level> = depth
+        .bids
+        .iter()
         .filter_map(|[p, q]| {
             Some(L2Level {
                 price: p.parse().ok()?,
@@ -483,7 +555,9 @@ pub fn depth_to_snapshot(depth: &DepthResponse) -> L2Snapshot {
         })
         .collect();
 
-    let asks: Vec<L2Level> = depth.asks.iter()
+    let asks: Vec<L2Level> = depth
+        .asks
+        .iter()
         .filter_map(|[p, q]| {
             Some(L2Level {
                 price: p.parse().ok()?,

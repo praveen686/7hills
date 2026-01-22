@@ -15,25 +15,23 @@
 //! - `paper` - Run paper trading
 //! - `live` - Run live trading
 
-pub mod zerodha_capture;
 pub mod kitesim_backtest;
+pub mod zerodha_capture;
 
 use clap::{Parser, Subcommand};
-use tracing::{info, error};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use tracing::{error, info};
 
 pub use quantlaxmi_runner_common::{
-    AppState, SymbolState, RunnerConfig,
+    AppState, RunnerConfig, SymbolState,
     circuit_breakers::TradingCircuitBreakers,
+    create_runtime, init_observability, report, tui,
     web_server::{ServerState, start_server},
-    tui,
-    report,
-    init_observability, create_runtime,
 };
 
-use quantlaxmi_connectors_zerodha::{ZerodhaConnector, ZerodhaAutoDiscovery, AutoDiscoveryConfig};
 use kubera_core::ExecutionMode;
+use quantlaxmi_connectors_zerodha::{AutoDiscoveryConfig, ZerodhaAutoDiscovery, ZerodhaConnector};
 
 #[derive(Parser, Debug)]
 #[command(name = "quantlaxmi-india")]
@@ -167,15 +165,29 @@ async fn async_main() -> anyhow::Result<()> {
     init_observability("quantlaxmi-india");
 
     match cli.command {
-        Commands::DiscoverZerodha { underlying, strikes } => {
-            run_discover_zerodha(&underlying, strikes).await
-        }
-        Commands::CaptureZerodha { symbols, out, duration_secs } => {
-            run_capture_zerodha(&symbols, &out, duration_secs).await
-        }
+        Commands::DiscoverZerodha {
+            underlying,
+            strikes,
+        } => run_discover_zerodha(&underlying, strikes).await,
+        Commands::CaptureZerodha {
+            symbols,
+            out,
+            duration_secs,
+        } => run_capture_zerodha(&symbols, &out, duration_secs).await,
         Commands::BacktestKitesim {
-            qty_scale, strategy, replay, orders, intents, depth, out,
-            timeout_ms, latency_ms, slippage_bps, adverse_bps, stale_quote_ms, hedge_on_failure,
+            qty_scale,
+            strategy,
+            replay,
+            orders,
+            intents,
+            depth,
+            out,
+            timeout_ms,
+            latency_ms,
+            slippage_bps,
+            adverse_bps,
+            stale_quote_ms,
+            hedge_on_failure,
         } => {
             kitesim_backtest::run_kitesim_backtest_cli(kitesim_backtest::KiteSimCliConfig {
                 qty_scale,
@@ -191,25 +203,36 @@ async fn async_main() -> anyhow::Result<()> {
                 adverse_bps,
                 stale_quote_ms,
                 hedge_on_failure,
-            }).await
+            })
+            .await
         }
-        Commands::Paper { config, headless, initial_capital } => {
-            run_paper_mode(&config, headless, initial_capital).await
-        }
-        Commands::Live { config, initial_capital } => {
-            run_live_mode(&config, initial_capital).await
-        }
+        Commands::Paper {
+            config,
+            headless,
+            initial_capital,
+        } => run_paper_mode(&config, headless, initial_capital).await,
+        Commands::Live {
+            config,
+            initial_capital,
+        } => run_live_mode(&config, initial_capital).await,
     }
 }
 
 async fn run_discover_zerodha(underlying: &str, strikes: u32) -> anyhow::Result<()> {
-    println!("Discovering {} options (ATM ± {} strikes)...", underlying, strikes);
+    println!(
+        "Discovering {} options (ATM ± {} strikes)...",
+        underlying, strikes
+    );
 
     let discovery = ZerodhaAutoDiscovery::from_sidecar()?;
     let config = AutoDiscoveryConfig {
         underlying: underlying.to_uppercase(),
         strikes_around_atm: strikes,
-        strike_interval: if underlying.to_uppercase() == "BANKNIFTY" { 100.0 } else { 50.0 },
+        strike_interval: if underlying.to_uppercase() == "BANKNIFTY" {
+            100.0
+        } else {
+            50.0
+        },
         ..Default::default()
     };
 
@@ -233,24 +256,36 @@ async fn run_capture_zerodha(symbols: &str, out: &str, duration_secs: u64) -> an
         std::fs::create_dir_all(parent)?;
     }
 
-    let symbol_list: Vec<String> = symbols.split(',')
+    let symbol_list: Vec<String> = symbols
+        .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
     if symbol_list.is_empty() {
-        return Err(anyhow::anyhow!("No symbols provided. Use --symbols BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE"));
+        return Err(anyhow::anyhow!(
+            "No symbols provided. Use --symbols BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE"
+        ));
     }
 
-    println!("Capturing Zerodha quotes for {} symbols for {} seconds...", symbol_list.len(), duration_secs);
+    println!(
+        "Capturing Zerodha quotes for {} symbols for {} seconds...",
+        symbol_list.len(),
+        duration_secs
+    );
 
-    let stats = zerodha_capture::capture_zerodha_quotes(&symbol_list, out_path, duration_secs).await?;
+    let stats =
+        zerodha_capture::capture_zerodha_quotes(&symbol_list, out_path, duration_secs).await?;
     println!("Capture complete: {} ({})", out, stats);
 
     Ok(())
 }
 
-async fn run_paper_mode(config_path: &str, headless: bool, initial_capital: f64) -> anyhow::Result<()> {
+async fn run_paper_mode(
+    config_path: &str,
+    headless: bool,
+    initial_capital: f64,
+) -> anyhow::Result<()> {
     info!("QuantLaxmi India - Paper Trading Mode");
     info!("Loading configuration from: {}", config_path);
 

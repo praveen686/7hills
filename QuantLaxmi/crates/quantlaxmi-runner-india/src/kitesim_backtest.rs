@@ -16,8 +16,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
 use kubera_options::execution::{LegSide, LegStatus, MultiLegOrder};
-use kubera_options::kitesim::{AtomicExecPolicy, KiteSim, KiteSimConfig, MultiLegCoordinator, SimExecutionMode};
-use kubera_options::replay::{QuoteEvent, DepthEvent, ReplayEvent, ReplayFeed};
+use kubera_options::kitesim::{
+    AtomicExecPolicy, KiteSim, KiteSimConfig, MultiLegCoordinator, SimExecutionMode,
+};
+use kubera_options::replay::{DepthEvent, QuoteEvent, ReplayEvent, ReplayFeed};
 use kubera_options::report::{BacktestReport, FillMetrics};
 use kubera_options::specs::SpecStore;
 
@@ -69,7 +71,9 @@ pub fn load_quotes_jsonl(path: &Path) -> Result<Vec<ReplayEvent>> {
     let mut out = Vec::new();
     for (i, line) in br.lines().enumerate() {
         let line = line.with_context(|| format!("read line {}", i + 1))?;
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         let q: QuoteEvent = serde_json::from_str(&line)
             .with_context(|| format!("parse QuoteEvent JSON on line {}", i + 1))?;
         out.push(ReplayEvent::Quote(q));
@@ -84,7 +88,9 @@ pub fn load_depth_jsonl(path: &Path) -> Result<Vec<ReplayEvent>> {
     let mut out = Vec::new();
     for (i, line) in br.lines().enumerate() {
         let line = line.with_context(|| format!("read line {}", i + 1))?;
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         let d: DepthEvent = serde_json::from_str(&line)
             .with_context(|| format!("parse DepthEvent JSON on line {}", i + 1))?;
         out.push(ReplayEvent::Depth(d));
@@ -93,14 +99,17 @@ pub fn load_depth_jsonl(path: &Path) -> Result<Vec<ReplayEvent>> {
 }
 
 pub fn load_orders_json(path: &Path) -> Result<OrderFile> {
-    let s = std::fs::read_to_string(path).with_context(|| format!("read orders file: {:?}", path))?;
+    let s =
+        std::fs::read_to_string(path).with_context(|| format!("read orders file: {:?}", path))?;
     let of: OrderFile = serde_json::from_str(&s).with_context(|| "parse OrderFile JSON")?;
     Ok(of)
 }
 
 pub fn load_intents_json(path: &Path) -> Result<OrderIntentFile> {
-    let s = std::fs::read_to_string(path).with_context(|| format!("read intents file: {:?}", path))?;
-    let intf: OrderIntentFile = serde_json::from_str(&s).with_context(|| "parse OrderIntentFile JSON")?;
+    let s =
+        std::fs::read_to_string(path).with_context(|| format!("read intents file: {:?}", path))?;
+    let intf: OrderIntentFile =
+        serde_json::from_str(&s).with_context(|| "parse OrderIntentFile JSON")?;
     Ok(intf)
 }
 
@@ -164,7 +173,10 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
     let strategy_name = if cfg.strategy_name.trim().is_empty() {
         if use_intents {
-            intents_file.as_ref().map(|f| f.strategy_name.clone()).unwrap_or_else(|| order_file.strategy_name.clone())
+            intents_file
+                .as_ref()
+                .map(|f| f.strategy_name.clone())
+                .unwrap_or_else(|| order_file.strategy_name.clone())
         } else {
             order_file.strategy_name.clone()
         }
@@ -185,13 +197,19 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     let mut specs = SpecStore::new();
 
     let symbols: std::collections::HashSet<String> = if use_intents {
-        intents_file.as_ref()
-            .map(|f| f.intents.iter()
-                .flat_map(|i| i.order.legs.iter().map(|l| l.tradingsymbol.clone()))
-                .collect())
+        intents_file
+            .as_ref()
+            .map(|f| {
+                f.intents
+                    .iter()
+                    .flat_map(|i| i.order.legs.iter().map(|l| l.tradingsymbol.clone()))
+                    .collect()
+            })
             .unwrap_or_default()
     } else {
-        order_file.orders.iter()
+        order_file
+            .orders
+            .iter()
             .flat_map(|o| o.legs.iter().map(|l| l.tradingsymbol.clone()))
             .collect()
     };
@@ -211,7 +229,8 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
     let mut feed = ReplayFeed::new(replay_events);
     // Store (order, result) pairs to track side info for PnL computation
-    let mut all_results: Vec<(MultiLegOrder, kubera_options::execution::MultiLegResult)> = Vec::new();
+    let mut all_results: Vec<(MultiLegOrder, kubera_options::execution::MultiLegResult)> =
+        Vec::new();
 
     if use_intents {
         let intf = intents_file.as_ref().unwrap();
@@ -248,15 +267,30 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
     let fill = FillMetrics {
         orders_total: all_results.len() as u64,
-        legs_total: all_results.iter().map(|(_, r)| r.leg_results.len() as u64).sum(),
-        legs_filled: all_results.iter().flat_map(|(_, r)| r.leg_results.iter())
-            .filter(|lr| lr.status == LegStatus::Filled).count() as u64,
-        legs_partially_filled: all_results.iter().flat_map(|(_, r)| r.leg_results.iter())
-            .filter(|lr| lr.status == LegStatus::PartiallyFilled).count() as u64,
-        legs_rejected: all_results.iter().flat_map(|(_, r)| r.leg_results.iter())
-            .filter(|lr| lr.status == LegStatus::Rejected).count() as u64,
-        legs_cancelled: all_results.iter().flat_map(|(_, r)| r.leg_results.iter())
-            .filter(|lr| lr.status == LegStatus::Cancelled).count() as u64,
+        legs_total: all_results
+            .iter()
+            .map(|(_, r)| r.leg_results.len() as u64)
+            .sum(),
+        legs_filled: all_results
+            .iter()
+            .flat_map(|(_, r)| r.leg_results.iter())
+            .filter(|lr| lr.status == LegStatus::Filled)
+            .count() as u64,
+        legs_partially_filled: all_results
+            .iter()
+            .flat_map(|(_, r)| r.leg_results.iter())
+            .filter(|lr| lr.status == LegStatus::PartiallyFilled)
+            .count() as u64,
+        legs_rejected: all_results
+            .iter()
+            .flat_map(|(_, r)| r.leg_results.iter())
+            .filter(|lr| lr.status == LegStatus::Rejected)
+            .count() as u64,
+        legs_cancelled: all_results
+            .iter()
+            .flat_map(|(_, r)| r.leg_results.iter())
+            .filter(|lr| lr.status == LegStatus::Cancelled)
+            .count() as u64,
         rollbacks: stats.rollbacks,
         timeouts: stats.timeouts,
         hedges_attempted: stats.hedges_attempted,
@@ -274,9 +308,14 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     report.fill = fill.clone();
     report.notes.push(format!("strategy={}", strategy_name));
     if use_intents {
-        report.notes.push(format!("intents_file={}", cfg.intents_path.as_ref().unwrap()));
+        report.notes.push(format!(
+            "intents_file={}",
+            cfg.intents_path.as_ref().unwrap()
+        ));
     } else {
-        report.notes.push(format!("orders_file={}", orders_path.to_string_lossy()));
+        report
+            .notes
+            .push(format!("orders_file={}", orders_path.to_string_lossy()));
     }
     report.notes.push(format!("qty_scale={}", cfg.qty_scale));
 
@@ -320,7 +359,10 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
     println!("\n=== KiteSim Backtest Complete (India/Zerodha) ===");
     println!("Strategy: {}", strategy_name);
-    println!("Orders: {}, Legs filled: {}/{}", fill.orders_total, fill.legs_filled, fill.legs_total);
+    println!(
+        "Orders: {}, Legs filled: {}/{}",
+        fill.orders_total, fill.legs_filled, fill.legs_total
+    );
     println!("PnL: ₹{:.2}", pnl);
 
     Ok(())

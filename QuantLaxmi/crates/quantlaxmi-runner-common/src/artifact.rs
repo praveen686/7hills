@@ -24,7 +24,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -51,10 +51,10 @@ impl ArtifactFamily {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RunProfile {
-    Smoke,      // Quick validation
-    Research,   // Full research run
-    Alpha,      // Live/paper trading
-    Certified,  // Deterministic certified run (Crypto)
+    Smoke,     // Quick validation
+    Research,  // Full research run
+    Alpha,     // Live/paper trading
+    Certified, // Deterministic certified run (Crypto)
 }
 
 /// Hash of a file for reproducibility tracking
@@ -463,7 +463,9 @@ impl ArtifactBuilder {
 
     /// Write strategy gates diagnostics
     pub fn write_strategy_gates(&mut self) -> Result<PathBuf> {
-        let path = self.base_dir.join("outputs/diagnostics/strategy_gates.json");
+        let path = self
+            .base_dir
+            .join("outputs/diagnostics/strategy_gates.json");
         let json = serde_json::to_string_pretty(&self.manifest.diagnostics)?;
         fs::write(&path, &json)?;
         self.manifest.outputs.strategy_gates = Some(FileHash::from_file(&path)?);
@@ -477,7 +479,10 @@ impl ArtifactBuilder {
 
     /// Add a regime transition to diagnostics
     pub fn log_regime_transition(&mut self, transition: RegimeTransition) {
-        self.manifest.diagnostics.regime_transitions.push(transition);
+        self.manifest
+            .diagnostics
+            .regime_transitions
+            .push(transition);
     }
 
     /// Set context validation results
@@ -559,7 +564,8 @@ impl IndiaContextValidator {
         if !underlying_present && !self.options_symbols.is_empty() {
             errors.push(
                 "FATAL: Options universe has no underlying reference (FUT or spot). \
-                 HYDRA/AEON require underlying context for regime detection.".to_string()
+                 HYDRA/AEON require underlying context for regime detection."
+                    .to_string(),
             );
         }
 
@@ -609,11 +615,9 @@ mod tests {
     #[test]
     fn test_artifact_builder() {
         let temp = TempDir::new().unwrap();
-        let builder = ArtifactBuilder::new(
-            temp.path(),
-            ArtifactFamily::Crypto,
-            RunProfile::Research
-        ).unwrap();
+        let builder =
+            ArtifactBuilder::new(temp.path(), ArtifactFamily::Crypto, RunProfile::Research)
+                .unwrap();
 
         assert!(builder.run_dir().join("inputs").exists());
         assert!(builder.run_dir().join("outputs/diagnostics").exists());

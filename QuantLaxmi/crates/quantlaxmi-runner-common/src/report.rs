@@ -2,9 +2,9 @@
 //!
 //! Shared report generation and export utilities.
 
-use serde::{Serialize, Deserialize};
-use std::path::Path;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tracing::info;
 
 /// Backtest/trading session report
@@ -112,5 +112,9 @@ pub fn create_run_dir(base: &str, run_id: &str) -> anyhow::Result<std::path::Pat
 /// Generate a unique run ID
 pub fn generate_run_id() -> String {
     let now = Utc::now();
-    format!("{}_{}", now.format("%Y%m%d_%H%M%S"), &uuid::Uuid::new_v4().to_string()[..8])
+    format!(
+        "{}_{}",
+        now.format("%Y%m%d_%H%M%S"),
+        &uuid::Uuid::new_v4().to_string()[..8]
+    )
 }

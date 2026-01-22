@@ -18,7 +18,7 @@
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use futures_util::{StreamExt, SinkExt};
+use futures_util::{SinkExt, StreamExt};
 use std::collections::VecDeque;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
@@ -26,9 +26,9 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use url::Url;
 
-use kubera_sbe::{SbeHeader, BinanceSbeDecoder, DepthUpdate, SBE_HEADER_SIZE};
-use kubera_options::replay::{DepthEvent, DepthLevel};
 use kubera_models::IntegrityTier;
+use kubera_options::replay::{DepthEvent, DepthLevel};
+use kubera_sbe::{BinanceSbeDecoder, DepthUpdate, SBE_HEADER_SIZE, SbeHeader};
 
 /// REST depth snapshot response from Binance.
 #[derive(Debug, serde::Deserialize)]
@@ -99,7 +99,8 @@ fn parse_to_mantissa_pure(s: &str, exponent: i8) -> Result<i64> {
             let next_digit = frac_part.chars().nth(target_decimals).unwrap_or('0');
             if next_digit >= '5' {
                 // Parse, increment, return
-                let mut val: i64 = mantissa_str.parse()
+                let mut val: i64 = mantissa_str
+                    .parse()
                     .with_context(|| format!("parse mantissa: {}", mantissa_str))?;
                 val += 1;
                 return Ok(if is_negative { -val } else { val });
@@ -114,7 +115,8 @@ fn parse_to_mantissa_pure(s: &str, exponent: i8) -> Result<i64> {
     }
 
     // Parse the combined string as i64
-    let val: i64 = mantissa_str.parse()
+    let val: i64 = mantissa_str
+        .parse()
         .with_context(|| format!("parse mantissa: {}", mantissa_str))?;
 
     Ok(if is_negative { -val } else { val })
@@ -269,8 +271,12 @@ pub async fn capture_sbe_depth_jsonl(
 
     let url = Url::parse(url_str)?;
     let mut request = url.into_client_request()?;
-    request.headers_mut().insert("X-MBX-APIKEY", api_key.parse()?);
-    request.headers_mut().insert("Sec-WebSocket-Protocol", "binance-sbe".parse()?);
+    request
+        .headers_mut()
+        .insert("X-MBX-APIKEY", api_key.parse()?);
+    request
+        .headers_mut()
+        .insert("Sec-WebSocket-Protocol", "binance-sbe".parse()?);
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(request)
         .await
@@ -311,7 +317,10 @@ pub async fn capture_sbe_depth_jsonl(
                 if bin.len() >= SBE_HEADER_SIZE {
                     if let Ok(header) = SbeHeader::decode(&bin[..SBE_HEADER_SIZE]) {
                         if header.template_id == 10003 {
-                            if let Ok(update) = BinanceSbeDecoder::decode_depth_update(&header, &bin[SBE_HEADER_SIZE..]) {
+                            if let Ok(update) = BinanceSbeDecoder::decode_depth_update(
+                                &header,
+                                &bin[SBE_HEADER_SIZE..],
+                            ) {
                                 initial_buffer.push_back(update);
                             }
                         }
@@ -358,13 +367,14 @@ pub async fn capture_sbe_depth_jsonl(
         if update.first_update_id <= snapshot_last_id + 1
             && snapshot_last_id + 1 <= update.last_update_id
         {
-            println!("Bootstrap sync found in buffer: U={}, u={}, snapshot={}",
-                update.first_update_id, update.last_update_id, snapshot_last_id);
+            println!(
+                "Bootstrap sync found in buffer: U={}, u={}, snapshot={}",
+                update.first_update_id, update.last_update_id, snapshot_last_id
+            );
 
             // Write snapshot first
-            let snapshot_event = snapshot_to_depth_event(
-                &snapshot, &sym_upper, price_exponent, qty_exponent
-            )?;
+            let snapshot_event =
+                snapshot_to_depth_event(&snapshot, &sym_upper, price_exponent, qty_exponent)?;
             let line = serde_json::to_string(&snapshot_event)?;
             file.write_all(line.as_bytes()).await?;
             file.write_all(b"\n").await?;
@@ -375,9 +385,8 @@ pub async fn capture_sbe_depth_jsonl(
             let mut last_update_id = snapshot_last_id;
             for buffered in diff_buffer.iter() {
                 if buffered.first_update_id > snapshot_last_id {
-                    let event = sbe_depth_to_event(
-                        buffered, &sym_upper, price_exponent, qty_exponent
-                    );
+                    let event =
+                        sbe_depth_to_event(buffered, &sym_upper, price_exponent, qty_exponent);
                     let line = serde_json::to_string(&event)?;
                     file.write_all(line.as_bytes()).await?;
                     file.write_all(b"\n").await?;
@@ -426,7 +435,10 @@ pub async fn capture_sbe_depth_jsonl(
                     continue;
                 }
 
-                let update = match BinanceSbeDecoder::decode_depth_update(&header, &bin[SBE_HEADER_SIZE..]) {
+                let update = match BinanceSbeDecoder::decode_depth_update(
+                    &header,
+                    &bin[SBE_HEADER_SIZE..],
+                ) {
                     Ok(u) => u,
                     Err(e) => {
                         eprintln!("SBE decode error: {}", e);
@@ -444,10 +456,12 @@ pub async fn capture_sbe_depth_jsonl(
                         if update.first_update_id <= snapshot_last_id + 1
                             && snapshot_last_id + 1 <= update.last_update_id
                         {
-
                             // Write snapshot first
                             let snapshot_event = snapshot_to_depth_event(
-                                &snapshot, &sym_upper, price_exponent, qty_exponent
+                                &snapshot,
+                                &sym_upper,
+                                price_exponent,
+                                qty_exponent,
                             )?;
                             let line = serde_json::to_string(&snapshot_event)?;
                             file.write_all(line.as_bytes()).await?;
@@ -459,7 +473,10 @@ pub async fn capture_sbe_depth_jsonl(
                             while let Some(buffered) = diff_buffer.pop_front() {
                                 if buffered.first_update_id > snapshot_last_id {
                                     let event = sbe_depth_to_event(
-                                        &buffered, &sym_upper, price_exponent, qty_exponent
+                                        &buffered,
+                                        &sym_upper,
+                                        price_exponent,
+                                        qty_exponent,
                                     );
                                     let line = serde_json::to_string(&event)?;
                                     file.write_all(line.as_bytes()).await?;
@@ -469,7 +486,7 @@ pub async fn capture_sbe_depth_jsonl(
                             }
 
                             state = BootstrapState::Ready {
-                                last_update_id: update.last_update_id
+                                last_update_id: update.last_update_id,
                             };
                             println!("Bootstrap complete, now capturing...");
                         }
@@ -494,9 +511,8 @@ pub async fn capture_sbe_depth_jsonl(
                             // But we record the gap in stats
                         }
 
-                        let event = sbe_depth_to_event(
-                            &update, &sym_upper, price_exponent, qty_exponent
-                        );
+                        let event =
+                            sbe_depth_to_event(&update, &sym_upper, price_exponent, qty_exponent);
                         let line = serde_json::to_string(&event)?;
                         file.write_all(line.as_bytes()).await?;
                         file.write_all(b"\n").await?;
@@ -522,8 +538,10 @@ pub async fn capture_sbe_depth_jsonl(
     file.flush().await?;
 
     if !stats.snapshot_written {
-        bail!("Bootstrap failed: never synced with snapshot. \
-            This may indicate a timing issue - try again or increase buffer time.");
+        bail!(
+            "Bootstrap failed: never synced with snapshot. \
+            This may indicate a timing issue - try again or increase buffer time."
+        );
     }
 
     Ok(stats)
@@ -582,12 +600,8 @@ mod tests {
     fn test_snapshot_to_depth_event() {
         let snapshot = DepthSnapshot {
             last_update_id: 12345,
-            bids: vec![
-                ["90000.00".to_string(), "1.5".to_string()],
-            ],
-            asks: vec![
-                ["90001.00".to_string(), "2.0".to_string()],
-            ],
+            bids: vec![["90000.00".to_string(), "1.5".to_string()]],
+            asks: vec![["90001.00".to_string(), "2.0".to_string()]],
         };
 
         let event = snapshot_to_depth_event(&snapshot, "BTCUSDT", -2, -8).unwrap();

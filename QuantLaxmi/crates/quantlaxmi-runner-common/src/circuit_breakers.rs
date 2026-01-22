@@ -13,10 +13,10 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tracing::{warn, error, info};
+use tracing::{error, info, warn};
 
 /// Rate limiter using token bucket algorithm
 pub struct RateLimiter {
@@ -128,7 +128,9 @@ impl LatencyCircuitBreaker {
             if percentile_latency > self.threshold_ms {
                 self.trip(format!(
                     "p{:.0} latency {:.1}ms exceeds threshold {:.1}ms",
-                    self.percentile * 100.0, percentile_latency, self.threshold_ms
+                    self.percentile * 100.0,
+                    percentile_latency,
+                    self.threshold_ms
                 ));
                 return false;
             }
@@ -215,7 +217,8 @@ impl OrderFlowMonitor {
             self.is_tripped = true;
             self.trip_reason = Some(format!(
                 "Order rate exceeded: {} orders in {:?} window",
-                self.order_times.len(), self.window
+                self.order_times.len(),
+                self.window
             ));
             error!("[ORDER_FLOW] {}", self.trip_reason.as_ref().unwrap());
             return false;
@@ -238,7 +241,8 @@ impl OrderFlowMonitor {
             self.is_tripped = true;
             self.trip_reason = Some(format!(
                 "Signal rate exceeded: {} signals in {:?} window",
-                self.signal_times.len(), self.window
+                self.signal_times.len(),
+                self.window
             ));
             error!("[ORDER_FLOW] {}", self.trip_reason.as_ref().unwrap());
             return false;
@@ -423,7 +427,10 @@ impl TradingCircuitBreakers {
             return false;
         }
 
-        if self.latency_breaker.is_tripped() || self.order_flow.is_tripped() || self.drawdown_breaker.is_tripped() {
+        if self.latency_breaker.is_tripped()
+            || self.order_flow.is_tripped()
+            || self.drawdown_breaker.is_tripped()
+        {
             self.trip_count.fetch_add(1, Ordering::Relaxed);
             return false;
         }
@@ -440,7 +447,10 @@ impl TradingCircuitBreakers {
             return false;
         }
 
-        if self.latency_breaker.is_tripped() || self.order_flow.is_tripped() || self.drawdown_breaker.is_tripped() {
+        if self.latency_breaker.is_tripped()
+            || self.order_flow.is_tripped()
+            || self.drawdown_breaker.is_tripped()
+        {
             self.trip_count.fetch_add(1, Ordering::Relaxed);
             return false;
         }
@@ -483,7 +493,10 @@ impl TradingCircuitBreakers {
             status.push("ORDER_FLOW".to_string());
         }
         if self.drawdown_breaker.is_tripped() {
-            status.push(format!("DRAWDOWN({:.1}%)", self.drawdown_breaker.current_drawdown_pct(current_equity)));
+            status.push(format!(
+                "DRAWDOWN({:.1}%)",
+                self.drawdown_breaker.current_drawdown_pct(current_equity)
+            ));
         }
 
         if status.is_empty() {

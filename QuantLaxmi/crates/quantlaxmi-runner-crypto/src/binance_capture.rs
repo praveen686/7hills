@@ -38,7 +38,8 @@ struct BookTickerEvent {
 }
 
 fn parse_f64(s: &str) -> Result<f64> {
-    Ok(s.parse::<f64>().with_context(|| format!("parse f64: {}", s))?)
+    Ok(s.parse::<f64>()
+        .with_context(|| format!("parse f64: {}", s))?)
 }
 
 fn parse_u32_qty(s: &str) -> Result<u32> {
@@ -53,7 +54,11 @@ fn ms_to_dt(ms: i64) -> DateTime<Utc> {
         .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap())
 }
 
-pub async fn capture_book_ticker_jsonl(symbol: &str, out_path: &Path, duration_secs: u64) -> Result<()> {
+pub async fn capture_book_ticker_jsonl(
+    symbol: &str,
+    out_path: &Path,
+    duration_secs: u64,
+) -> Result<()> {
     let sym = symbol.to_lowercase();
     let url = format!("wss://stream.binance.com:9443/ws/{}@bookTicker", sym);
 
