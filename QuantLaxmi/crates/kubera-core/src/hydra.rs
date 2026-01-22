@@ -3229,11 +3229,11 @@ pub struct HydraStrategy {
     kill_switch: KillSwitchPolicy,
     /// Configuration
     config: HydraConfig,
-    /// Current position
-    position: f64,
-    /// Current price
-    current_price: f64,
-    /// Tick counter
+    /// Current position per symbol (multi-symbol correctness fix)
+    positions: HashMap<String, f64>,
+    /// Current price per symbol (multi-symbol correctness fix)
+    current_prices: HashMap<String, f64>,
+    /// Tick counter (global, monotonic)
     tick_count: u64,
     /// Active intents awaiting execution
     active_intents: HashMap<Uuid, ExpertIntent>,
@@ -3245,8 +3245,8 @@ pub struct HydraStrategy {
     signal_history: HashMap<String, VecDeque<f64>>,
     /// Execution guard to prevent re-entrant stack buildup
     is_processing: bool,
-    /// V2: Last trade tick for cooldown
-    last_trade_tick: u64,
+    /// V2: Last trade tick per symbol for cooldown (multi-symbol correctness fix)
+    last_trade_tick_by_symbol: HashMap<String, u64>,
     /// PROJECT AEON: Informational predictability score (0.0 - 1.0)
     pub aeon_bif_score: f64,
     /// OPTIONS: Greeks-based risk manager
@@ -3316,15 +3316,15 @@ impl HydraStrategy {
             exec_gate: ExecutionQualityGate::new(),
             kill_switch: KillSwitchPolicy::new(Arc::clone(&kill_switch_flag)),
             config,
-            position: 0.0,
-            current_price: 0.0,
+            positions: HashMap::new(),
+            current_prices: HashMap::new(),
             tick_count: 0,
             active_intents: HashMap::new(),
             kill_switch_flag,
             price_history: VecDeque::with_capacity(100),
             signal_history: HashMap::new(),
             is_processing: false,
-            last_trade_tick: 0,
+            last_trade_tick_by_symbol: HashMap::new(),
             aeon_bif_score: 1.0, // Default to full scale for standalone use
             greeks_manager,
             implied_vol: 0.15, // Default IV 15%
@@ -3420,9 +3420,13 @@ impl HydraStrategy {
             return;
         }
         self.is_processing = true;
-        
-        self.current_price = price;
+
+        // Update per-symbol price (multi-symbol correctness)
+        self.current_prices.insert(symbol.to_string(), price);
         self.tick_count += 1;
+
+        // Get current position for this symbol
+        let current_pos = *self.positions.get(symbol).unwrap_or(&0.0);
 
         // Check kill switch
         if self.kill_switch.is_triggered() || self.kill_switch_flag.load(Ordering::SeqCst) {
@@ -3581,7 +3585,7 @@ impl HydraStrategy {
             {
                 // PRODUCTION: Real Greeks from kubera_options Black-Scholes
                 greeks_mgr.update_from_option(
-                    self.position,
+                    current_pos,
                     price,
                     strike,
                     tte,
@@ -3592,7 +3596,7 @@ impl HydraStrategy {
             } else {
                 // FALLBACK: Crude ATM estimates (backtest mode only)
                 #[allow(deprecated)]
-                greeks_mgr.update_from_position(self.position, price, self.implied_vol);
+                greeks_mgr.update_from_position(current_pos, price, self.implied_vol);
             }
 
             // Apply Greeks-based risk scalar
@@ -3727,29 +3731,30 @@ impl HydraStrategy {
 
         // --- MASTERPIECE: TRAILING ALPHA-STOP ---
         // If we are long but signal is strongly reversed, close position immediately
-        let is_reversal = (self.position > 0.0 && portfolio_signal < -0.4) || (self.position < 0.0 && portfolio_signal > 0.4);
-        
+        let is_reversal = (current_pos > 0.0 && portfolio_signal < -0.4) || (current_pos < 0.0 && portfolio_signal > 0.4);
+
         // Position change with hysteresis
-        let position_change = target_pos - self.position;
+        let position_change = target_pos - current_pos;
         let mut should_trade = position_change.abs() > self.config.position_hysteresis;
 
-        // V2: Trade cooldown - minimum 50 ticks between trades to avoid commission churn
+        // V2: Trade cooldown - minimum 50 ticks between trades to avoid commission churn (per-symbol)
         const MIN_TICKS_BETWEEN_TRADES: u64 = 50;
-        if self.tick_count - self.last_trade_tick < MIN_TICKS_BETWEEN_TRADES && self.last_trade_tick > 0 {
-            debug!("[HYDRA] Trade cooldown active ({} ticks since last trade)", self.tick_count - self.last_trade_tick);
+        let last_trade_tick = *self.last_trade_tick_by_symbol.get(symbol).unwrap_or(&0);
+        if self.tick_count - last_trade_tick < MIN_TICKS_BETWEEN_TRADES && last_trade_tick > 0 {
+            debug!("[HYDRA] Trade cooldown active for {} ({} ticks since last trade)", symbol, self.tick_count - last_trade_tick);
             self.is_processing = false;
             return;
         }
 
         if is_reversal && !should_trade {
-            info!("[HYDRA] Trailing Alpha-Stop triggered (Reversal detected) - Closing position");
+            info!("[HYDRA] Trailing Alpha-Stop triggered (Reversal detected) - Closing {} position", symbol);
             target_pos = 0.0;
             should_trade = true;
         }
 
         if should_trade {
-            let side = if target_pos > self.position { Side::Buy } else { Side::Sell };
-            let raw_qty = (target_pos - self.position).abs();
+            let side = if target_pos > current_pos { Side::Buy } else { Side::Sell };
+            let raw_qty = (target_pos - current_pos).abs();
 
             // Get lot size for this symbol (per-symbol or default)
             let lot_size = self.get_lot_size_for_symbol(symbol);
@@ -3804,9 +3809,9 @@ impl HydraStrategy {
                 }
             }
 
-            self.position = target_pos;
-            self.last_trade_tick = self.tick_count;
-            info!("[HYDRA] Position updated: {:.3} -> {:.3}", self.position - position_change, self.position);
+            self.positions.insert(symbol.to_string(), target_pos);
+            self.last_trade_tick_by_symbol.insert(symbol.to_string(), self.tick_count);
+            info!("[HYDRA] {} position updated: {:.3} -> {:.3}", symbol, current_pos, target_pos);
         }
         
         // Reset processing guard
@@ -3895,29 +3900,30 @@ impl crate::Strategy for HydraStrategy {
     fn on_fill(&mut self, fill: &OrderEvent) {
         if let OrderPayload::Update { filled_quantity, avg_price, commission, status } = &fill.payload {
             if *status == kubera_models::OrderStatus::Filled || *status == kubera_models::OrderStatus::PartiallyFilled {
+                let symbol = &fill.symbol;
+
                 // Find matching intent and record attribution
                 // In production, we'd match by order ID; here we use the most recent intent
                 if let Some((intent_id, _)) = self.active_intents.iter().next() {
                     let intent_id = *intent_id;
+                    let current_price = *self.current_prices.get(symbol).unwrap_or(avg_price);
                     self.ledger.record_fill(
                         intent_id,
                         *avg_price,
                         *filled_quantity,
                         *commission,
-                        self.current_price,
+                        current_price,
                     );
                     self.active_intents.remove(&intent_id);
                 }
 
-                // UPDATE POSITION TO PREVENT RECURSIVE SIGNAL LOOPS
-                let position_delta = match &fill.side {
-                    Side::Buy => *filled_quantity,
-                    Side::Sell => -*filled_quantity,
-                };
-                self.position += position_delta;
+                // NOTE: Position already updated in execute_logic when signal was emitted.
+                // on_fill is for attribution/logging only. If we also updated here, we'd double-count.
+                // In a proper architecture, Portfolio/Exchange tracks actual positions, not strategy.
+                let pos = *self.positions.get(symbol).unwrap_or(&0.0);
 
-                info!("[HYDRA] Fill processed: {:.4} @ {:.2} (commission: {:.4}) | Position updated: {:.4}",
-                    filled_quantity, avg_price, commission, self.position);
+                info!("[HYDRA] {} fill processed: {:.4} @ {:.2} (commission: {:.4}) | Position: {:.4}",
+                    symbol, filled_quantity, avg_price, commission, pos);
             }
         }
     }

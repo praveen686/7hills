@@ -149,6 +149,114 @@ pub enum CommissionModel {
     ZerodhaFnO,
 }
 
+// ============================================================================
+// RISK ENVELOPE (venue-level position/notional limits)
+// ============================================================================
+
+/// Risk enforcement mode for when limits are exceeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RiskMode {
+    /// Clip order quantity to fit within limits (research/backtest).
+    Clip,
+    /// Reject orders that exceed limits (strict/certification).
+    Reject,
+}
+
+/// Venue-level risk envelope for position and notional limits.
+///
+/// Enforced at the exchange boundary to prevent strategy bugs from causing
+/// catastrophic exposure. All limits are in USD for cross-asset consistency.
+///
+/// # Example
+/// ```rust
+/// let envelope = RiskEnvelope::for_equity(100_000.0); // $100k account
+/// // max_gross_notional_usd = $200k (2x)
+/// // max_symbol_notional_usd = $50k (0.5x)
+/// // max_order_notional_usd = $5k (0.05x)
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RiskEnvelope {
+    /// Maximum gross notional across all positions (sum of |pos * price|).
+    pub max_gross_notional_usd: f64,
+    /// Maximum notional per symbol.
+    pub max_symbol_notional_usd: f64,
+    /// Maximum notional per single order.
+    pub max_order_notional_usd: f64,
+    /// Enforcement mode (Clip or Reject).
+    pub mode: RiskMode,
+    /// Whether envelope is enabled.
+    pub enabled: bool,
+}
+
+impl RiskEnvelope {
+    /// Create a disabled (no-op) risk envelope.
+    pub fn disabled() -> Self {
+        Self {
+            max_gross_notional_usd: f64::MAX,
+            max_symbol_notional_usd: f64::MAX,
+            max_order_notional_usd: f64::MAX,
+            mode: RiskMode::Clip,
+            enabled: false,
+        }
+    }
+
+    /// Create a risk envelope sized for a given equity amount.
+    ///
+    /// Uses conservative defaults:
+    /// - max_gross_notional = 2x equity
+    /// - max_symbol_notional = 0.5x equity
+    /// - max_order_notional = 0.05x equity
+    pub fn for_equity(equity: f64) -> Self {
+        Self {
+            max_gross_notional_usd: 2.0 * equity,
+            max_symbol_notional_usd: 0.5 * equity,
+            max_order_notional_usd: 0.05 * equity,
+            mode: RiskMode::Clip,
+            enabled: true,
+        }
+    }
+
+    /// Create with explicit limits.
+    pub fn new(
+        max_gross_notional_usd: f64,
+        max_symbol_notional_usd: f64,
+        max_order_notional_usd: f64,
+        mode: RiskMode,
+    ) -> Self {
+        Self {
+            max_gross_notional_usd,
+            max_symbol_notional_usd,
+            max_order_notional_usd,
+            mode,
+            enabled: true,
+        }
+    }
+}
+
+impl Default for RiskEnvelope {
+    fn default() -> Self {
+        Self::disabled()
+    }
+}
+
+/// Audit record for risk enforcement actions.
+#[derive(Debug, Clone, Serialize)]
+pub struct RiskEvent {
+    pub timestamp: chrono::DateTime<Utc>,
+    pub symbol: String,
+    pub side: Side,
+    pub requested_qty: f64,
+    pub accepted_qty: f64,
+    pub price_used: f64,
+    pub order_notional: f64,
+    pub symbol_notional_before: f64,
+    pub symbol_notional_after: f64,
+    pub gross_notional_before: f64,
+    pub gross_notional_after: f64,
+    pub rule_triggered: String, // "MAX_ORDER", "MAX_SYMBOL", "MAX_GROSS", "NONE"
+    pub action: String,          // "CLIP", "REJECT", "PASS"
+}
+
 /// High-fidelity simulated execution venue.
 ///
 /// # Architecture
@@ -171,6 +279,12 @@ pub struct SimulatedExchange {
     rng: Pcg64,
     /// Internal simulation clock synchronized with market data.
     current_time: chrono::DateTime<chrono::Utc>,
+    /// Last known prices per symbol (for notional calculations).
+    last_prices: HashMap<String, f64>,
+    /// Risk envelope for position/notional limits.
+    risk_envelope: RiskEnvelope,
+    /// Risk event log for audit trail.
+    risk_events: Vec<RiskEvent>,
 }
 
 impl SimulatedExchange {
@@ -195,7 +309,161 @@ impl SimulatedExchange {
             commission_model,
             rng,
             current_time: Utc::now(),
+            last_prices: HashMap::new(),
+            risk_envelope: RiskEnvelope::disabled(),
+            risk_events: Vec::new(),
         }
+    }
+
+    /// Create a new simulated exchange with a risk envelope.
+    ///
+    /// # Parameters
+    /// * `bus` - Shared event distribution system.
+    /// * `slippage_bps` - Expected price impact/cost in basis points.
+    /// * `commission_model` - Fees model to apply.
+    /// * `seed` - Optional seed for the PRNG to enable reproducible runs.
+    /// * `risk_envelope` - Risk limits for position/notional enforcement.
+    pub fn with_risk_envelope(
+        bus: Arc<EventBus>,
+        slippage_bps: f64,
+        commission_model: CommissionModel,
+        seed: Option<u64>,
+        risk_envelope: RiskEnvelope,
+    ) -> Self {
+        let rng = match seed {
+            Some(s) => Pcg64::seed_from_u64(s),
+            None => Pcg64::from_entropy(),
+        };
+
+        Self {
+            bus,
+            pending_orders: HashMap::new(),
+            positions: HashMap::new(),
+            slippage_bps,
+            commission_model,
+            rng,
+            current_time: Utc::now(),
+            last_prices: HashMap::new(),
+            risk_envelope,
+            risk_events: Vec::new(),
+        }
+    }
+
+    /// Get a reference to the risk events log.
+    pub fn risk_events(&self) -> &[RiskEvent] {
+        &self.risk_events
+    }
+
+    /// Calculate current gross notional across all positions.
+    fn gross_notional(&self) -> f64 {
+        self.positions.iter().map(|(sym, pos)| {
+            let price = self.last_prices.get(sym).copied().unwrap_or(0.0);
+            pos.quantity.abs() * price
+        }).sum()
+    }
+
+    /// Calculate current notional for a specific symbol.
+    fn symbol_notional(&self, symbol: &str) -> f64 {
+        let pos = self.positions.get(symbol).map(|p| p.quantity.abs()).unwrap_or(0.0);
+        let price = self.last_prices.get(symbol).copied().unwrap_or(0.0);
+        pos * price
+    }
+
+    /// Enforce risk envelope on an order, returning the accepted quantity.
+    ///
+    /// Returns (accepted_qty, rule_triggered, action).
+    fn enforce_risk(&mut self, symbol: &str, side: Side, requested_qty: f64, price: f64) -> (f64, String, String) {
+        if !self.risk_envelope.enabled {
+            return (requested_qty, "NONE".to_string(), "PASS".to_string());
+        }
+
+        let order_notional = requested_qty * price;
+        let current_symbol_notional = self.symbol_notional(symbol);
+        let current_gross_notional = self.gross_notional();
+
+        // Get current position for the symbol
+        let current_pos = self.positions.get(symbol).map(|p| p.quantity).unwrap_or(0.0);
+        let delta = if side == Side::Buy { requested_qty } else { -requested_qty };
+        let new_pos = current_pos + delta;
+        let new_symbol_notional = new_pos.abs() * price;
+
+        // Calculate new gross notional (sum of all |position * price|)
+        let new_gross_notional = current_gross_notional - current_symbol_notional + new_symbol_notional;
+
+        // Check limits in order: ORDER -> SYMBOL -> GROSS
+        // 1. Max order notional
+        if order_notional > self.risk_envelope.max_order_notional_usd {
+            let max_qty = self.risk_envelope.max_order_notional_usd / price;
+            match self.risk_envelope.mode {
+                RiskMode::Clip => {
+                    warn!(
+                        "[RISK] MAX_ORDER exceeded: requested ${:.0} > limit ${:.0}, clipping to {:.4} units",
+                        order_notional, self.risk_envelope.max_order_notional_usd, max_qty
+                    );
+                    return (max_qty, "MAX_ORDER".to_string(), "CLIP".to_string());
+                }
+                RiskMode::Reject => {
+                    warn!(
+                        "[RISK] MAX_ORDER exceeded: requested ${:.0} > limit ${:.0}, REJECTING",
+                        order_notional, self.risk_envelope.max_order_notional_usd
+                    );
+                    return (0.0, "MAX_ORDER".to_string(), "REJECT".to_string());
+                }
+            }
+        }
+
+        // 2. Max symbol notional (position after fill)
+        if new_symbol_notional > self.risk_envelope.max_symbol_notional_usd {
+            // Calculate max qty that keeps us under the limit
+            let max_new_pos = self.risk_envelope.max_symbol_notional_usd / price;
+            let max_delta = if side == Side::Buy {
+                (max_new_pos - current_pos).max(0.0)
+            } else {
+                (current_pos + max_new_pos).max(0.0)
+            };
+
+            match self.risk_envelope.mode {
+                RiskMode::Clip => {
+                    warn!(
+                        "[RISK] MAX_SYMBOL exceeded: new notional ${:.0} > limit ${:.0}, clipping to {:.4} units",
+                        new_symbol_notional, self.risk_envelope.max_symbol_notional_usd, max_delta
+                    );
+                    return (max_delta, "MAX_SYMBOL".to_string(), "CLIP".to_string());
+                }
+                RiskMode::Reject => {
+                    warn!(
+                        "[RISK] MAX_SYMBOL exceeded: new notional ${:.0} > limit ${:.0}, REJECTING",
+                        new_symbol_notional, self.risk_envelope.max_symbol_notional_usd
+                    );
+                    return (0.0, "MAX_SYMBOL".to_string(), "REJECT".to_string());
+                }
+            }
+        }
+
+        // 3. Max gross notional
+        if new_gross_notional > self.risk_envelope.max_gross_notional_usd {
+            let available = self.risk_envelope.max_gross_notional_usd - current_gross_notional + current_symbol_notional;
+            let max_qty = (available / price).max(0.0);
+
+            match self.risk_envelope.mode {
+                RiskMode::Clip => {
+                    warn!(
+                        "[RISK] MAX_GROSS exceeded: new gross ${:.0} > limit ${:.0}, clipping to {:.4} units",
+                        new_gross_notional, self.risk_envelope.max_gross_notional_usd, max_qty
+                    );
+                    return (max_qty, "MAX_GROSS".to_string(), "CLIP".to_string());
+                }
+                RiskMode::Reject => {
+                    warn!(
+                        "[RISK] MAX_GROSS exceeded: new gross ${:.0} > limit ${:.0}, REJECTING",
+                        new_gross_notional, self.risk_envelope.max_gross_notional_usd
+                    );
+                    return (0.0, "MAX_GROSS".to_string(), "REJECT".to_string());
+                }
+            }
+        }
+
+        (requested_qty, "NONE".to_string(), "PASS".to_string())
     }
 
     /// Calculates commission for a trade based on the configured model.
@@ -246,17 +514,74 @@ impl SimulatedExchange {
     pub async fn handle_order(&mut self, event: OrderEvent) -> anyhow::Result<()> {
         match event.payload {
             OrderPayload::New { symbol, side, price, quantity, .. } => {
-                info!("Accepted New Order: {} {} @ {:?}", side, symbol, price);
-                let order = OrderState { 
-                    id: event.order_id, 
+                // Get price for risk enforcement (use limit price or last known price)
+                let risk_price = price.or_else(|| self.last_prices.get(&symbol).copied()).unwrap_or(0.0);
+
+                // Enforce risk envelope
+                let symbol_notional_before = self.symbol_notional(&symbol);
+                let gross_notional_before = self.gross_notional();
+
+                let (accepted_qty, rule_triggered, action) = self.enforce_risk(&symbol, side, quantity, risk_price);
+
+                // Log risk event if envelope is enabled
+                if self.risk_envelope.enabled {
+                    let order_notional = accepted_qty * risk_price;
+
+                    // Calculate projected notional after fill
+                    let current_pos = self.positions.get(&symbol).map(|p| p.quantity).unwrap_or(0.0);
+                    let delta = if side == Side::Buy { accepted_qty } else { -accepted_qty };
+                    let new_pos = current_pos + delta;
+                    let symbol_notional_after = new_pos.abs() * risk_price;
+                    let gross_notional_after = gross_notional_before - symbol_notional_before + symbol_notional_after;
+
+                    let risk_event = RiskEvent {
+                        timestamp: self.current_time,
+                        symbol: symbol.clone(),
+                        side,
+                        requested_qty: quantity,
+                        accepted_qty,
+                        price_used: risk_price,
+                        order_notional,
+                        symbol_notional_before,
+                        symbol_notional_after,
+                        gross_notional_before,
+                        gross_notional_after,
+                        rule_triggered: rule_triggered.clone(),
+                        action: action.clone(),
+                    };
+                    self.risk_events.push(risk_event);
+                }
+
+                // Reject order entirely if accepted_qty is 0
+                if accepted_qty <= 0.0 {
+                    warn!("Order REJECTED by risk envelope: {} {} @ {:?}", side, symbol, price);
+                    self.bus.publish_order_update(OrderEvent {
+                        order_id: event.order_id,
+                        intent_id: event.intent_id,
+                        timestamp: self.current_time,
+                        symbol: event.symbol.clone(),
+                        side: event.side,
+                        payload: OrderPayload::Update {
+                            status: OrderStatus::Rejected,
+                            filled_quantity: 0.0,
+                            avg_price: 0.0,
+                            commission: 0.0,
+                        },
+                    })?;
+                    return Ok(());
+                }
+
+                info!("Accepted New Order: {} {} @ {:?} (qty: {:.4} of {:.4})", side, symbol, price, accepted_qty, quantity);
+                let order = OrderState {
+                    id: event.order_id,
                     intent_id: event.intent_id,
-                    symbol: symbol.clone(), 
-                    side, 
-                    price, 
-                    quantity 
+                    symbol: symbol.clone(),
+                    side,
+                    price,
+                    quantity: accepted_qty, // Use risk-adjusted quantity
                 };
                 self.pending_orders.entry(symbol).or_default().push(order);
-                
+
                 self.bus.publish_order_update(OrderEvent {
                     order_id: event.order_id,
                     intent_id: event.intent_id,
@@ -353,7 +678,10 @@ impl SimulatedExchange {
         };
         if let Some(price) = price {
             let symbol = event.symbol.clone();
-            
+
+            // Track last price for risk notional calculations
+            self.last_prices.insert(symbol.clone(), price);
+
             // 1. Collect potential matches to avoid borrow checker conflicts
             let mut fills = Vec::new();
             

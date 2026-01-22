@@ -34,6 +34,10 @@ path = "src/bin/backtest_aeon_export.rs"
 name = "record_zerodha_wal_l2"
 path = "src/bin/record_zerodha_wal_l2.rs"
 
+[[bin]]
+name = "replay_session"
+path = "src/bin/replay_session.rs"
+
 [dependencies]
 kubera-core = { path = "../kubera-core" }
 kubera-models = { path = "../kubera-models" }
