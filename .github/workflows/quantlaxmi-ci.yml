@@ -1,0 +1,96 @@
+name: QuantLaxmi CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  quantlaxmi:
+    name: Build, Clippy, Test, Isolation (QuantLaxmi)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: QuantLaxmi
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            QuantLaxmi/target/
+          key: ${{ runner.os }}-cargo-quantlaxmi-${{ hashFiles('QuantLaxmi/**/Cargo.lock') }}
+
+      - name: Formatting (QuantLaxmi crates only)
+        run: |
+          cargo fmt -p quantlaxmi-runner-common -- --check
+          cargo fmt -p quantlaxmi-runner-india -- --check
+          cargo fmt -p quantlaxmi-runner-crypto -- --check
+          cargo fmt -p quantlaxmi-connectors-zerodha -- --check
+          cargo fmt -p quantlaxmi-connectors-binance -- --check
+
+      - name: Build (debug)
+        run: |
+          cargo build -p quantlaxmi-india
+          cargo build -p quantlaxmi-crypto
+
+      - name: Clippy (strict on QuantLaxmi crates)
+        run: |
+          cargo clippy -p quantlaxmi-runner-common -- -D warnings
+          cargo clippy -p quantlaxmi-runner-india -- -D warnings
+          cargo clippy -p quantlaxmi-runner-crypto -- -D warnings
+          cargo clippy -p quantlaxmi-connectors-zerodha -- -D warnings
+          cargo clippy -p quantlaxmi-connectors-binance -- -D warnings
+
+      - name: Clippy (lenient on legacy crates still in workspace)
+        run: cargo clippy -p kubera-core -p kubera-options -p kubera-data || true
+
+      - name: Tests (runner-common)
+        run: cargo test -p quantlaxmi-runner-common --lib
+
+      - name: Tests (runner-india)
+        run: cargo test -p quantlaxmi-runner-india --lib
+
+      - name: Tests (runner-crypto)
+        run: cargo test -p quantlaxmi-runner-crypto --lib
+
+      - name: Verify fixtures exist + are valid JSON (first line)
+        run: |
+          test -f tests/fixtures/india/sample_quotes.jsonl
+          test -f tests/fixtures/crypto/sample_quotes.jsonl
+          head -1 tests/fixtures/india/sample_quotes.jsonl | python3 -c "import sys,json; json.load(sys.stdin)"
+          head -1 tests/fixtures/crypto/sample_quotes.jsonl | python3 -c "import sys,json; json.load(sys.stdin)"
+
+      - name: Build (release)
+        run: |
+          cargo build -p quantlaxmi-india --release
+          cargo build -p quantlaxmi-crypto --release
+
+      - name: Dependency isolation check
+        run: bash scripts/check_isolation.sh
+
+      - name: Verify CLI commands exist (release binaries)
+        run: |
+          ./target/release/quantlaxmi-india --help | grep -q "discover-zerodha"
+          ./target/release/quantlaxmi-india --help | grep -q "capture-zerodha"
+          ./target/release/quantlaxmi-india --help | grep -q "backtest-kitesim"
+          ./target/release/quantlaxmi-crypto --help | grep -q "capture-binance"
+          ./target/release/quantlaxmi-crypto --help | grep -q "capture-sbe-depth"
+          ./target/release/quantlaxmi-crypto --help | grep -q "exchange-info"
