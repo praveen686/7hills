@@ -40,6 +40,30 @@ struct AuthOutput {
     api_key: String,
 }
 
+/// Quote response from Kite API for real-time price fetching.
+#[derive(Debug, Deserialize)]
+struct KiteQuoteResponse {
+    status: String,
+    data: HashMap<String, KiteQuoteData>,
+}
+
+/// Individual quote data from Kite API.
+#[derive(Debug, Deserialize)]
+struct KiteQuoteData {
+    last_price: f64,
+    #[serde(default)]
+    ohlc: Option<KiteOhlc>,
+}
+
+/// OHLC data from Kite quote.
+#[derive(Debug, Deserialize)]
+struct KiteOhlc {
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
+}
+
 /// Capture statistics.
 #[derive(Debug, Default)]
 pub struct CaptureStats {
@@ -118,6 +142,54 @@ async fn fetch_instrument_tokens(
     }
 
     Ok(tokens)
+}
+
+/// Fetch real-time quotes from Kite Quote API.
+/// Returns a map of symbol -> (last_price, ohlc) for pre-market validation.
+pub async fn fetch_quotes(
+    api_key: &str,
+    access_token: &str,
+    symbols: &[String],
+) -> Result<HashMap<String, (f64, Option<(f64, f64, f64, f64)>)>> {
+    let client = reqwest::Client::new();
+
+    // Build query params: i=NFO:SYMBOL1&i=NFO:SYMBOL2...
+    let instruments: Vec<String> = symbols
+        .iter()
+        .map(|s| format!("NFO:{}", s.to_uppercase()))
+        .collect();
+    let query_str = instruments
+        .iter()
+        .map(|i| format!("i={}", i))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    let url = format!("{}/quote?{}", KITE_API_URL, query_str);
+    let response = client
+        .get(&url)
+        .header("X-Kite-Version", "3")
+        .header(
+            "Authorization",
+            format!("token {}:{}", api_key, access_token),
+        )
+        .send()
+        .await?;
+
+    let quote_resp: KiteQuoteResponse = response.json().await?;
+
+    if quote_resp.status != "success" {
+        bail!("Quote API returned status: {}", quote_resp.status);
+    }
+
+    let mut result = HashMap::new();
+    for (key, data) in quote_resp.data {
+        let ohlc = data.ohlc.map(|o| (o.open, o.high, o.low, o.close));
+        // Key is like "NFO:BANKNIFTY26JAN48000CE" - extract symbol part
+        let symbol = key.split(':').next_back().unwrap_or(&key).to_string();
+        result.insert(symbol, (data.last_price, ohlc));
+    }
+
+    Ok(result)
 }
 
 /// Parse binary tick data from Kite WebSocket.
