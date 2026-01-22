@@ -10,6 +10,7 @@
 #![allow(clippy::manual_is_multiple_of)]
 #![allow(clippy::redundant_closure)]
 #![allow(clippy::let_and_return)]
+#![allow(clippy::derivable_impls)]
 
 //! # QuantKubera Core Module
 //!
