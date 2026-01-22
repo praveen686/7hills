@@ -239,7 +239,8 @@ impl SymbolHandler {
             match sync_state {
                 SyncState::Buffering => {
                     if depth_buffer.len() >= 10
-                        || (depth_buffer.len() > 0 && last_pong.elapsed() > Duration::from_secs(2))
+                        || (!depth_buffer.is_empty()
+                            && last_pong.elapsed() > Duration::from_secs(2))
                     {
                         info!(symbol = %self.symbol, buffered = depth_buffer.len(), "Fetching snapshot for synchronization");
                         match self.fetch_snapshot().await {
@@ -288,24 +289,22 @@ impl SymbolHandler {
                                     .depth_updates_dropped
                                     .fetch_add(1, Ordering::Relaxed);
                             }
+                        } else if buffered.first_update_id == last_applied_u + 1 {
+                            last_applied_u = buffered.last_update_id;
+                            self.publish_depth_update(buffered.update, buffered.exchange_time)
+                                .await;
+                            self.stats
+                                .depth_updates_applied
+                                .fetch_add(1, Ordering::Relaxed);
+                        } else if buffered.first_update_id > last_applied_u + 1 {
+                            warn!(symbol = %self.symbol, expected = last_applied_u + 1, got = buffered.first_update_id, "Sequence gap detected in buffered updates");
+                            self.stats.sequence_gaps.fetch_add(1, Ordering::Relaxed);
+                            sync_state = SyncState::Resync;
+                            break;
                         } else {
-                            if buffered.first_update_id == last_applied_u + 1 {
-                                last_applied_u = buffered.last_update_id;
-                                self.publish_depth_update(buffered.update, buffered.exchange_time)
-                                    .await;
-                                self.stats
-                                    .depth_updates_applied
-                                    .fetch_add(1, Ordering::Relaxed);
-                            } else if buffered.first_update_id > last_applied_u + 1 {
-                                warn!(symbol = %self.symbol, expected = last_applied_u + 1, got = buffered.first_update_id, "Sequence gap detected in buffered updates");
-                                self.stats.sequence_gaps.fetch_add(1, Ordering::Relaxed);
-                                sync_state = SyncState::Resync;
-                                break;
-                            } else {
-                                self.stats
-                                    .depth_updates_dropped
-                                    .fetch_add(1, Ordering::Relaxed);
-                            }
+                            self.stats
+                                .depth_updates_dropped
+                                .fetch_add(1, Ordering::Relaxed);
                         }
                     }
 
@@ -420,6 +419,7 @@ impl SymbolHandler {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_depth_update(
         &self,
         header: &SbeHeader,

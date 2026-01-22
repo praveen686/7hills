@@ -12,7 +12,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use kubera_options::execution::{LegSide, LegStatus, MultiLegOrder};
@@ -300,24 +300,25 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
         slippage_bps_p99: quantile(&stats.slippage_samples_bps, 0.99),
     };
 
-    let mut report = BacktestReport::default();
-    report.created_at = Utc::now();
-    report.engine = "KiteSim".to_string();
-    report.venue = "NSE-Zerodha-Sim".to_string();
-    report.dataset = replay_path.to_string_lossy().to_string();
-    report.fill = fill.clone();
-    report.notes.push(format!("strategy={}", strategy_name));
+    let mut initial_notes = vec![format!("strategy={}", strategy_name)];
     if use_intents {
-        report.notes.push(format!(
+        initial_notes.push(format!(
             "intents_file={}",
             cfg.intents_path.as_ref().unwrap()
         ));
     } else {
-        report
-            .notes
-            .push(format!("orders_file={}", orders_path.to_string_lossy()));
+        initial_notes.push(format!("orders_file={}", orders_path.to_string_lossy()));
     }
-    report.notes.push(format!("qty_scale={}", cfg.qty_scale));
+    initial_notes.push(format!("qty_scale={}", cfg.qty_scale));
+
+    let mut report = BacktestReport {
+        created_at: Utc::now(),
+        engine: "KiteSim".to_string(),
+        venue: "NSE-Zerodha-Sim".to_string(),
+        dataset: replay_path.to_string_lossy().to_string(),
+        fill: fill.clone(),
+        notes: initial_notes,
+    };
 
     // Compute PnL from fills
     // Side info comes from the order legs (matched by index)

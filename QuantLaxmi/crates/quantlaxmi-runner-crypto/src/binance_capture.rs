@@ -38,8 +38,8 @@ struct BookTickerEvent {
 }
 
 fn parse_f64(s: &str) -> Result<f64> {
-    Ok(s.parse::<f64>()
-        .with_context(|| format!("parse f64: {}", s))?)
+    s.parse::<f64>()
+        .with_context(|| format!("parse f64: {}", s))
 }
 
 fn parse_u32_qty(s: &str) -> Result<u32> {

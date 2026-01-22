@@ -112,10 +112,10 @@ impl LatencyCircuitBreaker {
         }
 
         // Check if we should auto-reset after cooldown
-        if let Some(tripped_at) = self.tripped_at {
-            if tripped_at.elapsed() > self.cooldown {
-                self.reset();
-            }
+        if let Some(tripped_at) = self.tripped_at
+            && tripped_at.elapsed() > self.cooldown
+        {
+            self.reset();
         }
 
         if self.is_tripped.load(Ordering::Relaxed) {

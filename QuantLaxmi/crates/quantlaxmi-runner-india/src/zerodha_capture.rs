@@ -30,18 +30,14 @@ use kubera_options::replay::QuoteEvent;
 
 const KITE_API_URL: &str = "https://api.kite.trade";
 
+/// Tick data: (token, best_bid, best_ask, bid_qty, ask_qty)
+type TickData = (u32, f64, f64, u32, u32);
+
 /// Authentication response from Python sidecar.
 #[derive(Deserialize)]
 struct AuthOutput {
     access_token: String,
     api_key: String,
-}
-
-/// Quote response from Kite API.
-#[derive(Debug, Deserialize)]
-struct KiteQuoteResponse {
-    status: String,
-    data: HashMap<String, serde_json::Value>,
 }
 
 /// Capture statistics.
@@ -113,10 +109,10 @@ async fn fetch_instrument_tokens(
             let token_str = parts[0];
             let tradingsymbol = parts[2].to_uppercase();
 
-            if symbols_upper.contains(&tradingsymbol) {
-                if let Ok(token) = token_str.parse::<u32>() {
-                    tokens.push((tradingsymbol, token));
-                }
+            if symbols_upper.contains(&tradingsymbol)
+                && let Ok(token) = token_str.parse::<u32>()
+            {
+                tokens.push((tradingsymbol, token));
             }
         }
     }
@@ -146,7 +142,7 @@ async fn fetch_instrument_tokens(
 /// - Offset +0: Quantity (int32)
 /// - Offset +4: Price (int32, divide by 100)
 /// - Offset +8: Orders (int16) + padding (2 bytes)
-fn parse_tick(data: &[u8]) -> Option<Vec<(u32, f64, f64, u32, u32)>> {
+fn parse_tick(data: &[u8]) -> Option<Vec<TickData>> {
     if data.len() < 4 {
         return None;
     }
@@ -380,7 +376,7 @@ pub async fn capture_zerodha_quotes(
                             stats.events_written += 1;
 
                             // Progress indicator every 100 events
-                            if stats.events_written % 100 == 0 {
+                            if stats.events_written.is_multiple_of(100) {
                                 print!("\rCaptured {} events...", stats.events_written);
                                 std::io::Write::flush(&mut std::io::stdout())?;
                             }

@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -158,7 +158,7 @@ impl ExecutionEnv {
 }
 
 /// Input data sources with hashes
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InputSources {
     pub universe: Option<FileHash>,
     pub quotes: Option<FileHash>,
@@ -167,20 +167,8 @@ pub struct InputSources {
     pub config: Option<FileHash>,
 }
 
-impl Default for InputSources {
-    fn default() -> Self {
-        Self {
-            universe: None,
-            quotes: None,
-            depth_events: None,
-            orders: None,
-            config: None,
-        }
-    }
-}
-
 /// Output artifacts with hashes
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OutputArtifacts {
     pub fills: Option<FileHash>,
     pub report: Option<FileHash>,
@@ -188,19 +176,6 @@ pub struct OutputArtifacts {
     pub vectorbt_market: Option<FileHash>,
     pub vectorbt_fills: Option<FileHash>,
     pub vectorbt_summary: Option<FileHash>,
-}
-
-impl Default for OutputArtifacts {
-    fn default() -> Self {
-        Self {
-            fills: None,
-            report: None,
-            strategy_gates: None,
-            vectorbt_market: None,
-            vectorbt_fills: None,
-            vectorbt_summary: None,
-        }
-    }
 }
 
 /// Strategy gate decision record
@@ -541,17 +516,13 @@ impl IndiaContextValidator {
             || upper == "BANKNIFTY-I"  // Spot proxy
             || upper.contains("FUT");
 
-        if is_underlying {
-            if !self.underlying_symbols.contains(&upper) {
-                self.underlying_symbols.push(upper);
-            }
-        } else {
+        if is_underlying && !self.underlying_symbols.contains(&upper) {
+            self.underlying_symbols.push(upper);
+        } else if (upper.contains("CE") || upper.contains("PE"))
+            && !self.options_symbols.contains(&upper)
+        {
             // Options have CE/PE suffix
-            if upper.contains("CE") || upper.contains("PE") {
-                if !self.options_symbols.contains(&upper) {
-                    self.options_symbols.push(upper);
-                }
-            }
+            self.options_symbols.push(upper);
         }
     }
 

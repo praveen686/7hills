@@ -21,7 +21,7 @@ pub mod zerodha_capture;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tracing::{error, info};
+use tracing::info;
 
 pub use quantlaxmi_runner_common::{
     AppState, RunnerConfig, SymbolState,
@@ -31,7 +31,7 @@ pub use quantlaxmi_runner_common::{
 };
 
 use kubera_core::ExecutionMode;
-use quantlaxmi_connectors_zerodha::{AutoDiscoveryConfig, ZerodhaAutoDiscovery, ZerodhaConnector};
+use quantlaxmi_connectors_zerodha::{AutoDiscoveryConfig, ZerodhaAutoDiscovery};
 
 #[derive(Parser, Debug)]
 #[command(name = "quantlaxmi-india")]
@@ -314,9 +314,14 @@ async fn run_paper_mode(
 
     info!("Paper trading mode initialized");
     info!("Symbols: {:?}", config.mode.symbols);
+    info!("Initial capital: ${:.2}", initial_capital);
     info!("Press Ctrl+C to stop");
 
     tokio::signal::ctrl_c().await?;
+
+    // Log final state before shutdown
+    let state = app_state.lock().unwrap();
+    info!("Final equity: ${:.2}", state.equity);
     info!("Shutting down...");
 
     Ok(())
@@ -330,6 +335,7 @@ async fn run_live_mode(config_path: &str, initial_capital: f64) -> anyhow::Resul
 
     info!("Live trading mode initialized");
     info!("Symbols: {:?}", config.mode.symbols);
+    info!("Initial capital: ${:.2}", initial_capital);
     info!("⚠️  LIVE MODE - Real orders will be placed!");
     info!("Press Ctrl+C to stop");
 

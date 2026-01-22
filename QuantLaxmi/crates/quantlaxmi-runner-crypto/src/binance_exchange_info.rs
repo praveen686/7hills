@@ -22,12 +22,12 @@ struct SymbolInfo {
 #[serde(tag = "filterType")]
 enum Filter {
     #[serde(rename = "PRICE_FILTER")]
-    PriceFilter {
+    Price {
         #[serde(rename = "tickSize")]
         tick_size: String,
     },
     #[serde(rename = "LOT_SIZE")]
-    LotSize {
+    Lot {
         #[serde(rename = "stepSize")]
         step_size: String,
     },
@@ -47,8 +47,8 @@ fn decimals_from_str(s: &str) -> u32 {
 }
 
 fn parse_f64(s: &str) -> Result<f64> {
-    Ok(s.parse::<f64>()
-        .with_context(|| format!("parse f64: {}", s))?)
+    s.parse::<f64>()
+        .with_context(|| format!("parse f64: {}", s))
 }
 
 /// Compute qty_scale from LOT_SIZE stepSize.
@@ -90,10 +90,10 @@ pub fn fetch_spot_specs(symbols: &HashSet<String>) -> Result<HashMap<String, (f6
 
         for f in s.filters {
             match f {
-                Filter::PriceFilter { tick_size } => {
+                Filter::Price { tick_size } => {
                     tick = Some(parse_f64(&tick_size)?);
                 }
-                Filter::LotSize { step_size } => {
+                Filter::Lot { step_size } => {
                     step = Some(step_size);
                 }
                 _ => {}

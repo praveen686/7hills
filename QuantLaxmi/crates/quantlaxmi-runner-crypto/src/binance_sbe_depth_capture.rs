@@ -68,8 +68,8 @@ fn parse_to_mantissa_pure(s: &str, exponent: i8) -> Result<i64> {
     }
 
     // Handle negative numbers
-    let (is_negative, s) = if s.starts_with('-') {
-        (true, &s[1..])
+    let (is_negative, s) = if let Some(stripped) = s.strip_prefix('-') {
+        (true, stripped)
     } else {
         (false, s)
     };
@@ -314,17 +314,13 @@ pub async fn capture_sbe_depth_jsonl(
                 }
             }
             Ok(Some(Ok(Message::Binary(bin)))) => {
-                if bin.len() >= SBE_HEADER_SIZE {
-                    if let Ok(header) = SbeHeader::decode(&bin[..SBE_HEADER_SIZE]) {
-                        if header.template_id == 10003 {
-                            if let Ok(update) = BinanceSbeDecoder::decode_depth_update(
-                                &header,
-                                &bin[SBE_HEADER_SIZE..],
-                            ) {
-                                initial_buffer.push_back(update);
-                            }
-                        }
-                    }
+                if bin.len() >= SBE_HEADER_SIZE
+                    && let Ok(header) = SbeHeader::decode(&bin[..SBE_HEADER_SIZE])
+                    && header.template_id == 10003
+                    && let Ok(update) =
+                        BinanceSbeDecoder::decode_depth_update(&header, &bin[SBE_HEADER_SIZE..])
+                {
+                    initial_buffer.push_back(update);
                 }
             }
             _ => {}
@@ -365,7 +361,7 @@ pub async fn capture_sbe_depth_jsonl(
     // Since we fetched snapshot after buffering, the sync point might already be in the buffer
     for update in diff_buffer.iter() {
         if update.first_update_id <= snapshot_last_id + 1
-            && snapshot_last_id + 1 <= update.last_update_id
+            && snapshot_last_id < update.last_update_id
         {
             println!(
                 "Bootstrap sync found in buffer: U={}, u={}, snapshot={}",
@@ -454,7 +450,7 @@ pub async fn capture_sbe_depth_jsonl(
                         // Check if this diff can be used to sync with snapshot
                         // Condition: U <= lastUpdateId+1 <= u
                         if update.first_update_id <= snapshot_last_id + 1
-                            && snapshot_last_id + 1 <= update.last_update_id
+                            && snapshot_last_id < update.last_update_id
                         {
                             // Write snapshot first
                             let snapshot_event = snapshot_to_depth_event(

@@ -10,13 +10,12 @@ use crossterm::{
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table},
+    layout::Rect,
+    style::{Color, Style},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 use std::io::Stdout;
 use std::time::Duration;
-use tracing::info;
 
 pub type TuiTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -49,10 +48,10 @@ pub fn print_headless_banner(service_name: &str, initial_capital: f64) {
 
 /// Check for quit key press (non-blocking)
 pub fn check_quit_key() -> bool {
-    if event::poll(Duration::from_millis(50)).unwrap_or(false) {
-        if let Ok(CEvent::Key(key)) = event::read() {
-            return key.code == KeyCode::Char('q') || key.code == KeyCode::Esc;
-        }
+    if event::poll(Duration::from_millis(50)).unwrap_or(false)
+        && let Ok(CEvent::Key(key)) = event::read()
+    {
+        return key.code == KeyCode::Char('q') || key.code == KeyCode::Esc;
     }
     false
 }
@@ -77,7 +76,7 @@ pub fn render_status_panel(
 
     let paragraph = Paragraph::new(text)
         .block(block)
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(pnl_color));
 
     frame.render_widget(paragraph, area);
 }

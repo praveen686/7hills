@@ -1,3 +1,16 @@
+// Legacy crate - suppress clippy warnings pending migration
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::collapsible_else_if)]
+#![allow(clippy::redundant_pattern_matching)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::manual_strip)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::clone_on_copy)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::manual_is_multiple_of)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::let_and_return)]
+
 //! # QuantKubera Core Module
 //!
 //! Provides the central event bus and core abstractions for the trading system.

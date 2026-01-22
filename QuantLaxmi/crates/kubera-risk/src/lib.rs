@@ -1,3 +1,6 @@
+// Legacy crate - suppress clippy warnings pending migration
+#![allow(clippy::collapsible_if)]
+
 //! # Risk Management Engine Module
 //!
 //! Pre-trade risk checks and position limits enforcement.

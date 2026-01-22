@@ -281,18 +281,18 @@ impl ZerodhaConnector {
                 .send()
                 .await?;
 
-            if let Ok(quote_resp) = response.json::<KiteQuoteResponse>().await {
-                if quote_resp.status == "success" {
-                    for (key, _) in quote_resp.data {
-                        // Key contains the instrument token info
-                        // We need to fetch it from instruments API
-                        tokens.push((
-                            symbol.clone(),
-                            self.lookup_token(&key, api_key, access_token)
-                                .await
-                                .unwrap_or(0),
-                        ));
-                    }
+            if let Ok(quote_resp) = response.json::<KiteQuoteResponse>().await
+                && quote_resp.status == "success"
+            {
+                for (key, _) in quote_resp.data {
+                    // Key contains the instrument token info
+                    // We need to fetch it from instruments API
+                    tokens.push((
+                        symbol.clone(),
+                        self.lookup_token(&key, api_key, access_token)
+                            .await
+                            .unwrap_or(0),
+                    ));
                 }
             }
         }
@@ -1184,7 +1184,7 @@ impl ZerodhaAutoDiscovery {
             ));
         }
 
-        for (_, quote) in quote_resp.data {
+        if let Some((_, quote)) = quote_resp.data.into_iter().next() {
             return Ok(quote.last_price);
         }
 

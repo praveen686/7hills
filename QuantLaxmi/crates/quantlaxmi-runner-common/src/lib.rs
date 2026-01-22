@@ -33,8 +33,8 @@ pub use web_server::{ServerState, WebMessage, start_server};
 use kubera_core::ExecutionMode;
 use kubera_core::{MetricsConfig, TradingMetrics};
 use kubera_data::Level2Book;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
 use tracing::info;
 
 /// Volatile state for a single instrument tracking.
