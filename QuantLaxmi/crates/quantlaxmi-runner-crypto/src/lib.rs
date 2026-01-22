@@ -19,7 +19,9 @@
 pub mod binance_capture;
 pub mod binance_exchange_info;
 pub mod binance_sbe_depth_capture;
+pub mod binance_trades_capture;
 pub mod paper_trading;
+pub mod session_capture;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -86,6 +88,60 @@ pub enum Commands {
 
         /// Strict sequencing mode (default: true). Fails capture if sequence gaps detected.
         /// Gaps break deterministic replay, so certified captures must have strict=true.
+        #[arg(long, default_value_t = true)]
+        strict: bool,
+    },
+
+    /// Capture Binance SBE trades stream into TradeEvent JSONL (certified)
+    CaptureTrades {
+        /// Symbol, e.g. BTCUSDT
+        #[arg(long)]
+        symbol: String,
+
+        /// Output path, e.g. data/replay/binance/BTCUSDT_trades.jsonl
+        #[arg(long)]
+        out: String,
+
+        /// Capture duration in seconds
+        #[arg(long, default_value_t = 300)]
+        duration_secs: u64,
+
+        /// Price exponent for scaled integers (e.g., -2 for 2 decimal places)
+        #[arg(long, default_value_t = -2)]
+        price_exponent: i8,
+
+        /// Quantity exponent for scaled integers (e.g., -8 for 8 decimal places)
+        #[arg(long, default_value_t = -8)]
+        qty_exponent: i8,
+    },
+
+    /// Capture multi-symbol session (depth + trades) for arbitrage research
+    CaptureSession {
+        /// Comma-separated symbols, e.g. BTCUSDT,ETHUSDT,BNBUSDT
+        #[arg(long)]
+        symbols: String,
+
+        /// Output directory for session data
+        #[arg(long)]
+        out_dir: String,
+
+        /// Capture duration in seconds
+        #[arg(long, default_value_t = 7200)]
+        duration_secs: u64,
+
+        /// Price exponent for scaled integers (e.g., -2 for 2 decimal places)
+        #[arg(long, default_value_t = -2)]
+        price_exponent: i8,
+
+        /// Quantity exponent for scaled integers (e.g., -8 for 8 decimal places)
+        #[arg(long, default_value_t = -8)]
+        qty_exponent: i8,
+
+        /// Include trades capture (in addition to depth)
+        #[arg(long, default_value_t = true)]
+        include_trades: bool,
+
+        /// Strict sequencing mode (default: true). Fails capture if sequence gaps detected.
         #[arg(long, default_value_t = true)]
         strict: bool,
     },
@@ -168,6 +224,33 @@ async fn async_main() -> anyhow::Result<()> {
                 duration_secs,
                 price_exponent,
                 qty_exponent,
+                strict,
+            )
+            .await
+        }
+        Commands::CaptureTrades {
+            symbol,
+            out,
+            duration_secs,
+            price_exponent,
+            qty_exponent,
+        } => run_capture_trades(&symbol, &out, duration_secs, price_exponent, qty_exponent).await,
+        Commands::CaptureSession {
+            symbols,
+            out_dir,
+            duration_secs,
+            price_exponent,
+            qty_exponent,
+            include_trades,
+            strict,
+        } => {
+            run_capture_session(
+                &symbols,
+                &out_dir,
+                duration_secs,
+                price_exponent,
+                qty_exponent,
+                include_trades,
                 strict,
             )
             .await
@@ -404,6 +487,161 @@ fn emit_capture_manifest(
     if let Some(ref hash) = manifest.determinism.input_hash {
         println!("  Input hash: {}", &hash[..16]);
     }
+
+    Ok(())
+}
+
+async fn run_capture_trades(
+    symbol: &str,
+    out: &str,
+    duration_secs: u64,
+    price_exponent: i8,
+    qty_exponent: i8,
+) -> anyhow::Result<()> {
+    let out_path = std::path::Path::new(out);
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Requires BINANCE_API_KEY_ED25519 env var for SBE stream access
+    let api_key = std::env::var("BINANCE_API_KEY_ED25519")
+        .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
+
+    println!(
+        "Capturing Binance SBE {} trades stream for {} seconds (price_exp={}, qty_exp={})...",
+        symbol, duration_secs, price_exponent, qty_exponent
+    );
+
+    let stats = binance_trades_capture::capture_sbe_trades_jsonl(
+        symbol,
+        out_path,
+        duration_secs,
+        price_exponent,
+        qty_exponent,
+        &api_key,
+    )
+    .await?;
+
+    println!("Capture complete: {} ({})", out, stats);
+
+    // Emit manifest for trades capture
+    let manifest_dir = out_path.parent().unwrap_or(std::path::Path::new("."));
+    emit_trades_manifest(
+        manifest_dir,
+        out_path,
+        symbol,
+        &stats,
+        price_exponent,
+        qty_exponent,
+    )?;
+
+    Ok(())
+}
+
+/// Emit RunManifest for trades capture.
+fn emit_trades_manifest(
+    manifest_dir: &std::path::Path,
+    trades_path: &std::path::Path,
+    symbol: &str,
+    stats: &binance_trades_capture::TradesCaptureStats,
+    price_exponent: i8,
+    qty_exponent: i8,
+) -> anyhow::Result<()> {
+    let mut manifest = RunManifest::new(ArtifactFamily::Crypto, RunProfile::Certified);
+
+    // Record trades file hash (using quotes field as generic input)
+    manifest.inputs.quotes = Some(FileHash::from_file(trades_path)?);
+
+    manifest.determinism.certified = true;
+    manifest.compute_input_hash();
+
+    manifest.diagnostics.regime_transitions.push(
+        quantlaxmi_runner_common::artifact::RegimeTransition {
+            timestamp: chrono::Utc::now(),
+            previous_regime: "capture_start".to_string(),
+            new_regime: "capture_complete".to_string(),
+            confidence: 1.0,
+            features: serde_json::json!({
+                "symbol": symbol,
+                "trades_written": stats.trades_written,
+                "buy_count": stats.buy_count,
+                "sell_count": stats.sell_count,
+                "total_volume_mantissa": stats.total_volume_mantissa,
+                "price_exponent": price_exponent,
+                "qty_exponent": qty_exponent,
+                "integrity_tier": "Certified",
+                "source": "binance_sbe_trades_capture"
+            }),
+        },
+    );
+
+    manifest.finish();
+    let manifest_path = manifest_dir.join("trades_manifest.json");
+    let json = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&manifest_path, json)?;
+
+    println!("Trades manifest written: {:?}", manifest_path);
+    println!("  Run ID: {}", manifest.run_id);
+
+    Ok(())
+}
+
+async fn run_capture_session(
+    symbols: &str,
+    out_dir: &str,
+    duration_secs: u64,
+    price_exponent: i8,
+    qty_exponent: i8,
+    include_trades: bool,
+    strict: bool,
+) -> anyhow::Result<()> {
+    // Parse symbols
+    let symbol_list: Vec<String> = symbols
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if symbol_list.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No symbols provided. Use --symbols BTCUSDT,ETHUSDT,BNBUSDT"
+        ));
+    }
+
+    // Requires BINANCE_API_KEY_ED25519 env var for SBE stream access
+    let api_key = std::env::var("BINANCE_API_KEY_ED25519")
+        .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
+
+    println!("=== Session Capture ===");
+    println!("Symbols: {:?}", symbol_list);
+    println!("Duration: {} seconds", duration_secs);
+    println!("Include trades: {}", include_trades);
+    println!("Strict mode: {}", strict);
+    println!("Output: {}", out_dir);
+
+    let config = session_capture::SessionCaptureConfig {
+        symbols: symbol_list,
+        out_dir: std::path::PathBuf::from(out_dir),
+        duration_secs,
+        price_exponent,
+        qty_exponent,
+        include_trades,
+        strict,
+        api_key,
+    };
+
+    let stats = session_capture::capture_session(config).await?;
+
+    println!("\n=== Session Summary ===");
+    println!("Session ID: {}", stats.session_id);
+    println!("Duration: {:.1}s", stats.duration_secs);
+    println!("Total depth events: {}", stats.total_depth_events);
+    println!("Total trades: {}", stats.total_trades);
+    println!("Total gaps: {}", stats.total_gaps);
+    println!(
+        "Certified: {}",
+        if stats.all_symbols_clean { "YES" } else { "NO" }
+    );
 
     Ok(())
 }

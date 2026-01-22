@@ -163,6 +163,8 @@ pub struct InputSources {
     pub universe: Option<FileHash>,
     pub quotes: Option<FileHash>,
     pub depth_events: Option<FileHash>,
+    pub trade_events: Option<FileHash>,
+    pub tick_events: Option<FileHash>,
     pub orders: Option<FileHash>,
     pub config: Option<FileHash>,
 }

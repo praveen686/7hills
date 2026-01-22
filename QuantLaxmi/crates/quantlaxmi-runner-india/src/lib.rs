@@ -16,6 +16,7 @@
 //! - `live` - Run live trading
 
 pub mod kitesim_backtest;
+pub mod session_capture;
 pub mod zerodha_capture;
 
 use clap::{Parser, Subcommand};
@@ -68,6 +69,25 @@ pub enum Commands {
         /// Capture duration in seconds
         #[arg(long, default_value_t = 300)]
         duration_secs: u64,
+    },
+
+    /// Capture multi-instrument session with TickEvent JSONL (mantissa-based pricing)
+    CaptureSession {
+        /// Comma-separated instruments, e.g. BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE
+        #[arg(long)]
+        instruments: String,
+
+        /// Output directory, e.g. data/sessions/banknifty_20260122
+        #[arg(long)]
+        out_dir: String,
+
+        /// Capture duration in seconds
+        #[arg(long, default_value_t = 300)]
+        duration_secs: u64,
+
+        /// Price exponent (Kite uses -2, meaning divide by 100)
+        #[arg(long, default_value_t = -2)]
+        price_exponent: i8,
     },
 
     /// Offline KiteSim backtest runner (India/Zerodha only)
@@ -174,6 +194,12 @@ async fn async_main() -> anyhow::Result<()> {
             out,
             duration_secs,
         } => run_capture_zerodha(&symbols, &out, duration_secs).await,
+        Commands::CaptureSession {
+            instruments,
+            out_dir,
+            duration_secs,
+            price_exponent,
+        } => run_capture_session(&instruments, &out_dir, duration_secs, price_exponent).await,
         Commands::BacktestKitesim {
             qty_scale,
             strategy,
@@ -277,6 +303,42 @@ async fn run_capture_zerodha(symbols: &str, out: &str, duration_secs: u64) -> an
     let stats =
         zerodha_capture::capture_zerodha_quotes(&symbol_list, out_path, duration_secs).await?;
     println!("Capture complete: {} ({})", out, stats);
+
+    Ok(())
+}
+
+async fn run_capture_session(
+    instruments: &str,
+    out_dir: &str,
+    duration_secs: u64,
+    price_exponent: i8,
+) -> anyhow::Result<()> {
+    let instrument_list: Vec<String> = instruments
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if instrument_list.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No instruments provided. Use --instruments BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE"
+        ));
+    }
+
+    let config = session_capture::SessionCaptureConfig {
+        instruments: instrument_list,
+        out_dir: std::path::PathBuf::from(out_dir),
+        duration_secs,
+        price_exponent,
+    };
+
+    let stats = session_capture::capture_session(config).await?;
+
+    println!("\n=== Session Summary ===");
+    println!("Session ID: {}", stats.session_id);
+    println!("Duration: {:.1}s", stats.duration_secs);
+    println!("Total ticks: {}", stats.total_ticks);
+    println!("Certified: {}", if stats.all_certified { "YES" } else { "NO" });
 
     Ok(())
 }

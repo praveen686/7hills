@@ -14,3 +14,6 @@ quantlaxmi-runner-crypto = { path = "../../crates/quantlaxmi-runner-crypto" }
 
 # Error handling
 anyhow = { workspace = true }
+
+# Environment
+dotenv = { workspace = true }
