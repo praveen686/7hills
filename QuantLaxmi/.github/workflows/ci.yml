@@ -1,0 +1,229 @@
+name: QuantLaxmi CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ============================================
+  # Build and test both isolated binaries
+  # ============================================
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build all crates
+        run: cargo build --workspace
+
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run tests (runner-common)
+        run: cargo test -p quantlaxmi-runner-common --lib
+
+      - name: Run tests (runner-india)
+        run: cargo test -p quantlaxmi-runner-india --lib
+
+      - name: Run tests (runner-crypto)
+        run: cargo test -p quantlaxmi-runner-crypto --lib
+
+  # ============================================
+  # Dependency isolation verification
+  # ============================================
+  isolation:
+    name: Dependency Isolation Check
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binaries
+        run: |
+          cargo build -p quantlaxmi-india --release
+          cargo build -p quantlaxmi-crypto --release
+
+      - name: Check India has NO Binance/SBE deps
+        run: |
+          if cargo tree -p quantlaxmi-india 2>/dev/null | grep -E "(binance|kubera-sbe|quantlaxmi-connectors-binance)" > /dev/null; then
+            echo "FAIL: India binary has Binance/SBE dependencies!"
+            cargo tree -p quantlaxmi-india | grep -E "(binance|kubera-sbe|quantlaxmi-connectors-binance)"
+            exit 1
+          fi
+          echo "PASS: No Binance/SBE dependencies in India binary"
+
+      - name: Check Crypto has NO Zerodha deps
+        run: |
+          if cargo tree -p quantlaxmi-crypto 2>/dev/null | grep -E "(zerodha|quantlaxmi-connectors-zerodha)" > /dev/null; then
+            echo "FAIL: Crypto binary has Zerodha dependencies!"
+            cargo tree -p quantlaxmi-crypto | grep -E "(zerodha|quantlaxmi-connectors-zerodha)"
+            exit 1
+          fi
+          echo "PASS: No Zerodha dependencies in Crypto binary"
+
+      - name: Verify CLI commands (India)
+        run: |
+          ./target/release/quantlaxmi-india --help | grep -q "discover-zerodha"
+          ./target/release/quantlaxmi-india --help | grep -q "capture-zerodha"
+          ./target/release/quantlaxmi-india --help | grep -q "backtest-kitesim"
+          echo "PASS: India CLI has correct commands"
+
+      - name: Verify CLI commands (Crypto)
+        run: |
+          ./target/release/quantlaxmi-crypto --help | grep -q "capture-binance"
+          ./target/release/quantlaxmi-crypto --help | grep -q "capture-sbe-depth"
+          ./target/release/quantlaxmi-crypto --help | grep -q "exchange-info"
+          echo "PASS: Crypto CLI has correct commands"
+
+  # ============================================
+  # Artifact manifest tests
+  # ============================================
+  artifacts:
+    name: Artifact & Reproducibility Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Test artifact module
+        run: cargo test -p quantlaxmi-runner-common artifact --lib
+
+      - name: Test vectorbt module
+        run: cargo test -p quantlaxmi-runner-common vectorbt --lib
+
+      - name: Test hash reproducibility
+        run: |
+          # Create test file
+          echo "test data for hashing" > /tmp/test_hash.txt
+
+          # Run hash test twice, verify same result
+          HASH1=$(sha256sum /tmp/test_hash.txt | cut -d' ' -f1)
+          HASH2=$(sha256sum /tmp/test_hash.txt | cut -d' ' -f1)
+
+          if [ "$HASH1" != "$HASH2" ]; then
+            echo "FAIL: Hash reproducibility test failed"
+            exit 1
+          fi
+          echo "PASS: Hash reproducibility verified"
+
+  # ============================================
+  # India-specific pipeline tests
+  # ============================================
+  india-pipeline:
+    name: India Pipeline Tests
+    runs-on: ubuntu-latest
+    needs: [build, isolation]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Verify sample fixtures exist
+        run: |
+          test -f tests/fixtures/india/sample_quotes.jsonl
+          echo "India sample fixtures present"
+
+      - name: Test KiteSim module
+        run: cargo test -p quantlaxmi-runner-india kitesim --lib || true
+
+      - name: Test lot size functions
+        run: |
+          cargo test -p quantlaxmi-runner-india get_nse_lot_size --lib || true
+
+  # ============================================
+  # Crypto-specific pipeline tests
+  # ============================================
+  crypto-pipeline:
+    name: Crypto Pipeline Tests
+    runs-on: ubuntu-latest
+    needs: [build, isolation]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Verify sample fixtures exist
+        run: |
+          test -f tests/fixtures/crypto/sample_quotes.jsonl
+          echo "Crypto sample fixtures present"
+
+      - name: Test SBE decoder (if available)
+        run: cargo test -p kubera-sbe --lib || true

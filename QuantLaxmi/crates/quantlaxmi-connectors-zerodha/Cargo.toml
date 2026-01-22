@@ -1,0 +1,30 @@
+[package]
+name = "quantlaxmi-connectors-zerodha"
+version = "0.1.0"
+edition = "2024"
+description = "Zerodha Kite Connect integration for QuantLaxmi India"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+url = "2"
+byteorder = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+
+# Internal dependencies - only India-specific
+kubera-models = { path = "../kubera-models" }
+kubera-core = { path = "../kubera-core" }
+kubera-options = { path = "../kubera-options" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

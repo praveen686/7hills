@@ -1,0 +1,63 @@
+[package]
+name = "quantlaxmi-runner-india"
+version = "0.1.0"
+edition = "2024"
+description = "India trading runner for QuantLaxmi (Zerodha/NSE/BSE)"
+
+[dependencies]
+# Shared runner infrastructure
+quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }
+
+# India-specific connector (NO BINANCE)
+quantlaxmi-connectors-zerodha = { path = "../quantlaxmi-connectors-zerodha" }
+
+# Core infrastructure
+kubera-core = { path = "../kubera-core" }
+kubera-models = { path = "../kubera-models" }
+kubera-data = { path = "../kubera-data" }
+kubera-executor = { path = "../kubera-executor" }
+kubera-risk = { path = "../kubera-risk" }
+kubera-options = { path = "../kubera-options" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# WebSocket (for Zerodha capture)
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
+byteorder = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# Time
+chrono = { workspace = true }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+
+# TUI
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+# HTTP
+axum = { workspace = true, features = ["ws"] }
+reqwest = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Environment
+dotenv = { workspace = true }
+
+# IDs
+uuid = { workspace = true }

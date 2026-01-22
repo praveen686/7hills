@@ -1,0 +1,62 @@
+[package]
+name = "quantlaxmi-runner-common"
+version = "0.1.0"
+edition = "2024"
+description = "Shared runner infrastructure for QuantLaxmi (venue-agnostic)"
+
+[dependencies]
+# Core infrastructure (shared spine) - NO CONNECTOR IMPORTS
+kubera-core = { path = "../kubera-core" }
+kubera-models = { path = "../kubera-models" }
+kubera-data = { path = "../kubera-data" }
+kubera-executor = { path = "../kubera-executor" }
+kubera-risk = { path = "../kubera-risk" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# Time
+chrono = { workspace = true }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+
+# HTTP server (WebSocket)
+axum = { workspace = true, features = ["ws"] }
+tower-http = { workspace = true }
+
+# TUI
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Environment
+dotenv = { workspace = true }
+
+# IDs
+uuid = { workspace = true }
+
+# Cryptography (for artifact hashing)
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# System info
+hostname = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

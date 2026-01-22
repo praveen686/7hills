@@ -1,0 +1,70 @@
+[package]
+name = "quantlaxmi-runner-crypto"
+version = "0.1.0"
+edition = "2024"
+description = "Crypto trading runner for QuantLaxmi (Binance)"
+
+[dependencies]
+# Shared runner infrastructure
+quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }
+
+# Crypto-specific connector (NO ZERODHA)
+quantlaxmi-connectors-binance = { path = "../quantlaxmi-connectors-binance" }
+
+# Core infrastructure
+kubera-core = { path = "../kubera-core" }
+kubera-models = { path = "../kubera-models" }
+kubera-data = { path = "../kubera-data" }
+kubera-executor = { path = "../kubera-executor" }
+kubera-risk = { path = "../kubera-risk" }
+kubera-options = { path = "../kubera-options" }
+kubera-sbe = { path = "../kubera-sbe" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# WebSocket (for Binance capture)
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# Time
+chrono = { workspace = true }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+
+# TUI
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+# HTTP
+axum = { workspace = true, features = ["ws"] }
+reqwest = { version = "0.11", features = ["json", "native-tls", "blocking"] }
+
+# URL encoding
+urlencoding = "2.1"
+url = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Environment
+dotenv = { workspace = true }
+
+# IDs
+uuid = { workspace = true }
+
+# Binary encoding
+byteorder = { workspace = true }
