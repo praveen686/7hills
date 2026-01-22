@@ -1226,7 +1226,10 @@ impl ZerodhaAutoDiscovery {
             target_strikes.push(atm - (i as f64) * config.strike_interval);
         }
 
-        info!("[AUTO-DISCOVERY] Looking for strikes: {:?}", target_strikes);
+        info!(
+            "[AUTO-DISCOVERY] Spot={:.2}, ATM={:.2}, Looking for strikes: {:?}",
+            spot, atm, target_strikes
+        );
 
         // Find matching instruments
         for instr in instruments.iter()
@@ -1234,9 +1237,13 @@ impl ZerodhaAutoDiscovery {
             .filter(|i| i.expiry == expiry)
         {
             if target_strikes.iter().any(|&s| (instr.strike - s).abs() < 0.01) {
+                // Compute moneyness for audit trail
+                let moneyness = instr.strike / spot;
+                let otm_pct = ((instr.strike - spot) / spot * 100.0).abs();
                 info!(
-                    "[AUTO-DISCOVERY] Found: {} (token={}, strike={}, type={}, lot={})",
-                    instr.tradingsymbol, instr.instrument_token, instr.strike, instr.instrument_type, instr.lot_size
+                    "[AUTO-DISCOVERY] Found: {} (token={}, strike={}, type={}, lot={}, moneyness={:.4}, OTM%={:.2})",
+                    instr.tradingsymbol, instr.instrument_token, instr.strike,
+                    instr.instrument_type, instr.lot_size, moneyness, otm_pct
                 );
                 result.push((instr.tradingsymbol.clone(), instr.instrument_token));
             }

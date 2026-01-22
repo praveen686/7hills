@@ -10,6 +10,7 @@ output/
 *.wal
 *.parquet
 *.jsonl
+!tests/fixtures/**/*.jsonl
 *.log
 
 # Local secrets
