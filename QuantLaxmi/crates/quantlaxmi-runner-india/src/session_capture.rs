@@ -525,32 +525,34 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let (api_key, access_token) = authenticate()?;
 
     // Determine tokens: use manifest tokens if provided (Commit B), otherwise fetch from API
-    let (tokens, subscribe_mode): (Vec<(String, u32)>, String) = if let Some(manifest_tokens) = &config.manifest_tokens {
-        println!(
-            "Using {} manifest-provided tokens (subscribe_mode=manifest_tokens)",
-            manifest_tokens.len()
-        );
-        debug!(
-            token_count = manifest_tokens.len(),
-            sample_tokens = ?manifest_tokens.iter().take(5).map(|(_, t)| t).collect::<Vec<_>>(),
-            subscribe_mode = "manifest_tokens",
-            "Subscription tokens from UniverseManifest"
-        );
-        (manifest_tokens.clone(), "manifest_tokens".to_string())
-    } else {
-        // Legacy path: fetch instrument tokens from API (auto-detects segment)
-        println!(
-            "Fetching instrument tokens for {} symbols (subscribe_mode=api_lookup)...",
-            config.instruments.len()
-        );
-        let fetched = fetch_instrument_tokens_auto(&api_key, &access_token, &config.instruments).await?;
-        debug!(
-            token_count = fetched.len(),
-            subscribe_mode = "api_lookup",
-            "Subscription tokens from API lookup"
-        );
-        (fetched, "api_lookup".to_string())
-    };
+    let (tokens, subscribe_mode): (Vec<(String, u32)>, String) =
+        if let Some(manifest_tokens) = &config.manifest_tokens {
+            println!(
+                "Using {} manifest-provided tokens (subscribe_mode=manifest_tokens)",
+                manifest_tokens.len()
+            );
+            debug!(
+                token_count = manifest_tokens.len(),
+                sample_tokens = ?manifest_tokens.iter().take(5).map(|(_, t)| t).collect::<Vec<_>>(),
+                subscribe_mode = "manifest_tokens",
+                "Subscription tokens from UniverseManifest"
+            );
+            (manifest_tokens.clone(), "manifest_tokens".to_string())
+        } else {
+            // Legacy path: fetch instrument tokens from API (auto-detects segment)
+            println!(
+                "Fetching instrument tokens for {} symbols (subscribe_mode=api_lookup)...",
+                config.instruments.len()
+            );
+            let fetched =
+                fetch_instrument_tokens_auto(&api_key, &access_token, &config.instruments).await?;
+            debug!(
+                token_count = fetched.len(),
+                subscribe_mode = "api_lookup",
+                "Subscription tokens from API lookup"
+            );
+            (fetched, "api_lookup".to_string())
+        };
 
     if tokens.is_empty() {
         bail!(
@@ -806,7 +808,12 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
                 .get(sym)
                 .cloned()
                 .unwrap_or_else(|| format!("{}/ticks.jsonl", sym));
-            (sym.clone(), relative_path, stats.ticks_written, stats.has_depth)
+            (
+                sym.clone(),
+                relative_path,
+                stats.ticks_written,
+                stats.has_depth,
+            )
         })
         .collect();
 

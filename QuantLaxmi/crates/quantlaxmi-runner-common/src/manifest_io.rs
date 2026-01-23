@@ -91,8 +91,8 @@ pub fn persist_universe_manifest<T: Serialize>(
     manifest: &T,
 ) -> Result<ManifestPersistResult> {
     // Serialize to compact JSON (deterministic)
-    let bytes = serde_json::to_vec(manifest)
-        .context("Failed to serialize UniverseManifest to JSON")?;
+    let bytes =
+        serde_json::to_vec(manifest).context("Failed to serialize UniverseManifest to JSON")?;
 
     // Compute hash
     let sha256 = sha256_hex(&bytes);

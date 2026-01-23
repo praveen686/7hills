@@ -26,8 +26,8 @@ use std::sync::atomic::AtomicBool;
 use tracing::{debug, info};
 
 pub use quantlaxmi_runner_common::{
-    AppState, IntegritySummary, RunnerConfig, SessionManifest, SymbolState,
-    TickOutputEntry, UnderlyingEntry,
+    AppState, IntegritySummary, RunnerConfig, SessionManifest, SymbolState, TickOutputEntry,
+    UnderlyingEntry,
     circuit_breakers::TradingCircuitBreakers,
     create_runtime, init_observability, persist_session_manifest_atomic, report, tui,
     web_server::{ServerState, start_server},
@@ -356,14 +356,14 @@ async fn run_capture_session(
         Option<Vec<(String, u32)>>,
         Vec<UnderlyingEntry>,
     ) = if let Some(instr) = instruments {
-            // Manual instrument list - no manifest tokens (legacy path)
-            let symbols: Vec<String> = instr
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            (symbols, None, Vec::new())
-        } else if let Some(underlying_list) = underlyings {
+        // Manual instrument list - no manifest tokens (legacy path)
+        let symbols: Vec<String> = instr
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        (symbols, None, Vec::new())
+    } else if let Some(underlying_list) = underlyings {
         // Auto-discover multi-expiry universe for all underlyings
         let mut all_symbols = Vec::new();
         let mut all_tokens: Vec<(String, u32)> = Vec::new();
@@ -431,8 +431,10 @@ async fn run_capture_session(
             // Use per-underlying subdirectory to avoid overwrite when capturing multiple underlyings
             let underlying_dir = std::path::Path::new(out_dir).join(underlying_sym.to_lowercase());
             std::fs::create_dir_all(&underlying_dir)?;
-            let persist_result =
-                quantlaxmi_runner_common::manifest_io::persist_universe_manifest(&underlying_dir, &manifest)?;
+            let persist_result = quantlaxmi_runner_common::manifest_io::persist_universe_manifest(
+                &underlying_dir,
+                &manifest,
+            )?;
 
             // Pre-Commit B gates: validate manifest before subscription
             if manifest.instruments.is_empty() {

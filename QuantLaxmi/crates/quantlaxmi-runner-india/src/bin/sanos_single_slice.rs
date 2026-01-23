@@ -15,8 +15,8 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clap::Parser;
 use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator};
 use quantlaxmi_runner_india::sanos_io::{
-    SanosManifestInventory, SanosUnderlyingInventory,
-    try_load_sanos_inventory, log_manifest_mode, log_legacy_mode,
+    SanosManifestInventory, SanosUnderlyingInventory, log_legacy_mode, log_manifest_mode,
+    try_load_sanos_inventory,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -248,7 +248,12 @@ fn build_slice_manifest(
     time_to_exp: f64,
 ) -> Result<ExpirySlice> {
     let expiry_str = expiry.format("%Y-%m-%d").to_string();
-    let mut slice = ExpirySlice::new(&underlying_inv.underlying, &expiry_str, target_ts, time_to_exp);
+    let mut slice = ExpirySlice::new(
+        &underlying_inv.underlying,
+        &expiry_str,
+        target_ts,
+        time_to_exp,
+    );
 
     // Get instruments for this expiry from manifest
     let instruments = underlying_inv.get_instruments_for_expiry(expiry);
@@ -312,7 +317,8 @@ fn match_expiry_code(expiry_code: &str, available_expiries: &[NaiveDate]) -> Opt
         }
 
         // Also try matching without leading zero (e.g., "9JAN" vs "09JAN")
-        let formatted_no_zero = format!("{}{}",
+        let formatted_no_zero = format!(
+            "{}{}",
             expiry.format("%e").to_string().trim(), // Day without leading zero
             expiry.format("%b").to_string().to_uppercase()
         );
@@ -325,10 +331,7 @@ fn match_expiry_code(expiry_code: &str, available_expiries: &[NaiveDate]) -> Opt
 }
 
 /// Run manifest-driven calibration for a single slice.
-fn run_manifest_mode(
-    args: &Args,
-    inventory: &SanosManifestInventory,
-) -> Result<()> {
+fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<()> {
     // Find the underlying entry for the requested underlying
     let underlying_inv = inventory
         .underlyings
@@ -338,7 +341,11 @@ fn run_manifest_mode(
             anyhow!(
                 "Underlying {} not found in session manifest. Available: {:?}",
                 args.underlying,
-                inventory.underlyings.iter().map(|u| &u.underlying).collect::<Vec<_>>()
+                inventory
+                    .underlyings
+                    .iter()
+                    .map(|u| &u.underlying)
+                    .collect::<Vec<_>>()
             )
         })?;
 
@@ -351,14 +358,16 @@ fn run_manifest_mode(
     );
 
     // Match the requested expiry code to a manifest expiry
-    let target_expiry = match_expiry_code(&args.expiry, &available_expiries)
-        .ok_or_else(|| {
-            anyhow!(
-                "Expiry code {} not found in manifest. Available: {:?}",
-                args.expiry,
-                available_expiries.iter().map(|e| e.format("%d%b").to_string()).collect::<Vec<_>>()
-            )
-        })?;
+    let target_expiry = match_expiry_code(&args.expiry, &available_expiries).ok_or_else(|| {
+        anyhow!(
+            "Expiry code {} not found in manifest. Available: {:?}",
+            args.expiry,
+            available_expiries
+                .iter()
+                .map(|e| e.format("%d%b").to_string())
+                .collect::<Vec<_>>()
+        )
+    })?;
 
     info!(
         "Matched expiry code {} -> {}",
@@ -440,8 +449,7 @@ fn run_manifest_mode(
     std::fs::write(&args.output, &json)?;
     info!(
         "Saved SanosSlice to {:?} (universe_sha256={})",
-        args.output,
-        underlying_inv.universe_sha256
+        args.output, underlying_inv.universe_sha256
     );
 
     Ok(())

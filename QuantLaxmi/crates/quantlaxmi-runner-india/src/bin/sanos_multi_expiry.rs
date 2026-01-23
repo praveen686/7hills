@@ -17,11 +17,9 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
-use quantlaxmi_runner_india::sanos_io::{
-    self, SanosManifestInventory, SanosUnderlyingInventory,
-};
 #[allow(unused_imports)]
 use quantlaxmi_runner_india::sanos_io::InstrumentInfo;
+use quantlaxmi_runner_india::sanos_io::{self, SanosManifestInventory, SanosUnderlyingInventory};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -333,7 +331,12 @@ fn build_slice_manifest(
     time_to_exp: f64,
 ) -> Result<ExpirySlice> {
     let expiry_str = expiry.format("%Y-%m-%d").to_string();
-    let mut slice = ExpirySlice::new(&underlying_inv.underlying, &expiry_str, target_ts, time_to_exp);
+    let mut slice = ExpirySlice::new(
+        &underlying_inv.underlying,
+        &expiry_str,
+        target_ts,
+        time_to_exp,
+    );
 
     // Get instruments for this expiry from manifest
     let instruments = underlying_inv.get_instruments_for_expiry(expiry);
@@ -491,7 +494,11 @@ fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<
             anyhow!(
                 "Underlying {} not found in session manifest. Available: {:?}",
                 args.underlying,
-                inventory.underlyings.iter().map(|u| &u.underlying).collect::<Vec<_>>()
+                inventory
+                    .underlyings
+                    .iter()
+                    .map(|u| &u.underlying)
+                    .collect::<Vec<_>>()
             )
         })?;
 
@@ -504,7 +511,10 @@ fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<
     );
 
     if expiries.is_empty() {
-        return Err(anyhow!("No expiries found for {} in manifest", args.underlying));
+        return Err(anyhow!(
+            "No expiries found for {} in manifest",
+            args.underlying
+        ));
     }
 
     // Find common timestamp (mid-session of first expiry data)
@@ -533,7 +543,10 @@ fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<
 
     for expiry in &expiries {
         let expiry_str = expiry.format("%Y-%m-%d").to_string();
-        info!("Calibrating {} {} (manifest-driven)", args.underlying, expiry_str);
+        info!(
+            "Calibrating {} {} (manifest-driven)",
+            args.underlying, expiry_str
+        );
 
         let ticks = load_ticks_manifest(&inventory.session_dir, underlying_inv, *expiry)?;
         let tte = time_to_expiry_from_date(target_ts, *expiry);

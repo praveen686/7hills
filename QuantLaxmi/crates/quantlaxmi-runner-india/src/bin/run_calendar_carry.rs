@@ -14,13 +14,12 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use clap::Parser;
 use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
-use quantlaxmi_runner_india::sanos_io::{
-    SanosUnderlyingInventory,
-    try_load_sanos_inventory, log_manifest_mode, log_legacy_mode,
-};
 use quantlaxmi_options::strategies::{
     AuditRecord, CalendarCarryStrategy, GateCheckResult, Phase8Features, QuoteSnapshot,
     SessionMeta, StraddleQuotes, StrategyContext, StrategyDecision,
+};
+use quantlaxmi_runner_india::sanos_io::{
+    SanosUnderlyingInventory, log_legacy_mode, log_manifest_mode, try_load_sanos_inventory,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -929,7 +928,12 @@ fn build_slice_manifest(
     time_to_exp: f64,
 ) -> ExpirySlice {
     let expiry_str = expiry.format("%Y-%m-%d").to_string();
-    let mut slice = ExpirySlice::new(&underlying_inv.underlying, &expiry_str, target_ts, time_to_exp);
+    let mut slice = ExpirySlice::new(
+        &underlying_inv.underlying,
+        &expiry_str,
+        target_ts,
+        time_to_exp,
+    );
 
     let instruments = underlying_inv.get_instruments_for_expiry(expiry);
 
@@ -1083,9 +1087,11 @@ fn build_straddle_quotes_manifest(
     let instruments = underlying_inv.get_instruments_for_expiry(expiry);
 
     // Find CE and PE at ATM strike from manifest instruments
-    let ce_instr = instruments.iter()
+    let ce_instr = instruments
+        .iter()
         .find(|i| i.instrument_type == "CE" && (i.strike - atm_strike).abs() < 0.01)?;
-    let pe_instr = instruments.iter()
+    let pe_instr = instruments
+        .iter()
         .find(|i| i.instrument_type == "PE" && (i.strike - atm_strike).abs() < 0.01)?;
 
     let ce_tick = find_closest_tick(symbol_ticks, &ce_instr.tradingsymbol, target_ts)?;
@@ -1121,9 +1127,11 @@ fn validate_q1_straddle_manifest(
     let instruments = underlying_inv.get_instruments_for_expiry(expiry);
 
     // Find CE and PE at ATM strike from manifest instruments
-    let ce_instr = instruments.iter()
+    let ce_instr = instruments
+        .iter()
         .find(|i| i.instrument_type == "CE" && (i.strike - atm_strike).abs() < 0.01)?;
-    let pe_instr = instruments.iter()
+    let pe_instr = instruments
+        .iter()
         .find(|i| i.instrument_type == "PE" && (i.strike - atm_strike).abs() < 0.01)?;
 
     let ce_tick = find_closest_tick(symbol_ticks, &ce_instr.tradingsymbol, decision_ts)?;
@@ -1453,37 +1461,38 @@ fn main() -> Result<()> {
     // Mode context: manifest-driven vs legacy
     // In manifest mode, underlying_inv is Some and we use manifest-based functions
     // In legacy mode, underlying_inv is None and we use parse_symbol() based functions
-    let (expiries_naive, all_ticks, manifest_underlying) = if let (Some(inv), Some(u_inv)) = (&manifest_inventory, underlying_inv) {
-        log_manifest_mode(inv);
+    let (expiries_naive, all_ticks, manifest_underlying) =
+        if let (Some(inv), Some(u_inv)) = (&manifest_inventory, underlying_inv) {
+            log_manifest_mode(inv);
 
-        let expiries = u_inv.get_sorted_expiries();
-        info!(
-            "Manifest-driven: {} expiries, universe_sha256={}",
-            expiries.len(),
-            u_inv.universe_sha256
-        );
+            let expiries = u_inv.get_sorted_expiries();
+            info!(
+                "Manifest-driven: {} expiries, universe_sha256={}",
+                expiries.len(),
+                u_inv.universe_sha256
+            );
 
-        let ticks = load_all_ticks_manifest(&inv.session_dir, u_inv)?;
-        info!("Loaded ticks for {} symbols (manifest-driven)", ticks.len());
+            let ticks = load_all_ticks_manifest(&inv.session_dir, u_inv)?;
+            info!("Loaded ticks for {} symbols (manifest-driven)", ticks.len());
 
-        (expiries, ticks, Some(u_inv))
-    } else {
-        log_legacy_mode(&args.session_dir);
+            (expiries, ticks, Some(u_inv))
+        } else {
+            log_legacy_mode(&args.session_dir);
 
-        let expiries_str = discover_expiries(&args.session_dir, &args.underlying)?;
-        info!("Found {} expiries: {:?}", expiries_str.len(), expiries_str);
+            let expiries_str = discover_expiries(&args.session_dir, &args.underlying)?;
+            info!("Found {} expiries: {:?}", expiries_str.len(), expiries_str);
 
-        // Convert string expiries to NaiveDate
-        let expiries: Vec<NaiveDate> = expiries_str
-            .iter()
-            .filter_map(|e| expiry_to_date(e))
-            .collect();
+            // Convert string expiries to NaiveDate
+            let expiries: Vec<NaiveDate> = expiries_str
+                .iter()
+                .filter_map(|e| expiry_to_date(e))
+                .collect();
 
-        let ticks = load_all_ticks(&args.session_dir, &args.underlying)?;
-        info!("Loaded ticks for {} symbols", ticks.len());
+            let ticks = load_all_ticks(&args.session_dir, &args.underlying)?;
+            info!("Loaded ticks for {} symbols", ticks.len());
 
-        (expiries, ticks, None)
-    };
+            (expiries, ticks, None)
+        };
 
     if expiries_naive.len() < 2 {
         return Err(anyhow!(
@@ -1496,7 +1505,12 @@ fn main() -> Result<()> {
     // Named 'expiries' for compatibility with rest of the code
     let expiries: Vec<String> = expiries_naive
         .iter()
-        .map(|d| d.format("%d%b").to_string().to_uppercase().replace(" ", "0"))
+        .map(|d| {
+            d.format("%d%b")
+                .to_string()
+                .to_uppercase()
+                .replace(" ", "0")
+        })
         .collect();
 
     // Find timestamp range
@@ -1622,101 +1636,102 @@ fn main() -> Result<()> {
         let back_atm = find_atm_strike(&slices[1], &args.underlying);
 
         // Build straddle quotes (manifest-driven or legacy)
-        let (front_straddle, back_straddle, q1_front, q1_back) = if let Some(u_inv) = manifest_underlying {
-            // Manifest mode: use instrument info (no symbol parsing)
-            let front = match build_straddle_quotes_manifest(
-                &all_ticks,
-                u_inv,
-                expiries_naive[0],
-                front_atm,
-                current_ts,
-            ) {
-                Some(s) => s,
-                None => {
-                    current_ts += interval;
-                    continue;
-                }
+        let (front_straddle, back_straddle, q1_front, q1_back) =
+            if let Some(u_inv) = manifest_underlying {
+                // Manifest mode: use instrument info (no symbol parsing)
+                let front = match build_straddle_quotes_manifest(
+                    &all_ticks,
+                    u_inv,
+                    expiries_naive[0],
+                    front_atm,
+                    current_ts,
+                ) {
+                    Some(s) => s,
+                    None => {
+                        current_ts += interval;
+                        continue;
+                    }
+                };
+
+                let back = match build_straddle_quotes_manifest(
+                    &all_ticks,
+                    u_inv,
+                    expiries_naive[1],
+                    back_atm,
+                    current_ts,
+                ) {
+                    Some(s) => s,
+                    None => {
+                        current_ts += interval;
+                        continue;
+                    }
+                };
+
+                // Phase 9.3: Q1-lite quote validation (manifest mode)
+                let q1_f = validate_q1_straddle_manifest(
+                    &all_ticks,
+                    u_inv,
+                    expiries_naive[0],
+                    front_atm,
+                    current_ts,
+                );
+                let q1_b = validate_q1_straddle_manifest(
+                    &all_ticks,
+                    u_inv,
+                    expiries_naive[1],
+                    back_atm,
+                    current_ts,
+                );
+
+                (front, back, q1_f, q1_b)
+            } else {
+                // Legacy mode: uses symbol construction
+                let front = match build_straddle_quotes(
+                    &all_ticks,
+                    &args.underlying,
+                    &expiries[0],
+                    front_atm,
+                    current_ts,
+                ) {
+                    Some(s) => s,
+                    None => {
+                        current_ts += interval;
+                        continue;
+                    }
+                };
+
+                let back = match build_straddle_quotes(
+                    &all_ticks,
+                    &args.underlying,
+                    &expiries[1],
+                    back_atm,
+                    current_ts,
+                ) {
+                    Some(s) => s,
+                    None => {
+                        current_ts += interval;
+                        continue;
+                    }
+                };
+
+                // Phase 9.3: Q1-lite quote validation (legacy mode)
+                let q1_f = validate_q1_straddle(
+                    &all_ticks,
+                    &args.underlying,
+                    &expiries[0],
+                    front_atm,
+                    current_ts,
+                );
+                let q1_b = validate_q1_straddle(
+                    &all_ticks,
+                    &args.underlying,
+                    &expiries[1],
+                    back_atm,
+                    current_ts,
+                );
+
+                (front, back, q1_f, q1_b)
             };
-
-            let back = match build_straddle_quotes_manifest(
-                &all_ticks,
-                u_inv,
-                expiries_naive[1],
-                back_atm,
-                current_ts,
-            ) {
-                Some(s) => s,
-                None => {
-                    current_ts += interval;
-                    continue;
-                }
-            };
-
-            // Phase 9.3: Q1-lite quote validation (manifest mode)
-            let q1_f = validate_q1_straddle_manifest(
-                &all_ticks,
-                u_inv,
-                expiries_naive[0],
-                front_atm,
-                current_ts,
-            );
-            let q1_b = validate_q1_straddle_manifest(
-                &all_ticks,
-                u_inv,
-                expiries_naive[1],
-                back_atm,
-                current_ts,
-            );
-
-            (front, back, q1_f, q1_b)
-        } else {
-            // Legacy mode: uses symbol construction
-            let front = match build_straddle_quotes(
-                &all_ticks,
-                &args.underlying,
-                &expiries[0],
-                front_atm,
-                current_ts,
-            ) {
-                Some(s) => s,
-                None => {
-                    current_ts += interval;
-                    continue;
-                }
-            };
-
-            let back = match build_straddle_quotes(
-                &all_ticks,
-                &args.underlying,
-                &expiries[1],
-                back_atm,
-                current_ts,
-            ) {
-                Some(s) => s,
-                None => {
-                    current_ts += interval;
-                    continue;
-                }
-            };
-
-            // Phase 9.3: Q1-lite quote validation (legacy mode)
-            let q1_f = validate_q1_straddle(
-                &all_ticks,
-                &args.underlying,
-                &expiries[0],
-                front_atm,
-                current_ts,
-            );
-            let q1_b = validate_q1_straddle(
-                &all_ticks,
-                &args.underlying,
-                &expiries[1],
-                back_atm,
-                current_ts,
-            );
-
-            (front, back, q1_f, q1_b)
-        };
 
         // Track Q1 stats if validation succeeded
         if let (Some(front_q1), Some(back_q1)) = (&q1_front, &q1_back) {

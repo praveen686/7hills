@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use quantlaxmi_connectors_zerodha::UniverseManifest;
 use quantlaxmi_runner_common::{
-    TickOutputEntry, UnderlyingEntry,
-    load_session_manifest, load_universe_manifest_bytes, session_manifest_exists,
+    TickOutputEntry, UnderlyingEntry, load_session_manifest, load_universe_manifest_bytes,
+    session_manifest_exists,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -113,11 +113,17 @@ fn load_underlying_inventory(
 ) -> Result<SanosUnderlyingInventory> {
     // Load universe manifest
     let um_bytes = load_universe_manifest_bytes(session_dir, &ue.universe_manifest_path)?;
-    let um: UniverseManifest = serde_json::from_slice(&um_bytes)
-        .with_context(|| format!("Failed to parse UniverseManifest: {}", ue.universe_manifest_path))?;
+    let um: UniverseManifest = serde_json::from_slice(&um_bytes).with_context(|| {
+        format!(
+            "Failed to parse UniverseManifest: {}",
+            ue.universe_manifest_path
+        )
+    })?;
 
     // Build symbol set for this underlying
-    let symbol_set: HashSet<String> = um.instruments.iter()
+    let symbol_set: HashSet<String> = um
+        .instruments
+        .iter()
         .map(|i| i.tradingsymbol.clone())
         .collect();
 
@@ -317,7 +323,11 @@ mod tests {
             ]
         });
         let universe_path = tmp.join("nifty/universe_manifest.json");
-        fs::write(&universe_path, serde_json::to_string_pretty(&universe).unwrap()).unwrap();
+        fs::write(
+            &universe_path,
+            serde_json::to_string_pretty(&universe).unwrap(),
+        )
+        .unwrap();
 
         // Compute SHA256 of universe manifest
         let universe_bytes = fs::read(&universe_path).unwrap();
@@ -355,10 +365,16 @@ mod tests {
                 "notes": []
             }
         });
-        fs::write(tmp.join("session_manifest.json"), serde_json::to_string_pretty(&session).unwrap()).unwrap();
+        fs::write(
+            tmp.join("session_manifest.json"),
+            serde_json::to_string_pretty(&session).unwrap(),
+        )
+        .unwrap();
 
         // Load inventory
-        let inventory = try_load_sanos_inventory(&tmp).unwrap().expect("Should load manifest");
+        let inventory = try_load_sanos_inventory(&tmp)
+            .unwrap()
+            .expect("Should load manifest");
 
         // Verify session ID
         assert_eq!(inventory.session_id, "test-determinism-001");
@@ -434,7 +450,11 @@ mod tests {
             ]
         });
         let universe_path = tmp.join("nifty/universe_manifest.json");
-        fs::write(&universe_path, serde_json::to_string_pretty(&universe).unwrap()).unwrap();
+        fs::write(
+            &universe_path,
+            serde_json::to_string_pretty(&universe).unwrap(),
+        )
+        .unwrap();
 
         let universe_bytes = fs::read(&universe_path).unwrap();
         let universe_sha = quantlaxmi_runner_common::manifest_io::sha256_hex(&universe_bytes);
@@ -465,11 +485,17 @@ mod tests {
                 "notes": []
             }
         });
-        fs::write(tmp.join("session_manifest.json"), serde_json::to_string_pretty(&session).unwrap()).unwrap();
+        fs::write(
+            tmp.join("session_manifest.json"),
+            serde_json::to_string_pretty(&session).unwrap(),
+        )
+        .unwrap();
 
         // Load multiple times and verify ordering is stable
         for _ in 0..3 {
-            let inventory = try_load_sanos_inventory(&tmp).unwrap().expect("Should load");
+            let inventory = try_load_sanos_inventory(&tmp)
+                .unwrap()
+                .expect("Should load");
             let u_inv = &inventory.underlyings[0];
             let expiries = u_inv.get_sorted_expiries();
 
@@ -536,7 +562,11 @@ mod tests {
             ]
         });
         let universe_path = tmp.join("nifty/universe_manifest.json");
-        fs::write(&universe_path, serde_json::to_string_pretty(&universe).unwrap()).unwrap();
+        fs::write(
+            &universe_path,
+            serde_json::to_string_pretty(&universe).unwrap(),
+        )
+        .unwrap();
 
         let universe_bytes = fs::read(&universe_path).unwrap();
         let universe_sha = quantlaxmi_runner_common::manifest_io::sha256_hex(&universe_bytes);
@@ -571,10 +601,16 @@ mod tests {
                 "notes": []
             }
         });
-        fs::write(tmp.join("session_manifest.json"), serde_json::to_string_pretty(&session).unwrap()).unwrap();
+        fs::write(
+            tmp.join("session_manifest.json"),
+            serde_json::to_string_pretty(&session).unwrap(),
+        )
+        .unwrap();
 
         // Load inventory
-        let inventory = try_load_sanos_inventory(&tmp).unwrap().expect("Should load manifest");
+        let inventory = try_load_sanos_inventory(&tmp)
+            .unwrap()
+            .expect("Should load manifest");
 
         // === STRUCTURAL ISOLATION CHECKS ===
 
@@ -598,8 +634,14 @@ mod tests {
         assert_eq!(instruments.len(), 2);
 
         // Find CE and PE
-        let ce = instruments.iter().find(|i| i.instrument_type == "CE").expect("Should have CE");
-        let pe = instruments.iter().find(|i| i.instrument_type == "PE").expect("Should have PE");
+        let ce = instruments
+            .iter()
+            .find(|i| i.instrument_type == "CE")
+            .expect("Should have CE");
+        let pe = instruments
+            .iter()
+            .find(|i| i.instrument_type == "PE")
+            .expect("Should have PE");
 
         // Verify instrument info is complete
         assert_eq!(ce.tradingsymbol, "NIFTY26JAN24750CE");
@@ -615,15 +657,27 @@ mod tests {
         // 5. Verify tick paths are explicit (no directory scanning needed)
         assert_eq!(u_inv.tick_outputs.len(), 2);
 
-        let ce_tick = u_inv.tick_outputs.iter().find(|t| t.symbol == "NIFTY26JAN24750CE");
-        let pe_tick = u_inv.tick_outputs.iter().find(|t| t.symbol == "NIFTY26JAN24750PE");
+        let ce_tick = u_inv
+            .tick_outputs
+            .iter()
+            .find(|t| t.symbol == "NIFTY26JAN24750CE");
+        let pe_tick = u_inv
+            .tick_outputs
+            .iter()
+            .find(|t| t.symbol == "NIFTY26JAN24750PE");
 
         assert!(ce_tick.is_some());
         assert!(pe_tick.is_some());
 
         // Verify tick path lookup works
-        assert_eq!(u_inv.get_tick_path("NIFTY26JAN24750CE"), Some("nifty/NIFTY26JAN24750CE/ticks.jsonl"));
-        assert_eq!(u_inv.get_tick_path("NIFTY26JAN24750PE"), Some("nifty/NIFTY26JAN24750PE/ticks.jsonl"));
+        assert_eq!(
+            u_inv.get_tick_path("NIFTY26JAN24750CE"),
+            Some("nifty/NIFTY26JAN24750CE/ticks.jsonl")
+        );
+        assert_eq!(
+            u_inv.get_tick_path("NIFTY26JAN24750PE"),
+            Some("nifty/NIFTY26JAN24750PE/ticks.jsonl")
+        );
 
         // 6. Verify symbols for expiry lookup works (used by manifest-mode straddle builders)
         let symbols = u_inv.get_symbols_for_expiry(expiries[0]);
