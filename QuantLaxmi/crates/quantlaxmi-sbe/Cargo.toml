@@ -2,7 +2,21 @@
 name = "quantlaxmi-sbe"
 version = "0.1.0"
 edition = "2021"
+description = "Simple Binary Encoding (SBE) decoder for Binance market data"
 publish = false
 
 [dependencies]
-kubera-sbe = { path = "../kubera-sbe" }
+byteorder = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "decode_bench"
+harness = false

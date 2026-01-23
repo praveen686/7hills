@@ -1,7 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian};
 use chrono::Utc;
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use kubera_sbe::{BinanceSbeDecoder, SbeHeader};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use quantlaxmi_sbe::{BinanceSbeDecoder, SbeHeader};
 
 fn bench_sbe_decode(c: &mut Criterion) {
     // Mock SBE TradesStreamEvent binary (Header + Body)
