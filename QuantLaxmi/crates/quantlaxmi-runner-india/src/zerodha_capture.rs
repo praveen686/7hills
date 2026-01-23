@@ -26,7 +26,7 @@ use std::process::Command;
 use tokio::io::AsyncWriteExt;
 use tokio_tungstenite::tungstenite::Message;
 
-use kubera_options::replay::QuoteEvent;
+use quantlaxmi_options::replay::QuoteEvent;
 
 const KITE_API_URL: &str = "https://api.kite.trade";
 

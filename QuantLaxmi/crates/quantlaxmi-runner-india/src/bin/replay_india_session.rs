@@ -10,9 +10,9 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use kubera_core::{EventBus, NullObserverStrategy, Portfolio, Strategy};
-use kubera_executor::{CommissionModel, RiskEnvelope, SimulatedExchange};
-use kubera_models::{
+use quantlaxmi_core::{EventBus, NullObserverStrategy, Portfolio, Strategy};
+use quantlaxmi_executor::{CommissionModel, RiskEnvelope, SimulatedExchange};
+use quantlaxmi_models::{
     L2Level, L2Snapshot, MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side,
 };
 use serde::{Deserialize, Serialize};
@@ -479,7 +479,7 @@ async fn main() -> Result<()> {
                         side: signal.side,
                         quantity: signal.quantity,
                         price: None,
-                        order_type: kubera_models::OrderType::Market,
+                        order_type: quantlaxmi_models::OrderType::Market,
                     },
                 })
                 .await?;
@@ -542,7 +542,7 @@ async fn main() -> Result<()> {
                 symbol: fill.symbol.clone(),
                 side: fill.side,
                 payload: OrderPayload::Update {
-                    status: kubera_models::OrderStatus::Filled,
+                    status: quantlaxmi_models::OrderStatus::Filled,
                     filled_quantity: fill.quantity,
                     avg_price: fill.price,
                     commission: fill.commission,

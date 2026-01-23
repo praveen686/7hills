@@ -9,8 +9,8 @@
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use clap::Parser;
-use kubera_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
-use kubera_options::strategies::{
+use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
+use quantlaxmi_options::strategies::{
     AuditRecord, CalendarCarryStrategy, GateCheckResult, Phase8Features, QuoteSnapshot,
     SessionMeta, StraddleQuotes, StrategyContext, StrategyDecision,
 };

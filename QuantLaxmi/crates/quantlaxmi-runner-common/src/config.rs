@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StrategyConfig {
-    pub hydra: Option<kubera_core::hydra::HydraConfig>,
-    pub aeon: Option<kubera_core::aeon::AeonConfig>,
+    pub hydra: Option<quantlaxmi_core::hydra::HydraConfig>,
+    pub aeon: Option<quantlaxmi_core::aeon::AeonConfig>,
 }
 
 /// Root configuration schema for the trading runner.
@@ -52,11 +52,11 @@ impl RunnerConfig {
     }
 
     /// Get default config path for a given execution mode
-    pub fn default_path(mode: &kubera_core::ExecutionMode) -> String {
+    pub fn default_path(mode: &quantlaxmi_core::ExecutionMode) -> String {
         match mode {
-            kubera_core::ExecutionMode::Backtest => "configs/backtest.toml".to_string(),
-            kubera_core::ExecutionMode::Live => "configs/live.toml".to_string(),
-            kubera_core::ExecutionMode::Paper => "configs/paper.toml".to_string(),
+            quantlaxmi_core::ExecutionMode::Backtest => "configs/backtest.toml".to_string(),
+            quantlaxmi_core::ExecutionMode::Live => "configs/live.toml".to_string(),
+            quantlaxmi_core::ExecutionMode::Paper => "configs/paper.toml".to_string(),
         }
     }
 }

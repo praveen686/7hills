@@ -22,10 +22,10 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 
-# Internal dependencies - only Crypto-specific
-kubera-models = { path = "../kubera-models" }
-kubera-core = { path = "../kubera-core" }
-kubera-sbe = { path = "../kubera-sbe" }
+# Internal dependencies - only Crypto-specific (via shims)
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

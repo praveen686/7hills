@@ -83,7 +83,7 @@ impl SessionReport {
     }
 
     /// Update metrics from TradingMetrics snapshot
-    pub fn update_from_metrics(&mut self, snapshot: &kubera_core::MetricsSnapshot) {
+    pub fn update_from_metrics(&mut self, snapshot: &quantlaxmi_core::MetricsSnapshot) {
         self.end_time = Utc::now();
         self.final_equity = snapshot.equity;
         self.total_pnl = snapshot.total_pnl;

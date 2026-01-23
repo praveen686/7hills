@@ -16,7 +16,7 @@
 
 use byteorder::{ByteOrder, LittleEndian};
 use chrono::{DateTime, TimeZone, Utc};
-use kubera_models::L2Level;
+use quantlaxmi_models::L2Level;
 
 /// Fixed size of SBE message header in bytes.
 pub const SBE_HEADER_SIZE: usize = 8;

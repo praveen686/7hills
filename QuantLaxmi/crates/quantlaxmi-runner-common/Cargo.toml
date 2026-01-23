@@ -5,12 +5,12 @@ edition = "2024"
 description = "Shared runner infrastructure for QuantLaxmi (venue-agnostic)"
 
 [dependencies]
-# Core infrastructure (shared spine) - NO CONNECTOR IMPORTS
-kubera-core = { path = "../kubera-core" }
-kubera-models = { path = "../kubera-models" }
-kubera-data = { path = "../kubera-data" }
-kubera-executor = { path = "../kubera-executor" }
-kubera-risk = { path = "../kubera-risk" }
+# Core infrastructure (via shims) - NO CONNECTOR IMPORTS
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-data = { path = "../quantlaxmi-data" }
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
 
 # Async runtime
 tokio = { workspace = true }

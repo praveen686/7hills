@@ -32,7 +32,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use kubera_models::depth::DepthEvent;
+use quantlaxmi_models::depth::DepthEvent;
 
 /// Write-Ahead Log for paper trading sessions.
 pub struct WriteAheadLog {
@@ -451,7 +451,7 @@ pub struct PaperSessionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kubera_models::depth::{DepthLevel, IntegrityTier};
+    use quantlaxmi_models::depth::{DepthLevel, IntegrityTier};
 
     #[test]
     fn test_paper_venue_fill_buy() {

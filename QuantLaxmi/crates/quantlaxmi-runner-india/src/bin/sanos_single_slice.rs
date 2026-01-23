@@ -9,7 +9,7 @@
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use clap::Parser;
-use kubera_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator};
+use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::File;

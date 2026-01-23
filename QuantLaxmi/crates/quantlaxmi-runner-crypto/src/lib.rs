@@ -692,9 +692,9 @@ async fn run_paper_mode(
     headless: bool,
 ) -> anyhow::Result<()> {
     use futures_util::{SinkExt, StreamExt};
-    use kubera_models::IntegrityTier;
-    use kubera_options::replay::DepthEvent;
-    use kubera_sbe::{BinanceSbeDecoder, SBE_HEADER_SIZE, SbeHeader};
+    use quantlaxmi_models::IntegrityTier;
+    use quantlaxmi_options::replay::DepthEvent;
+    use quantlaxmi_sbe::{BinanceSbeDecoder, SBE_HEADER_SIZE, SbeHeader};
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::protocol::Message;
     use url::Url;
@@ -759,7 +759,7 @@ async fn run_paper_mode(
     info!("Snapshot lastUpdateId: {}", snapshot_last_id);
 
     // Create snapshot event
-    let snapshot_bids: Vec<kubera_options::replay::DepthLevel> = snapshot_resp["bids"]
+    let snapshot_bids: Vec<quantlaxmi_options::replay::DepthLevel> = snapshot_resp["bids"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
@@ -771,11 +771,11 @@ async fn run_paper_mode(
                     .ok()?;
             let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent)
                 .ok()?;
-            Some(kubera_options::replay::DepthLevel { price, qty })
+            Some(quantlaxmi_options::replay::DepthLevel { price, qty })
         })
         .collect();
 
-    let snapshot_asks: Vec<kubera_options::replay::DepthLevel> = snapshot_resp["asks"]
+    let snapshot_asks: Vec<quantlaxmi_options::replay::DepthLevel> = snapshot_resp["asks"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
@@ -787,7 +787,7 @@ async fn run_paper_mode(
                     .ok()?;
             let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent)
                 .ok()?;
-            Some(kubera_options::replay::DepthLevel { price, qty })
+            Some(quantlaxmi_options::replay::DepthLevel { price, qty })
         })
         .collect();
 

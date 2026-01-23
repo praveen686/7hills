@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use kubera_options::replay::QuoteEvent;
+use quantlaxmi_options::replay::QuoteEvent;
 
 #[derive(Debug, serde::Deserialize)]
 struct BookTickerEvent {

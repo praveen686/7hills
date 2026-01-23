@@ -118,8 +118,8 @@ pub enum WebMessage {
 }
 
 impl WebMessage {
-    /// Create a MetricsSnapshot message from a kubera_core::MetricsSnapshot
-    pub fn from_metrics_snapshot(m: &kubera_core::MetricsSnapshot) -> Self {
+    /// Create a MetricsSnapshot message from a quantlaxmi_core::MetricsSnapshot
+    pub fn from_metrics_snapshot(m: &quantlaxmi_core::MetricsSnapshot) -> Self {
         WebMessage::MetricsSnapshot {
             total_pnl: m.total_pnl,
             total_return_pct: m.total_return_pct,

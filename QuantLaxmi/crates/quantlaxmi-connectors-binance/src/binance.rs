@@ -10,8 +10,8 @@ use crate::sbe::{BinanceSbeDecoder, SbeHeader};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::{SinkExt, StreamExt};
-use kubera_core::EventBus;
-use kubera_models::{L2Level, L2Snapshot, L2Update, MarketEvent, MarketPayload, Side};
+use quantlaxmi_core::EventBus;
+use quantlaxmi_models::{L2Level, L2Snapshot, L2Update, MarketEvent, MarketPayload, Side};
 use serde::Deserialize;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -139,7 +139,7 @@ impl BinanceConnector {
 }
 
 #[async_trait]
-impl kubera_core::connector::MarketConnector for BinanceConnector {
+impl quantlaxmi_core::connector::MarketConnector for BinanceConnector {
     async fn run(&self) -> anyhow::Result<()> {
         self.run_market_data().await
     }

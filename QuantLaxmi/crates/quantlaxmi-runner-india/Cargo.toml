@@ -38,15 +38,15 @@ quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }
 # India-specific connector (NO BINANCE)
 quantlaxmi-connectors-zerodha = { path = "../quantlaxmi-connectors-zerodha" }
 
-# Core infrastructure
-kubera-core = { path = "../kubera-core" }
-kubera-models = { path = "../kubera-models" }
-kubera-data = { path = "../kubera-data" }
-kubera-executor = { path = "../kubera-executor" }
-kubera-risk = { path = "../kubera-risk" }
-kubera-options = { path = "../kubera-options" }
+# Core infrastructure (via shims)
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-data = { path = "../quantlaxmi-data" }
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-options = { path = "../quantlaxmi-options" }
 
-# LP solver for SANOS (via kubera-options, but make sure it's available)
+# LP solver for SANOS (via quantlaxmi-options)
 good_lp = { workspace = true }
 
 # Async runtime

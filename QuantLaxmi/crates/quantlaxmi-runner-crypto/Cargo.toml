@@ -11,14 +11,14 @@ quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }
 # Crypto-specific connector (NO ZERODHA)
 quantlaxmi-connectors-binance = { path = "../quantlaxmi-connectors-binance" }
 
-# Core infrastructure
-kubera-core = { path = "../kubera-core" }
-kubera-models = { path = "../kubera-models" }
-kubera-data = { path = "../kubera-data" }
-kubera-executor = { path = "../kubera-executor" }
-kubera-risk = { path = "../kubera-risk" }
-kubera-options = { path = "../kubera-options" }
-kubera-sbe = { path = "../kubera-sbe" }
+# Core infrastructure (via shims)
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-data = { path = "../quantlaxmi-data" }
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-options = { path = "../quantlaxmi-options" }
+quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
 
 # Async runtime
 tokio = { workspace = true }

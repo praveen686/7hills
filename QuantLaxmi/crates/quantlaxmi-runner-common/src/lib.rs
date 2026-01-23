@@ -30,9 +30,9 @@ pub use circuit_breakers::{
 pub use config::{ExecutionInfo, ModeInfo, RiskInfo, RunnerConfig, StrategyConfig};
 pub use web_server::{ServerState, WebMessage, start_server};
 
-use kubera_core::ExecutionMode;
-use kubera_core::{MetricsConfig, TradingMetrics};
-use kubera_data::Level2Book;
+use quantlaxmi_core::ExecutionMode;
+use quantlaxmi_core::{MetricsConfig, TradingMetrics};
+use quantlaxmi_data::Level2Book;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tracing::info;
@@ -126,8 +126,8 @@ pub fn init_observability(service_name: &str) {
     let metrics_addr = format!("0.0.0.0:{}", metrics_port)
         .parse()
         .expect("Invalid metrics address");
-    kubera_core::observability::init_metrics(metrics_addr);
-    kubera_core::observability::init_tracing(service_name);
+    quantlaxmi_core::observability::init_metrics(metrics_addr);
+    quantlaxmi_core::observability::init_tracing(service_name);
 }
 
 /// Create the shared tokio runtime with appropriate stack size

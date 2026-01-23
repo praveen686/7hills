@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    # Core crates (shared spine)
+    # Core crates (shared spine) - legacy kubera-*
     "crates/kubera-core",
     "crates/kubera-models",
     "crates/kubera-risk",
@@ -8,6 +8,15 @@ members = [
     "crates/kubera-data",
     "crates/kubera-options",
     "crates/kubera-sbe",
+
+    # Shim crates (re-export kubera-* for migration)
+    "crates/quantlaxmi-models",
+    "crates/quantlaxmi-core",
+    "crates/quantlaxmi-data",
+    "crates/quantlaxmi-risk",
+    "crates/quantlaxmi-executor",
+    "crates/quantlaxmi-options",
+    "crates/quantlaxmi-sbe",
 
     # New isolated connectors
     "crates/quantlaxmi-connectors-zerodha",

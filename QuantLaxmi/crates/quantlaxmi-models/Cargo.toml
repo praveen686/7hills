@@ -1,0 +1,8 @@
+[package]
+name = "quantlaxmi-models"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+kubera-models = { path = "../kubera-models" }

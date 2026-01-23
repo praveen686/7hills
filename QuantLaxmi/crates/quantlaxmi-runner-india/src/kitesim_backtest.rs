@@ -15,13 +15,13 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use kubera_options::execution::{LegSide, LegStatus, MultiLegOrder};
-use kubera_options::kitesim::{
+use quantlaxmi_options::execution::{LegSide, LegStatus, MultiLegOrder};
+use quantlaxmi_options::kitesim::{
     AtomicExecPolicy, KiteSim, KiteSimConfig, MultiLegCoordinator, SimExecutionMode,
 };
-use kubera_options::replay::{DepthEvent, QuoteEvent, ReplayEvent, ReplayFeed};
-use kubera_options::report::{BacktestReport, FillMetrics};
-use kubera_options::specs::SpecStore;
+use quantlaxmi_options::replay::{DepthEvent, QuoteEvent, ReplayEvent, ReplayFeed};
+use quantlaxmi_options::report::{BacktestReport, FillMetrics};
+use quantlaxmi_options::specs::SpecStore;
 
 /// Scheduled order intent with timestamp
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -229,7 +229,7 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
     let mut feed = ReplayFeed::new(replay_events);
     // Store (order, result) pairs to track side info for PnL computation
-    let mut all_results: Vec<(MultiLegOrder, kubera_options::execution::MultiLegResult)> =
+    let mut all_results: Vec<(MultiLegOrder, quantlaxmi_options::execution::MultiLegResult)> =
         Vec::new();
 
     if use_intents {
