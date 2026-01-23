@@ -23,7 +23,7 @@ use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 // Use the canonical OrderBook from kubera-core (proper dependency layering)
-use kubera_core::lob::OrderBook;
+use quantlaxmi_core::lob::OrderBook;
 
 /// Errors that can occur during KiteSim execution.
 #[derive(Debug, Clone)]
@@ -160,7 +160,7 @@ impl SimOrder {
 }
 
 /// L2 order book wrapper for KiteSim.
-// NOTE: SimOrderBook has been replaced by kubera_core::lob::OrderBook
+// NOTE: SimOrderBook has been replaced by quantlaxmi_core::lob::OrderBook
 // This is the canonical LOB implementation with proper layering:
 // kubera-models → kubera-core → kubera-options
 
@@ -625,7 +625,11 @@ impl KiteSim {
         let fill_qty = if self.cfg.allow_partial {
             visible_qty.min(rem)
         } else {
-            if visible_qty >= rem { rem } else { 0 }
+            if visible_qty >= rem {
+                rem
+            } else {
+                0
+            }
         };
 
         if fill_qty == 0 {
@@ -970,13 +974,11 @@ mod tests {
         assert_eq!(res.leg_results.len(), 2);
         assert_eq!(res.leg_results[0].status, LegStatus::Filled);
         assert_eq!(res.leg_results[1].status, LegStatus::PartiallyFilled);
-        assert!(
-            res.leg_results[1]
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("partial fill")
-        );
+        assert!(res.leg_results[1]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("partial fill"));
     }
 
     /// P1.3: Golden determinism test - same input always produces identical output.
@@ -985,7 +987,7 @@ mod tests {
     async fn kitesim_l2_determinism_golden_test() {
         use crate::replay::DepthEvent;
         use crate::replay::DepthLevel;
-        use kubera_models::IntegrityTier;
+        use quantlaxmi_models::IntegrityTier;
 
         // Fixed seed depth events (L2 mode)
         let t0 = Utc.with_ymd_and_hms(2025, 1, 2, 9, 30, 0).unwrap();
@@ -1121,7 +1123,7 @@ mod tests {
     async fn kitesim_l2_gap_detection_hard_fail() {
         use crate::replay::DepthEvent;
         use crate::replay::DepthLevel;
-        use kubera_models::IntegrityTier;
+        use quantlaxmi_models::IntegrityTier;
 
         let t0 = Utc.with_ymd_and_hms(2025, 1, 2, 9, 30, 0).unwrap();
 

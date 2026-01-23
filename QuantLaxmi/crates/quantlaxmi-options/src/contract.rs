@@ -14,8 +14,8 @@
 use chrono::{Datelike, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 
-// Re-export OptionType from kubera_models (canonical location)
-pub use kubera_models::OptionType;
+// Re-export OptionType from quantlaxmi_models (canonical location)
+pub use quantlaxmi_models::OptionType;
 
 /// Logical model of a single derivative contract.
 ///

@@ -121,7 +121,7 @@ fn d1_d2(spot: f64, strike: f64, time: f64, rate: f64, volatility: f64) -> (f64,
 ///
 /// # Examples
 /// ```
-/// use kubera_options::pricing::black_scholes_call;
+/// use quantlaxmi_options::pricing::black_scholes_call;
 ///
 /// // NIFTY ATM call, 7 days to expiry, 15% IV
 /// let premium = black_scholes_call(25800.0, 25800.0, 7.0/365.0, 0.065, 0.15);
@@ -186,7 +186,7 @@ pub fn black_scholes_put(spot: f64, strike: f64, time: f64, rate: f64, volatilit
 ///
 /// # Examples
 /// ```
-/// use kubera_options::pricing::{black_scholes_call, implied_volatility};
+/// use quantlaxmi_options::pricing::{black_scholes_call, implied_volatility};
 ///
 /// let spot = 25800.0;
 /// let strike = 25800.0;

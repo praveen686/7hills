@@ -98,7 +98,7 @@ impl NseIndex {
     ///
     /// # Examples
     /// ```
-    /// use kubera_options::nse_specs::NseIndex;
+    /// use quantlaxmi_options::nse_specs::NseIndex;
     /// assert_eq!(NseIndex::from_symbol("NIFTY2612025400CE"), Some(NseIndex::Nifty));
     /// assert_eq!(NseIndex::from_symbol("BANKNIFTY2611552000CE"), Some(NseIndex::BankNifty));
     /// ```

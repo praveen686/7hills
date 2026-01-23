@@ -200,7 +200,7 @@ impl MultiLegExecutor {
         timeout_ms: u64,
         interval_ms: u64,
     ) -> anyhow::Result<(LegStatus, Option<f64>, u32)> {
-        use tokio::time::{Duration, Instant, sleep};
+        use tokio::time::{sleep, Duration, Instant};
         use tracing::debug;
 
         let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1));

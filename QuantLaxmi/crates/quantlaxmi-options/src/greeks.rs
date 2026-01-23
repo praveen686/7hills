@@ -1,13 +1,13 @@
 //! # Option Greeks Module
 //!
-//! Re-exports OptionGreeks from kubera_models (the canonical location).
+//! Re-exports OptionGreeks from quantlaxmi_models (the canonical location).
 //!
 //! This module previously defined OptionGreeks directly, but it has been
-//! moved to kubera_models to break dependency cycles and establish proper
+//! moved to quantlaxmi_models to break dependency cycles and establish proper
 //! layering (models → core → options).
 
 // Re-export from the canonical location
-pub use kubera_models::greeks::{OptionGreeks, OptionType};
+pub use quantlaxmi_models::greeks::{OptionGreeks, OptionType};
 
 // Also re-export the helper traits/functions if needed for tests
 #[cfg(test)]

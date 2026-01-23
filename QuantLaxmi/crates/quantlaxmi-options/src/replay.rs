@@ -11,13 +11,13 @@
 //!
 //! ## Event Types
 //! - `QuoteEvent`: L1 best bid/ask snapshot (legacy, for backward compatibility)
-//! - `DepthEvent`: L2 order book delta (from `kubera_models::depth`)
+//! - `DepthEvent`: L2 order book delta (from `quantlaxmi_models::depth`)
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 // Re-export deterministic depth types from the models crate (canonical location)
-pub use kubera_models::{DepthEvent, DepthLevel};
+pub use quantlaxmi_models::{DepthEvent, DepthLevel};
 
 /// Best bid/ask quote snapshot for an individual instrument (L1).
 ///
