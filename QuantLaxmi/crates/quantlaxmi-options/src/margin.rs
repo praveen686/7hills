@@ -370,8 +370,10 @@ mod tests {
 
     #[test]
     fn test_portfolio_delta_limit() {
-        let mut greeks = PortfolioGreeks::default();
-        greeks.total_delta = 15.0;
+        let greeks = PortfolioGreeks {
+            total_delta: 15.0,
+            ..Default::default()
+        };
 
         let violations = greeks.check_limits(10.0, 1.0, 1000.0);
         assert!(
@@ -384,10 +386,12 @@ mod tests {
     fn test_options_var_calculation() {
         let var_calc = OptionsVaR::new(0.99, 1, 0.15);
 
-        let mut greeks = PortfolioGreeks::default();
-        greeks.total_delta = 5.0; // 5 lots equivalent
-        greeks.total_gamma = 0.05;
-        greeks.total_vega = 50.0;
+        let greeks = PortfolioGreeks {
+            total_delta: 5.0, // 5 lots equivalent
+            total_gamma: 0.05,
+            total_vega: 50.0,
+            ..Default::default()
+        };
 
         let var_result = var_calc.calculate(&greeks, 25800.0, 50);
 
@@ -400,8 +404,10 @@ mod tests {
     fn test_historical_var() {
         let var_calc = OptionsVaR::new(0.99, 1, 0.15);
 
-        let mut greeks = PortfolioGreeks::default();
-        greeks.total_delta = 5.0;
+        let greeks = PortfolioGreeks {
+            total_delta: 5.0,
+            ..Default::default()
+        };
 
         // Historical returns simulating actual market moves
         let returns = vec![

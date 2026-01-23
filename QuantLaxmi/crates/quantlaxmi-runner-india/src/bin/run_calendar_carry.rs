@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write as IoWrite};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// NSE market hours (IST = UTC + 5:30)
@@ -814,7 +814,7 @@ fn minutes_to_close(ts: DateTime<Utc>) -> u64 {
 }
 
 /// Discover all expiries in session for given underlying
-fn discover_expiries(session_dir: &PathBuf, underlying: &str) -> Result<Vec<String>> {
+fn discover_expiries(session_dir: &Path, underlying: &str) -> Result<Vec<String>> {
     let mut expiries = std::collections::HashSet::new();
 
     for entry in std::fs::read_dir(session_dir)? {
@@ -841,10 +841,7 @@ fn discover_expiries(session_dir: &PathBuf, underlying: &str) -> Result<Vec<Stri
 }
 
 /// Load all ticks for an underlying (all expiries)
-fn load_all_ticks(
-    session_dir: &PathBuf,
-    underlying: &str,
-) -> Result<HashMap<String, Vec<TickEvent>>> {
+fn load_all_ticks(session_dir: &Path, underlying: &str) -> Result<HashMap<String, Vec<TickEvent>>> {
     let mut symbol_ticks: HashMap<String, Vec<TickEvent>> = HashMap::new();
 
     for entry in std::fs::read_dir(session_dir)? {
@@ -891,7 +888,7 @@ fn load_all_ticks(
 
 /// Load all ticks for an underlying using manifest inventory (no directory scan).
 fn load_all_ticks_manifest(
-    session_dir: &PathBuf,
+    session_dir: &Path,
     underlying_inv: &SanosUnderlyingInventory,
 ) -> Result<HashMap<String, Vec<TickEvent>>> {
     let mut symbol_ticks: HashMap<String, Vec<TickEvent>> = HashMap::new();

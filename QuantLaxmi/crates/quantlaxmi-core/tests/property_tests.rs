@@ -63,6 +63,12 @@ pub struct OrderStateMachine {
     transitions: Vec<(OrderState, OrderState)>,
 }
 
+impl Default for OrderStateMachine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OrderStateMachine {
     pub fn new() -> Self {
         Self {

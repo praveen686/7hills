@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -180,7 +180,7 @@ fn parse_symbol(symbol: &str) -> Option<(String, String, u32, bool)> {
 
 /// Load all ticks for symbols matching underlying and expiry
 fn load_ticks(
-    session_dir: &PathBuf,
+    session_dir: &Path,
     underlying: &str,
     expiry: &str,
 ) -> Result<HashMap<String, Vec<TickEvent>>> {
@@ -353,7 +353,7 @@ fn compute_metrics(current: &SanosSlice, previous: Option<&SanosSlice>) -> Stabi
 
 /// Load ticks for a specific expiry using manifest inventory (no directory scan).
 fn load_ticks_manifest(
-    session_dir: &PathBuf,
+    session_dir: &Path,
     underlying_inv: &SanosUnderlyingInventory,
     expiry: NaiveDate,
 ) -> Result<HashMap<String, Vec<TickEvent>>> {
@@ -605,16 +605,16 @@ fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<
     );
 
     // Build and print analysis (reuse shared logic)
-    let analysis = build_temporal_analysis(
-        &args.underlying,
-        &args.expiry,
-        min_ts,
-        max_ts,
-        args.interval_secs,
-        &snapshots,
+    let analysis = build_temporal_analysis(TemporalAnalysisParams {
+        underlying: &args.underlying,
+        expiry: &args.expiry,
+        start_ts: min_ts,
+        end_ts: max_ts,
+        interval_secs: args.interval_secs,
+        snapshots: &snapshots,
         num_feasible,
         num_infeasible,
-    );
+    });
 
     // Save JSON output
     let json_path = args.output_dir.join("temporal_analysis.json");
@@ -647,17 +647,30 @@ fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<
     Ok(())
 }
 
-/// Build TemporalAnalysis from collected snapshots.
-fn build_temporal_analysis(
-    underlying: &str,
-    expiry: &str,
+/// Parameters for building temporal analysis.
+struct TemporalAnalysisParams<'a> {
+    underlying: &'a str,
+    expiry: &'a str,
     start_ts: DateTime<Utc>,
     end_ts: DateTime<Utc>,
     interval_secs: i64,
-    snapshots: &[StabilityMetrics],
+    snapshots: &'a [StabilityMetrics],
     num_feasible: usize,
     num_infeasible: usize,
-) -> TemporalAnalysis {
+}
+
+/// Build TemporalAnalysis from collected snapshots.
+fn build_temporal_analysis(params: TemporalAnalysisParams<'_>) -> TemporalAnalysis {
+    let TemporalAnalysisParams {
+        underlying,
+        expiry,
+        start_ts,
+        end_ts,
+        interval_secs,
+        snapshots,
+        num_feasible,
+        num_infeasible,
+    } = params;
     let drift_metrics: Vec<_> = snapshots.iter().skip(1).collect();
 
     let max_density_drift = drift_metrics
@@ -1010,16 +1023,16 @@ fn main() -> Result<()> {
     );
 
     // Build analysis using shared function
-    let analysis = build_temporal_analysis(
-        &args.underlying,
-        &args.expiry,
-        min_ts,
-        max_ts,
-        args.interval_secs,
-        &snapshots,
+    let analysis = build_temporal_analysis(TemporalAnalysisParams {
+        underlying: &args.underlying,
+        expiry: &args.expiry,
+        start_ts: min_ts,
+        end_ts: max_ts,
+        interval_secs: args.interval_secs,
+        snapshots: &snapshots,
         num_feasible,
         num_infeasible,
-    );
+    });
 
     // Save JSON output
     let json_path = args.output_dir.join("temporal_analysis.json");

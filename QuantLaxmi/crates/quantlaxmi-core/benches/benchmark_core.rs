@@ -32,7 +32,7 @@ fn bench_sbe_decoding(c: &mut Criterion) {
 
     // Example Binance SBE Trade message (Template ID 10000)
     // Header (8 bytes) + Body
-    let mut trade_bin = vec![0u8; 64];
+    let mut trade_bin = [0u8; 64];
     trade_bin[2..4].copy_from_slice(&10000u16.to_le_bytes()); // Template ID
     // Minimal data for decoder to not panic
 

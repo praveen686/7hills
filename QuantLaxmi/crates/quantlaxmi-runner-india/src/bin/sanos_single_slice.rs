@@ -22,7 +22,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -106,7 +106,7 @@ fn parse_symbol(symbol: &str) -> Option<(String, String, u32, bool)> {
 
 /// Load all ticks for symbols matching underlying and expiry
 fn load_ticks(
-    session_dir: &PathBuf,
+    session_dir: &Path,
     underlying: &str,
     expiry: &str,
 ) -> Result<HashMap<String, Vec<TickEvent>>> {
@@ -203,7 +203,7 @@ fn build_slice(
 
 /// Load ticks for a specific expiry using manifest inventory (no directory scan).
 fn load_ticks_manifest(
-    session_dir: &PathBuf,
+    session_dir: &Path,
     underlying_inv: &SanosUnderlyingInventory,
     expiry: NaiveDate,
 ) -> Result<HashMap<String, Vec<TickEvent>>> {

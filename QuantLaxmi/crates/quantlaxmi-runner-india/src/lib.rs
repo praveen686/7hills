@@ -351,11 +351,7 @@ async fn run_capture_session(
     // Determine instrument list: either from --instruments or auto-discovery via --underlying
     // Commit B: Track both symbols and manifest tokens for subscription
     // Commit C: Also track underlying entries for aggregate session manifest
-    let (instrument_list, manifest_tokens, underlying_entries): (
-        Vec<String>,
-        Option<Vec<(String, u32)>>,
-        Vec<UnderlyingEntry>,
-    ) = if let Some(instr) = instruments {
+    let (instrument_list, manifest_tokens, underlying_entries) = if let Some(instr) = instruments {
         // Manual instrument list - no manifest tokens (legacy path)
         let symbols: Vec<String> = instr
             .split(',')

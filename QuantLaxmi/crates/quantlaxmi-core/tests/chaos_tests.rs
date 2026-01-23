@@ -15,6 +15,12 @@ pub struct ChaosNetwork {
     reconnect_count: Arc<AtomicU32>,
 }
 
+impl Default for ChaosNetwork {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChaosNetwork {
     pub fn new() -> Self {
         Self {
