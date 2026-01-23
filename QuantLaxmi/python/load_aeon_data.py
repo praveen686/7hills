@@ -1,5 +1,5 @@
 """
-VectorBT Pro Integration Example for QuantKubera AEON
+VectorBT Pro Integration Example for QuantLaxmi AEON
 
 This script demonstrates how to load Parquet files exported from
 the Rust backtesting engine and analyze them with VectorBT Pro.
@@ -9,8 +9,8 @@ Prerequisites:
 
 Usage:
     1. Run a backtest with Parquet export enabled:
-       cargo run -p kubera-runner -- --mode backtest --aeon --export-parquet
-    
+       cargo run -p quantlaxmi-india --release -- backtest-kitesim --aeon --export-parquet
+
     2. Run this script to analyze the results:
        python load_aeon_data.py
 """

@@ -5,7 +5,7 @@
 //!
 //! ## Usage
 //! ```bash
-//! cargo run --release --bin kubera-runner -- capture-zerodha \
+//! cargo run --release -p quantlaxmi-india -- capture-zerodha \
 //!     --symbols BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE \
 //!     --duration-secs 300 \
 //!     --out data/replay/BANKNIFTY/2026-01-22/quotes.jsonl

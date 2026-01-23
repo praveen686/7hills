@@ -22,6 +22,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Assert no Kubera crates exist
+        run: |
+          if ls crates/kubera-* >/dev/null 2>&1; then
+            echo "ERROR: Kubera crates still present under QuantLaxmi/crates"
+            ls -d crates/kubera-* || true
+            exit 1
+          fi
+          echo "✓ No Kubera crates present"
+
+      - name: Assert no Kubera deps or imports (QuantLaxmi scope)
+        run: |
+          if grep -RIn --include='Cargo.toml' -E '^\s*kubera-' crates apps; then exit 1; fi
+          if grep -RIn --include='*.rs' -E 'kubera_(models|core|data|risk|executor|options|sbe)::' crates apps; then exit 1; fi
+          echo "✓ No Kubera deps/imports in QuantLaxmi crates/apps"
+
+      - name: Assert no kubera_sdk in Python (renamed to quantlaxmi_sdk)
+        run: |
+          if [ -d "python/kubera_sdk" ]; then
+            echo "ERROR: python/kubera_sdk still exists (should be quantlaxmi_sdk)"
+            exit 1
+          fi
+          if grep -RIn --include='*.py' 'from kubera_sdk\|import kubera_sdk' python/; then
+            echo "ERROR: Python code still imports kubera_sdk"
+            exit 1
+          fi
+          echo "✓ No kubera_sdk in Python"
+
+      - name: Kubera Zero Policy (consolidated gate)
+        run: |
+          # See docs/KUBERA_ZERO_POLICY.md for rationale
+          # Allow: docs/, patches/, deprecation warnings in quantlaxmi_sdk
+          # Deny: everything else
+          echo "Checking Kubera Zero Policy..."
+          VIOLATIONS=$(grep -rIn --include='*.rs' --include='*.toml' --include='*.py' -i 'kubera' \
+            crates apps python scripts Cargo.toml README.md 2>/dev/null \
+            | grep -v 'quantlaxmi_sdk.*deprecated\|quantlaxmi_sdk.*DeprecationWarning\|quantlaxmi_sdk.*KuberaStrategy\|quantlaxmi_sdk.*Historical\|quantlaxmi_sdk.*decommission\|check_isolation.sh' \
+            || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "ERROR: Kubera Zero Policy violation detected:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          echo "✓ Kubera Zero Policy: no violations"
+
       - name: Enforce single CI authority (migration policy)
         working-directory: .
         run: |
@@ -75,9 +119,6 @@ jobs:
           cargo clippy -p quantlaxmi-runner-crypto -- -D warnings
           cargo clippy -p quantlaxmi-connectors-zerodha -- -D warnings
           cargo clippy -p quantlaxmi-connectors-binance -- -D warnings
-
-      - name: Clippy (lenient on legacy crates still in workspace)
-        run: cargo clippy -p kubera-core -p kubera-options -p kubera-data || true
 
       - name: Tests (runner-common)
         run: cargo test -p quantlaxmi-runner-common --lib

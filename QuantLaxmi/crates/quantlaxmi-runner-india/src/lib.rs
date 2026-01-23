@@ -16,18 +16,20 @@
 //! - `live` - Run live trading
 
 pub mod kitesim_backtest;
+pub mod sanos_io;
 pub mod session_capture;
 pub mod zerodha_capture;
 
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tracing::info;
+use tracing::{debug, info};
 
 pub use quantlaxmi_runner_common::{
-    AppState, RunnerConfig, SymbolState,
+    AppState, IntegritySummary, RunnerConfig, SessionManifest, SymbolState,
+    TickOutputEntry, UnderlyingEntry,
     circuit_breakers::TradingCircuitBreakers,
-    create_runtime, init_observability, report, tui,
+    create_runtime, init_observability, persist_session_manifest_atomic, report, tui,
     web_server::{ServerState, start_server},
 };
 
@@ -347,15 +349,25 @@ async fn run_capture_session(
     use quantlaxmi_connectors_zerodha::{ExpiryPolicy, MultiExpiryDiscoveryConfig};
 
     // Determine instrument list: either from --instruments or auto-discovery via --underlying
-    let instrument_list: Vec<String> = if let Some(instr) = instruments {
-        instr
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
-    } else if let Some(underlying_list) = underlyings {
+    // Commit B: Track both symbols and manifest tokens for subscription
+    // Commit C: Also track underlying entries for aggregate session manifest
+    let (instrument_list, manifest_tokens, underlying_entries): (
+        Vec<String>,
+        Option<Vec<(String, u32)>>,
+        Vec<UnderlyingEntry>,
+    ) = if let Some(instr) = instruments {
+            // Manual instrument list - no manifest tokens (legacy path)
+            let symbols: Vec<String> = instr
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            (symbols, None, Vec::new())
+        } else if let Some(underlying_list) = underlyings {
         // Auto-discover multi-expiry universe for all underlyings
         let mut all_symbols = Vec::new();
+        let mut all_tokens: Vec<(String, u32)> = Vec::new();
+        let mut all_underlying_entries: Vec<UnderlyingEntry> = Vec::new();
         let discovery = ZerodhaAutoDiscovery::from_sidecar()?;
 
         // Parse expiry policy
@@ -415,20 +427,83 @@ async fn run_capture_session(
                 }
             }
 
-            // Save manifest to output directory
-            let manifest_path = std::path::Path::new(out_dir).join(format!(
-                "universe_manifest_{}.json",
-                underlying_sym.to_lowercase()
-            ));
-            std::fs::create_dir_all(out_dir)?;
-            let manifest_json = serde_json::to_string_pretty(&manifest)?;
-            std::fs::write(&manifest_path, &manifest_json)?;
-            println!("   Manifest saved: {:?}", manifest_path);
+            // Persist manifest with cryptographic integrity (Commit A: Phase 5.0)
+            // Use per-underlying subdirectory to avoid overwrite when capturing multiple underlyings
+            let underlying_dir = std::path::Path::new(out_dir).join(underlying_sym.to_lowercase());
+            std::fs::create_dir_all(&underlying_dir)?;
+            let persist_result =
+                quantlaxmi_runner_common::manifest_io::persist_universe_manifest(&underlying_dir, &manifest)?;
 
-            all_symbols.extend(manifest.instruments.into_iter().map(|i| i.tradingsymbol));
+            // Pre-Commit B gates: validate manifest before subscription
+            if manifest.instruments.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "UniverseManifest for {} has no instruments - cannot proceed",
+                    underlying_sym
+                ));
+            }
+
+            // Validate token uniqueness
+            let token_set: std::collections::HashSet<u32> = manifest
+                .instruments
+                .iter()
+                .map(|i| i.instrument_token)
+                .collect();
+            if token_set.len() != manifest.instruments.len() {
+                return Err(anyhow::anyhow!(
+                    "UniverseManifest for {} has duplicate instrument tokens",
+                    underlying_sym
+                ));
+            }
+
+            info!(
+                underlying_dir = %underlying_dir.display(),
+                underlying = %underlying_sym,
+                universe_manifest_sha256 = %persist_result.sha256,
+                universe_manifest_path = %persist_result.manifest_path.display(),
+                instrument_count = manifest.instruments.len(),
+                t1_expiry = %manifest.expiry_selection.t1,
+                t2_expiry = ?manifest.expiry_selection.t2,
+                t3_expiry = ?manifest.expiry_selection.t3,
+                strike_step = manifest.strike_step,
+                bytes_len = persist_result.bytes_len,
+                "UniverseManifest persisted"
+            );
+
+            println!("   Manifest saved: {:?}", persist_result.manifest_path);
+            println!("   SHA-256: {}", persist_result.sha256);
+
+            // Commit B: Collect tokens from manifest for subscription (use iter, not into_iter)
+            for instr in &manifest.instruments {
+                all_symbols.push(instr.tradingsymbol.clone());
+                all_tokens.push((instr.tradingsymbol.clone(), instr.instrument_token));
+            }
+
+            // Commit C: Build UnderlyingEntry for aggregate session manifest
+            let underlying_entry = UnderlyingEntry {
+                underlying: underlying_sym.to_uppercase(),
+                subdir: format!("{}/", underlying_sym.to_lowercase()),
+                universe_manifest_path: format!(
+                    "{}/universe_manifest.json",
+                    underlying_sym.to_lowercase()
+                ),
+                universe_manifest_sha256: persist_result.sha256.clone(),
+                instrument_count: manifest.instruments.len(),
+                t1_expiry: manifest.expiry_selection.t1.to_string(),
+                t2_expiry: manifest.expiry_selection.t2.map(|d| d.to_string()),
+                t3_expiry: manifest.expiry_selection.t3.map(|d| d.to_string()),
+                strike_step: manifest.strike_step,
+            };
+            all_underlying_entries.push(underlying_entry);
+
+            debug!(
+                underlying = %underlying_sym,
+                token_count = all_tokens.len(),
+                sample_tokens = ?all_tokens.iter().take(5).map(|(_, t)| t).collect::<Vec<_>>(),
+                "Universe tokens prepared for subscription"
+            );
         }
 
-        all_symbols
+        (all_symbols, Some(all_tokens), all_underlying_entries)
     } else {
         return Err(anyhow::anyhow!(
             "Must provide either --instruments or --underlying for auto-discovery"
@@ -451,14 +526,73 @@ async fn run_capture_session(
         out_dir: std::path::PathBuf::from(out_dir),
         duration_secs,
         price_exponent,
+        manifest_tokens,
     };
 
     let stats = session_capture::capture_session(config).await?;
+
+    // Commit C: Build and persist aggregate session manifest
+    if !underlying_entries.is_empty() {
+        let mut session_manifest = SessionManifest::new(
+            stats.session_id.clone(),
+            "india_capture".to_string(),
+            out_dir.to_string(),
+            duration_secs,
+            price_exponent,
+        );
+
+        // Add underlying entries
+        for entry in underlying_entries {
+            session_manifest.add_underlying(entry);
+        }
+
+        // Add tick outputs from capture stats
+        for (symbol, path, ticks_written, has_depth) in &stats.tick_outputs {
+            session_manifest.add_tick_output(TickOutputEntry {
+                symbol: symbol.clone(),
+                path: path.clone(),
+                ticks_written: *ticks_written,
+                has_depth: *has_depth,
+            });
+        }
+
+        // Set integrity summary
+        session_manifest.set_integrity(IntegritySummary {
+            out_of_universe_ticks_dropped: stats.out_of_universe_ticks_dropped,
+            subscribe_mode: stats.subscribe_mode.clone(),
+            notes: Vec::new(),
+        });
+
+        // Persist atomically
+        let out_path = std::path::Path::new(out_dir);
+        let persist_result = persist_session_manifest_atomic(out_path, &session_manifest)?;
+
+        info!(
+            session_manifest_path = %persist_result.manifest_path.display(),
+            bytes_len = persist_result.bytes_len,
+            underlying_count = session_manifest.underlyings.len(),
+            tick_output_count = session_manifest.tick_outputs.len(),
+            subscribe_mode = %stats.subscribe_mode,
+            out_of_universe_ticks_dropped = stats.out_of_universe_ticks_dropped,
+            "Aggregate session manifest persisted"
+        );
+        println!(
+            "Session manifest saved: {:?} ({} bytes)",
+            persist_result.manifest_path, persist_result.bytes_len
+        );
+    }
 
     println!("\n=== Session Summary ===");
     println!("Session ID: {}", stats.session_id);
     println!("Duration: {:.1}s", stats.duration_secs);
     println!("Total ticks: {}", stats.total_ticks);
+    println!("Subscribe mode: {}", stats.subscribe_mode);
+    if stats.out_of_universe_ticks_dropped > 0 {
+        println!(
+            "Out-of-universe ticks dropped: {}",
+            stats.out_of_universe_ticks_dropped
+        );
+    }
     println!(
         "Certified: {}",
         if stats.all_certified { "YES" } else { "NO" }

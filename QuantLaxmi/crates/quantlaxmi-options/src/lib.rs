@@ -17,7 +17,7 @@
 //! Comprehensive toolkit for modeling, pricing, and executing option strategies.
 //!
 //! ## Description
-//! QuantKubera's options crate provides a high-performance foundation for
+//! QuantLaxmi's options crate provides a high-performance foundation for
 //! derivative trading. It handles the entire lifecycle from contract definition
 //! and pricing to multi-leg strategy execution and risk management.
 //!

@@ -400,7 +400,7 @@ def emit_orders_json(
     quantity_u32: int,
 ) -> None:
     """
-    Emit an OrderFile JSON compatible with kubera-runner backtest-kitesim.
+    Emit an OrderFile JSON compatible with quantlaxmi-india backtest-kitesim.
     This emits ONE MultiLegOrder with ONE leg (spot smoke / intent test).
     """
     order = {
@@ -512,7 +512,7 @@ def emit_intents_json(
     quantity_u32: int,
 ) -> None:
     """
-    Emit an OrderIntentFile JSON compatible with kubera-runner backtest-kitesim --intents.
+    Emit an OrderIntentFile JSON compatible with quantlaxmi-india backtest-kitesim --intents.
     Each entry/exit signal becomes a timestamped intent.
     """
     intents = []

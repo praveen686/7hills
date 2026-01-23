@@ -22,7 +22,7 @@ use crate::specs::SpecStore;
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-// Use the canonical OrderBook from kubera-core (proper dependency layering)
+// Use the canonical OrderBook from quantlaxmi-core (proper dependency layering)
 use quantlaxmi_core::lob::OrderBook;
 
 /// Errors that can occur during KiteSim execution.
@@ -162,7 +162,7 @@ impl SimOrder {
 /// L2 order book wrapper for KiteSim.
 // NOTE: SimOrderBook has been replaced by quantlaxmi_core::lob::OrderBook
 // This is the canonical LOB implementation with proper layering:
-// kubera-models → kubera-core → kubera-options
+// quantlaxmi-models → quantlaxmi-core → quantlaxmi-options
 
 /// Primary simulator: accepts quote events and matches eligible orders.
 pub struct KiteSim {
@@ -170,7 +170,7 @@ pub struct KiteSim {
     specs: Option<SpecStore>,
     last_quotes: HashMap<String, Quote>,
     /// L2 order books per symbol (only used in L2Book mode).
-    /// Uses the canonical OrderBook from kubera-core.
+    /// Uses the canonical OrderBook from quantlaxmi-core.
     order_books: HashMap<String, OrderBook>,
     orders: HashMap<String, SimOrder>,
     stats: KiteSimRunStats,

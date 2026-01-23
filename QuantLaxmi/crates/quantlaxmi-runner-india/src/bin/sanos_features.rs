@@ -9,6 +9,10 @@
 //! - Skew per expiry (SK1, SK2, SK3)
 //! - Roll-down estimates (ROLL12, ROLLC12)
 //!
+//! ## Modes (Commit D)
+//! - **Manifest-driven**: When `session_manifest.json` exists, uses deterministic inventory.
+//! - **Legacy**: Falls back to directory scanning + symbol parsing when no manifest.
+//!
 //! Usage:
 //!   cargo run --bin sanos_features -- --session-dir <path> --underlying NIFTY
 
@@ -19,6 +23,9 @@ use csv::Writer as CsvWriter;
 use quantlaxmi_options::sanos::{
     EPSILON_STRIKE, ETA, ExpirySlice, K_N_NORMALIZED, OptionQuote, SanosCalibrator, SanosSlice,
     StrikeMeta, V_MIN,
+};
+use quantlaxmi_runner_india::sanos_io::{
+    self, SanosManifestInventory, SanosUnderlyingInventory,
 };
 
 /// Expected number of CSV columns (Phase 8.1 integrity)
@@ -377,6 +384,112 @@ fn build_slice(
     Ok(slice)
 }
 
+// =============================================================================
+// MANIFEST-DRIVEN LOADERS (Commit D)
+// =============================================================================
+
+/// Load ticks for a specific expiry using manifest inventory (no directory scan).
+fn load_ticks_manifest(
+    session_dir: &PathBuf,
+    underlying_inv: &SanosUnderlyingInventory,
+    expiry: NaiveDate,
+) -> Result<HashMap<String, Vec<TickEvent>>> {
+    let mut symbol_ticks: HashMap<String, Vec<TickEvent>> = HashMap::new();
+
+    // Get symbols for this expiry from the manifest
+    let symbols = underlying_inv.get_symbols_for_expiry(expiry);
+
+    for symbol in symbols {
+        // Get tick file path from manifest
+        if let Some(rel_path) = underlying_inv.get_tick_path(&symbol) {
+            let ticks_file = session_dir.join(rel_path);
+            if !ticks_file.exists() {
+                continue;
+            }
+
+            let file = File::open(&ticks_file)?;
+            let reader = BufReader::new(file);
+            let mut ticks = Vec::new();
+
+            for line in reader.lines() {
+                let line = line?;
+                if let Ok(tick) = serde_json::from_str::<TickEvent>(&line) {
+                    ticks.push(tick);
+                }
+            }
+
+            symbol_ticks.insert(symbol, ticks);
+        }
+    }
+
+    Ok(symbol_ticks)
+}
+
+/// Build ExpirySlice from tick data using manifest instrument info (no symbol parsing).
+fn build_slice_manifest(
+    symbol_ticks: &HashMap<String, Vec<TickEvent>>,
+    underlying_inv: &SanosUnderlyingInventory,
+    expiry: NaiveDate,
+    target_ts: DateTime<Utc>,
+    time_to_exp: f64,
+) -> Result<ExpirySlice> {
+    let expiry_str = expiry.format("%Y-%m-%d").to_string();
+    let mut slice = ExpirySlice::new(&underlying_inv.underlying, &expiry_str, target_ts, time_to_exp);
+
+    // Get instruments for this expiry from manifest
+    let instruments = underlying_inv.get_instruments_for_expiry(expiry);
+
+    for instr in instruments {
+        if let Some(ticks) = symbol_ticks.get(&instr.tradingsymbol) {
+            let closest_tick = ticks
+                .iter()
+                .min_by_key(|t| (t.ts - target_ts).num_milliseconds().abs());
+
+            if let Some(tick) = closest_tick {
+                if (tick.ts - target_ts).num_seconds().abs() > 5 {
+                    continue;
+                }
+
+                let price_mult = 10f64.powi(tick.price_exponent);
+                let bid = tick.bid_price as f64 * price_mult;
+                let ask = tick.ask_price as f64 * price_mult;
+
+                if bid <= 0.0 || ask <= 0.0 || ask < bid {
+                    continue;
+                }
+
+                let quote = OptionQuote {
+                    symbol: instr.tradingsymbol.clone(),
+                    strike: instr.strike,
+                    is_call: instr.instrument_type == "CE",
+                    bid,
+                    ask,
+                    timestamp: tick.ts,
+                };
+
+                slice.add_quote(quote);
+            }
+        }
+    }
+
+    Ok(slice)
+}
+
+/// Calculate time to expiry in years from NaiveDate
+fn time_to_expiry_from_date(now: DateTime<Utc>, exp_date: NaiveDate) -> f64 {
+    // Assume expiry at 15:30 IST (10:00 UTC)
+    let exp_datetime = exp_date
+        .and_hms_opt(10, 0, 0)
+        .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+
+    if let Some(exp_dt) = exp_datetime {
+        let days = (exp_dt - now).num_seconds() as f64 / 86400.0;
+        return (days / 365.0).max(1.0 / 365.0); // Minimum 1 day
+    }
+
+    7.0 / 365.0 // Fallback: 7 days
+}
+
 /// Extract implied volatility from fitted call price
 /// Uses bisection with safe bounds
 fn extract_iv(call_price: f64, strike_norm: f64, tty: f64) -> Option<f64> {
@@ -701,6 +814,329 @@ fn extract_features(
     })
 }
 
+// =============================================================================
+// MANIFEST-DRIVEN MAIN (Commit D)
+// =============================================================================
+
+fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<()> {
+    // Find the underlying entry for the requested underlying
+    let underlying_inv = inventory
+        .underlyings
+        .iter()
+        .find(|u| u.underlying.eq_ignore_ascii_case(&args.underlying))
+        .ok_or_else(|| {
+            anyhow!(
+                "Underlying {} not found in session manifest. Available: {:?}",
+                args.underlying,
+                inventory.underlyings.iter().map(|u| &u.underlying).collect::<Vec<_>>()
+            )
+        })?;
+
+    // Get expiries from manifest (sorted)
+    let expiries = underlying_inv.get_sorted_expiries();
+    info!(
+        "Manifest-driven: {} expiries from universe_sha256={}",
+        expiries.len(),
+        underlying_inv.universe_sha256
+    );
+
+    if expiries.is_empty() {
+        return Err(anyhow!("No expiries found for {} in manifest", args.underlying));
+    }
+
+    // Find timestamp range from first expiry ticks
+    let first_ticks = load_ticks_manifest(&inventory.session_dir, underlying_inv, expiries[0])?;
+    let mut min_ts: Option<DateTime<Utc>> = None;
+    let mut max_ts: Option<DateTime<Utc>> = None;
+
+    for ticks in first_ticks.values() {
+        for tick in ticks {
+            min_ts = Some(min_ts.map_or(tick.ts, |m| m.min(tick.ts)));
+            max_ts = Some(max_ts.map_or(tick.ts, |m| m.max(tick.ts)));
+        }
+    }
+
+    let min_ts = min_ts.ok_or_else(|| anyhow!("No ticks found"))?;
+    let max_ts = max_ts.ok_or_else(|| anyhow!("No ticks found"))?;
+    let target_ts = min_ts + (max_ts - min_ts) / 2;
+
+    info!("Calibration timestamp: {}", target_ts);
+
+    // Calibrate each expiry using manifest-driven loaders
+    let calibrator = SanosCalibrator::with_eta(args.eta);
+    let mut slices: Vec<SanosSlice> = Vec::new();
+
+    for expiry in &expiries {
+        let expiry_str = expiry.format("%Y-%m-%d").to_string();
+        info!("Calibrating {} {} (manifest-driven)", args.underlying, expiry_str);
+
+        let ticks = load_ticks_manifest(&inventory.session_dir, underlying_inv, *expiry)?;
+        let tte = time_to_expiry_from_date(target_ts, *expiry);
+
+        let slice = build_slice_manifest(&ticks, underlying_inv, *expiry, target_ts, tte)?;
+
+        if slice.calls.is_empty() || slice.puts.is_empty() {
+            info!("  Skipping: insufficient data");
+            continue;
+        }
+
+        match calibrator.calibrate(&slice) {
+            Ok(sanos_slice) => {
+                info!(
+                    "  F0={:.2}, Σq={:.6}, LP={}",
+                    sanos_slice.forward,
+                    sanos_slice.diagnostics.weights_sum,
+                    sanos_slice.diagnostics.lp_status
+                );
+                slices.push(sanos_slice);
+            }
+            Err(e) => {
+                info!("  FAILED: {}", e);
+            }
+        }
+    }
+
+    if slices.is_empty() {
+        return Err(anyhow!("No successful calibrations"));
+    }
+
+    // Extract features (reuse existing function)
+    let features = extract_features(&slices, &inventory.session_id, &args.underlying)?;
+
+    // Write CSV (same format as legacy mode)
+    let csv_file = File::create(&args.output)?;
+    let mut wtr = CsvWriter::from_writer(csv_file);
+
+    // Header (strictly defined column order)
+    let header = [
+        "ts",
+        "underlying",
+        "session_id",
+        "t1",
+        "t2",
+        "t3",
+        "f1",
+        "f2",
+        "f3",
+        "tty1",
+        "tty2",
+        "tty3",
+        "iv1",
+        "iv2",
+        "iv3",
+        "ts12",
+        "ts23",
+        "ts_curv",
+        "cal12",
+        "cal23",
+        "sk1",
+        "sk2",
+        "sk3",
+        "roll12",
+        "rollc12",
+    ];
+    debug_assert_eq!(
+        header.len(),
+        CSV_COLUMN_COUNT,
+        "Header column count mismatch"
+    );
+    wtr.write_record(header)?;
+
+    // Data row
+    let row = [
+        features.ts.clone(),
+        features.underlying.clone(),
+        features.session_id.clone(),
+        features.t1.clone(),
+        features.t2.clone().unwrap_or_default(),
+        features.t3.clone().unwrap_or_default(),
+        format!("{:.2}", features.f1),
+        features.f2.map(|v| format!("{:.2}", v)).unwrap_or_default(),
+        features.f3.map(|v| format!("{:.2}", v)).unwrap_or_default(),
+        format!("{:.6}", features.tty1),
+        features
+            .tty2
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .tty3
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        format!("{:.4}", features.iv1),
+        features
+            .iv2
+            .map(|v| format!("{:.4}", v))
+            .unwrap_or_default(),
+        features
+            .iv3
+            .map(|v| format!("{:.4}", v))
+            .unwrap_or_default(),
+        features
+            .ts12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .ts23
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .ts_curv
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .cal12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .cal23
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .sk1
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .sk2
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .sk3
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .roll12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .rollc12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+    ];
+
+    debug_assert_eq!(row.len(), CSV_COLUMN_COUNT, "Row column count mismatch");
+    wtr.write_record(&row)?;
+    wtr.flush()?;
+
+    info!(
+        "Wrote features to {:?} ({} columns)",
+        args.output, CSV_COLUMN_COUNT
+    );
+
+    // Write manifest with audit info
+    let manifest = FeatureManifest {
+        version: "0.8.1".to_string(),
+        policies: PolicyConfig {
+            eta: args.eta,
+            v_min: V_MIN,
+            epsilon_strike: EPSILON_STRIKE,
+            k_n_normalized: K_N_NORMALIZED,
+            strike_band: 20,
+            expiry_policy: "T1T2T3".to_string(),
+        },
+        grid_points: GridConfig {
+            k_low: 0.97,
+            k_atm: 1.0,
+            k_high: 1.03,
+        },
+        iv_solver: IVSolverConfig {
+            method: "bisection".to_string(),
+            vol_min: 0.001,
+            vol_max: 5.0,
+            tolerance: 1e-6,
+        },
+        session_info: SessionInfo {
+            session_dir: inventory.session_dir.to_string_lossy().to_string(),
+            underlying: args.underlying.clone(),
+            expiries: slices.iter().map(|s| s.expiry.clone()).collect(),
+            snapshot_count: 1,
+        },
+    };
+
+    let manifest_json = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(&args.manifest, &manifest_json)?;
+    info!(
+        "Wrote manifest to {:?} (universe_sha256={})",
+        args.manifest, underlying_inv.universe_sha256
+    );
+
+    // Print summary (same as legacy)
+    print_feature_summary(&features);
+
+    Ok(())
+}
+
+fn print_feature_summary(features: &FeatureRow) {
+    println!("\n=== SANOS PHASE 8: FEATURE EXTRACTION ===");
+    println!("Underlying: {}", features.underlying);
+    println!("Timestamp: {}", features.ts);
+    println!();
+
+    println!("--- Term Structure ---");
+    println!("Expiry     Forward      TTY(d)    ATM IV");
+    println!(
+        "{:<10} {:>10.2} {:>8.1}    {:.2}%",
+        features.t1,
+        features.f1,
+        features.tty1 * 365.0,
+        features.iv1 * 100.0
+    );
+    if let (Some(t2), Some(f2), Some(tty2), Some(iv2)) =
+        (&features.t2, features.f2, features.tty2, features.iv2)
+    {
+        println!(
+            "{:<10} {:>10.2} {:>8.1}    {:.2}%",
+            t2, f2, tty2 * 365.0, iv2 * 100.0
+        );
+    }
+    if let (Some(t3), Some(f3), Some(tty3), Some(iv3)) =
+        (&features.t3, features.f3, features.tty3, features.iv3)
+    {
+        println!(
+            "{:<10} {:>10.2} {:>8.1}    {:.2}%",
+            t3, f3, tty3 * 365.0, iv3 * 100.0
+        );
+    }
+    println!();
+
+    println!("--- Features ---");
+    if let Some(ts12) = features.ts12 {
+        println!("TS12 (term slope T1->T2):  {:.4}", ts12);
+    }
+    if let Some(ts23) = features.ts23 {
+        println!("TS23 (term slope T2->T3):  {:.4}", ts23);
+    }
+    if let Some(ts_curv) = features.ts_curv {
+        println!("TS_curv (curvature):       {:.4}", ts_curv);
+    }
+    println!();
+
+    if let Some(cal12) = features.cal12 {
+        println!("CAL12 (price gap T1->T2):  {:.6}", cal12);
+    }
+    if let Some(cal23) = features.cal23 {
+        println!("CAL23 (price gap T2->T3):  {:.6}", cal23);
+    }
+    println!();
+
+    if let Some(sk1) = features.sk1 {
+        println!("SK1 (skew T1):             {:.4}", sk1);
+    }
+    if let Some(sk2) = features.sk2 {
+        println!("SK2 (skew T2):             {:.4}", sk2);
+    }
+    if let Some(sk3) = features.sk3 {
+        println!("SK3 (skew T3):             {:.4}", sk3);
+    }
+    println!();
+
+    if let Some(roll12) = features.roll12 {
+        println!("ROLL12 (IV carry T1->T2):  {:.4}", roll12);
+    }
+    if let Some(rollc12) = features.rollc12 {
+        println!("ROLLC12 (price carry):     {:.6}", rollc12);
+    }
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -715,7 +1151,14 @@ fn main() -> Result<()> {
     info!("Session: {:?}", args.session_dir);
     info!("Underlying: {}", args.underlying);
 
-    // Discover expiries
+    // Try manifest-driven mode (Commit D)
+    if let Some(inventory) = sanos_io::try_load_sanos_inventory(&args.session_dir)? {
+        sanos_io::log_manifest_mode(&inventory);
+        return run_manifest_mode(&args, &inventory);
+    }
+
+    // Legacy mode: discover expiries from directory scan
+    sanos_io::log_legacy_mode(&args.session_dir);
     let expiries = discover_expiries(&args.session_dir, &args.underlying)?;
     info!("Found {} expiries: {:?}", expiries.len(), expiries);
 

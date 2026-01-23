@@ -1,7 +1,7 @@
 //! Binance capture (Spot) -> QuoteEvent JSONL for KiteSim replay.
 //!
 //! Uses Binance bookTicker stream: best bid/ask updates.
-//! Output format matches kubera-options::replay::QuoteEvent (one JSON per line).
+//! Output format matches quantlaxmi-options::replay::QuoteEvent (one JSON per line).
 //!
 //! Notes:
 //! - This is for TESTING and replay generation. No trading, no API keys required.

@@ -19,7 +19,9 @@
 pub mod artifact;
 pub mod circuit_breakers;
 pub mod config;
+pub mod manifest_io;
 pub mod report;
+pub mod session_manifest;
 pub mod tui;
 pub mod vectorbt;
 pub mod web_server;
@@ -28,6 +30,11 @@ pub use circuit_breakers::{
     CircuitBreakerStatus, LatencyCircuitBreaker, RateLimiter, TradingCircuitBreakers,
 };
 pub use config::{ExecutionInfo, ModeInfo, RiskInfo, RunnerConfig, StrategyConfig};
+pub use session_manifest::{
+    IntegritySummary, SessionManifest, TickOutputEntry, UnderlyingEntry,
+    load_session_manifest, load_universe_manifest_bytes, persist_session_manifest_atomic,
+    session_manifest_exists, SESSION_MANIFEST_SCHEMA_VERSION,
+};
 pub use web_server::{ServerState, WebMessage, start_server};
 
 use quantlaxmi_core::ExecutionMode;

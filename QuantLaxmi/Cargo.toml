@@ -1,15 +1,6 @@
 [workspace]
 members = [
-    # Core crates (shared spine) - legacy kubera-*
-    "crates/kubera-core",
-    "crates/kubera-models",
-    "crates/kubera-risk",
-    "crates/kubera-executor",
-    "crates/kubera-data",
-    "crates/kubera-options",
-    "crates/kubera-sbe",
-
-    # Shim crates (re-export kubera-* for migration)
+    # Core crates (shared trading spine)
     "crates/quantlaxmi-models",
     "crates/quantlaxmi-core",
     "crates/quantlaxmi-data",
@@ -18,16 +9,16 @@ members = [
     "crates/quantlaxmi-options",
     "crates/quantlaxmi-sbe",
 
-    # New isolated connectors
+    # Venue connectors (isolated by market)
     "crates/quantlaxmi-connectors-zerodha",
     "crates/quantlaxmi-connectors-binance",
 
-    # New isolated runner libs
+    # Runner libraries (isolated by market)
     "crates/quantlaxmi-runner-common",
     "crates/quantlaxmi-runner-india",
     "crates/quantlaxmi-runner-crypto",
 
-    # Isolated application binaries
+    # Application binaries
     "apps/quantlaxmi-india",
     "apps/quantlaxmi-crypto",
 ]

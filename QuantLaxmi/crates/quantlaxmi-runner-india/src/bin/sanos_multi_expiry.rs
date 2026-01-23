@@ -5,6 +5,11 @@
 //! Calendar arbitrage constraint: C(K, T1) ≤ C(K, T2) for T1 < T2 (at same strike K)
 //! This ensures forward-start call prices are non-negative.
 //!
+//! ## Modes
+//! - **Manifest-driven** (Commit D): When `session_manifest.json` exists, uses
+//!   deterministic inventory from manifests. No directory scanning or symbol parsing.
+//! - **Legacy**: Falls back to directory scanning + symbol parsing when no manifest.
+//!
 //! Usage:
 //!   cargo run --bin sanos_multi_expiry -- --session-dir <path> --underlying NIFTY
 
@@ -12,6 +17,11 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
+use quantlaxmi_runner_india::sanos_io::{
+    self, SanosManifestInventory, SanosUnderlyingInventory,
+};
+#[allow(unused_imports)]
+use quantlaxmi_runner_india::sanos_io::InstrumentInfo;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -273,6 +283,112 @@ fn load_ticks(
     Ok(symbol_ticks)
 }
 
+// =============================================================================
+// MANIFEST-DRIVEN LOADERS (Commit D)
+// =============================================================================
+
+/// Load ticks for a specific expiry using manifest inventory (no directory scan).
+fn load_ticks_manifest(
+    session_dir: &PathBuf,
+    underlying_inv: &SanosUnderlyingInventory,
+    expiry: NaiveDate,
+) -> Result<HashMap<String, Vec<TickEvent>>> {
+    let mut symbol_ticks: HashMap<String, Vec<TickEvent>> = HashMap::new();
+
+    // Get symbols for this expiry from the manifest
+    let symbols = underlying_inv.get_symbols_for_expiry(expiry);
+
+    for symbol in symbols {
+        // Get tick file path from manifest
+        if let Some(rel_path) = underlying_inv.get_tick_path(&symbol) {
+            let ticks_file = session_dir.join(rel_path);
+            if !ticks_file.exists() {
+                continue;
+            }
+
+            let file = File::open(&ticks_file)?;
+            let reader = BufReader::new(file);
+            let mut ticks = Vec::new();
+
+            for line in reader.lines() {
+                let line = line?;
+                if let Ok(tick) = serde_json::from_str::<TickEvent>(&line) {
+                    ticks.push(tick);
+                }
+            }
+
+            symbol_ticks.insert(symbol, ticks);
+        }
+    }
+
+    Ok(symbol_ticks)
+}
+
+/// Build ExpirySlice from tick data using manifest instrument info (no symbol parsing).
+fn build_slice_manifest(
+    symbol_ticks: &HashMap<String, Vec<TickEvent>>,
+    underlying_inv: &SanosUnderlyingInventory,
+    expiry: NaiveDate,
+    target_ts: DateTime<Utc>,
+    time_to_exp: f64,
+) -> Result<ExpirySlice> {
+    let expiry_str = expiry.format("%Y-%m-%d").to_string();
+    let mut slice = ExpirySlice::new(&underlying_inv.underlying, &expiry_str, target_ts, time_to_exp);
+
+    // Get instruments for this expiry from manifest
+    let instruments = underlying_inv.get_instruments_for_expiry(expiry);
+
+    for instr in instruments {
+        if let Some(ticks) = symbol_ticks.get(&instr.tradingsymbol) {
+            let closest_tick = ticks
+                .iter()
+                .min_by_key(|t| (t.ts - target_ts).num_milliseconds().abs());
+
+            if let Some(tick) = closest_tick {
+                if (tick.ts - target_ts).num_seconds().abs() > 5 {
+                    continue;
+                }
+
+                let price_mult = 10f64.powi(tick.price_exponent);
+                let bid = tick.bid_price as f64 * price_mult;
+                let ask = tick.ask_price as f64 * price_mult;
+
+                if bid <= 0.0 || ask <= 0.0 || ask < bid {
+                    continue;
+                }
+
+                let quote = OptionQuote {
+                    symbol: instr.tradingsymbol.clone(),
+                    strike: instr.strike,
+                    is_call: instr.instrument_type == "CE",
+                    bid,
+                    ask,
+                    timestamp: tick.ts,
+                };
+
+                slice.add_quote(quote);
+            }
+        }
+    }
+
+    Ok(slice)
+}
+
+/// Calculate time to expiry in years from NaiveDate
+fn time_to_expiry_from_date(now: DateTime<Utc>, exp_date: NaiveDate) -> f64 {
+    // Assume expiry at 15:30 IST (10:00 UTC)
+    let exp_datetime = exp_date
+        .and_hms_opt(10, 0, 0)
+        .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+
+    if let Some(exp_dt) = exp_datetime {
+        let days = (exp_dt - now).num_seconds() as f64 / 86400.0;
+        return (days / 365.0).max(1.0 / 365.0); // Minimum 1 day
+    }
+
+    7.0 / 365.0 // Fallback: 7 days
+}
+
 /// Build ExpirySlice from tick data at a specific timestamp
 fn build_slice(
     symbol_ticks: &HashMap<String, Vec<TickEvent>>,
@@ -361,6 +477,231 @@ fn check_calendar_arbitrage(
     violations
 }
 
+// =============================================================================
+// MANIFEST-DRIVEN MAIN (Commit D)
+// =============================================================================
+
+fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<()> {
+    // Find the underlying entry for the requested underlying
+    let underlying_inv = inventory
+        .underlyings
+        .iter()
+        .find(|u| u.underlying.eq_ignore_ascii_case(&args.underlying))
+        .ok_or_else(|| {
+            anyhow!(
+                "Underlying {} not found in session manifest. Available: {:?}",
+                args.underlying,
+                inventory.underlyings.iter().map(|u| &u.underlying).collect::<Vec<_>>()
+            )
+        })?;
+
+    // Get expiries from manifest (sorted)
+    let expiries = underlying_inv.get_sorted_expiries();
+    info!(
+        "Manifest-driven: {} expiries from universe manifest: {:?}",
+        expiries.len(),
+        expiries
+    );
+
+    if expiries.is_empty() {
+        return Err(anyhow!("No expiries found for {} in manifest", args.underlying));
+    }
+
+    // Find common timestamp (mid-session of first expiry data)
+    let first_ticks = load_ticks_manifest(&inventory.session_dir, underlying_inv, expiries[0])?;
+    let mut min_ts: Option<DateTime<Utc>> = None;
+    let mut max_ts: Option<DateTime<Utc>> = None;
+
+    for ticks in first_ticks.values() {
+        for tick in ticks {
+            min_ts = Some(min_ts.map_or(tick.ts, |m| m.min(tick.ts)));
+            max_ts = Some(max_ts.map_or(tick.ts, |m| m.max(tick.ts)));
+        }
+    }
+
+    let min_ts = min_ts.ok_or_else(|| anyhow!("No ticks found"))?;
+    let max_ts = max_ts.ok_or_else(|| anyhow!("No ticks found"))?;
+    let target_ts = min_ts + (max_ts - min_ts) / 2;
+
+    info!("Calibration timestamp: {}", target_ts);
+
+    // Calibrate each expiry
+    let calibrator = SanosCalibrator::with_eta(args.eta);
+    let mut slices: Vec<SanosSlice> = Vec::new();
+    let mut forwards: Vec<(String, f64)> = Vec::new();
+    let mut time_to_expiries: Vec<(String, f64)> = Vec::new();
+
+    for expiry in &expiries {
+        let expiry_str = expiry.format("%Y-%m-%d").to_string();
+        info!("Calibrating {} {} (manifest-driven)", args.underlying, expiry_str);
+
+        let ticks = load_ticks_manifest(&inventory.session_dir, underlying_inv, *expiry)?;
+        let tte = time_to_expiry_from_date(target_ts, *expiry);
+
+        let slice = build_slice_manifest(&ticks, underlying_inv, *expiry, target_ts, tte)?;
+
+        if slice.calls.is_empty() || slice.puts.is_empty() {
+            info!("  Skipping: insufficient data");
+            continue;
+        }
+
+        match calibrator.calibrate(&slice) {
+            Ok(sanos_slice) => {
+                info!(
+                    "  F0={:.2}, Σq={:.6}, LP={}",
+                    sanos_slice.forward,
+                    sanos_slice.diagnostics.weights_sum,
+                    sanos_slice.diagnostics.lp_status
+                );
+
+                forwards.push((expiry_str.clone(), sanos_slice.forward));
+                time_to_expiries.push((expiry_str, tte));
+                slices.push(sanos_slice);
+            }
+            Err(e) => {
+                info!("  FAILED: {}", e);
+            }
+        }
+    }
+
+    if slices.is_empty() {
+        return Err(anyhow!("No successful calibrations"));
+    }
+
+    // Check calendar arbitrage between consecutive expiries
+    let mut all_violations: Vec<CalendarViolation> = Vec::new();
+    let tolerance = 0.0001;
+
+    for i in 0..slices.len() - 1 {
+        let near = &slices[i];
+        let far = &slices[i + 1];
+
+        let violations = check_calendar_arbitrage(near, far, tolerance);
+        if !violations.is_empty() {
+            info!(
+                "Calendar violations between {} and {}: {}",
+                near.expiry,
+                far.expiry,
+                violations.len()
+            );
+        }
+        all_violations.extend(violations);
+    }
+
+    let max_violation = all_violations
+        .iter()
+        .map(|v| v.violation_amount)
+        .fold(0.0, f64::max);
+
+    let calendar_free = all_violations.is_empty();
+
+    // Certification
+    let mut notes = Vec::new();
+    let mut state_certified = true;
+
+    for slice in &slices {
+        if (slice.diagnostics.weights_sum - 1.0).abs() > 0.01 {
+            state_certified = false;
+            notes.push(format!(
+                "{}: martingale sum = {:.6}",
+                slice.expiry, slice.diagnostics.weights_sum
+            ));
+        }
+    }
+
+    if !calendar_free {
+        state_certified = false;
+        notes.push(format!(
+            "{} calendar arbitrage violations (max: {:.6})",
+            all_violations.len(),
+            max_violation
+        ));
+    }
+
+    // Add manifest audit info to notes
+    notes.push(format!(
+        "manifest-driven: universe_sha256={}",
+        underlying_inv.universe_sha256
+    ));
+
+    if state_certified {
+        notes.push("All martingale and calendar arbitrage checks passed".to_string());
+    }
+
+    let result = MultiExpiryResult {
+        underlying: args.underlying.clone(),
+        calibration_ts: target_ts,
+        num_expiries: slices.len(),
+        expiries: slices.iter().map(|s| s.expiry.clone()).collect(),
+        slices,
+        calendar_violations: all_violations.clone(),
+        num_calendar_violations: all_violations.len(),
+        max_calendar_violation: max_violation,
+        calendar_arbitrage_free: calendar_free,
+        forwards,
+        time_to_expiries,
+        state_certified,
+        certification_notes: notes.clone(),
+    };
+
+    // Save JSON output
+    let json = serde_json::to_string_pretty(&result)?;
+    std::fs::write(&args.output, &json)?;
+    info!("Saved result to {:?}", args.output);
+
+    // Print summary (same as legacy mode)
+    print_summary(&result);
+
+    Ok(())
+}
+
+fn print_summary(result: &MultiExpiryResult) {
+    println!("\n=== SANOS MULTI-EXPIRY TERM STRUCTURE ===");
+    println!("Underlying: {}", result.underlying);
+    println!("Calibration: {}", result.calibration_ts);
+    println!();
+
+    println!("--- Term Structure ---");
+    println!("{:<10} {:>12} {:>10}", "Expiry", "Forward", "TTY (days)");
+    for ((exp, fwd), (_, tte)) in result.forwards.iter().zip(result.time_to_expiries.iter()) {
+        println!("{:<10} {:>12.2} {:>10.1}", exp, fwd, tte * 365.0);
+    }
+    println!();
+
+    println!("--- Calendar Arbitrage ---");
+    if result.calendar_arbitrage_free {
+        println!("Status: ✓ ARBITRAGE-FREE");
+        println!("No violations detected between expiries");
+    } else {
+        println!("Status: ✗ VIOLATIONS DETECTED");
+        println!("Violations: {}", result.num_calendar_violations);
+        println!("Max violation: {:.6}", result.max_calendar_violation);
+        for v in result.calendar_violations.iter().take(5) {
+            println!(
+                "  K={:.0}: {}={:.4} > {}={:.4}",
+                v.strike, v.near_expiry, v.near_call_price, v.far_expiry, v.far_call_price
+            );
+        }
+        if result.num_calendar_violations > 5 {
+            println!("  ... and {} more", result.num_calendar_violations - 5);
+        }
+    }
+    println!();
+
+    println!("=== CERTIFICATION ===");
+    println!(
+        "STATE_CERTIFIED: {}",
+        if result.state_certified {
+            "✓ CERTIFIED"
+        } else {
+            "✗ NOT CERTIFIED"
+        }
+    );
+    for note in &result.certification_notes {
+        println!("  - {}", note);
+    }
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -375,7 +716,14 @@ fn main() -> Result<()> {
     info!("Session: {:?}", args.session_dir);
     info!("Underlying: {}", args.underlying);
 
-    // Discover all expiries
+    // Try manifest-driven mode (Commit D)
+    if let Some(inventory) = sanos_io::try_load_sanos_inventory(&args.session_dir)? {
+        sanos_io::log_manifest_mode(&inventory);
+        return run_manifest_mode(&args, &inventory);
+    }
+
+    // Legacy mode: discover expiries from directory scan
+    sanos_io::log_legacy_mode(&args.session_dir);
     let expiries = discover_expiries(&args.session_dir, &args.underlying)?;
     info!("Found {} expiries: {:?}", expiries.len(), expiries);
 
@@ -519,51 +867,8 @@ fn main() -> Result<()> {
     std::fs::write(&args.output, &json)?;
     info!("Saved result to {:?}", args.output);
 
-    // Print summary
-    println!("\n=== SANOS MULTI-EXPIRY TERM STRUCTURE ===");
-    println!("Underlying: {}", result.underlying);
-    println!("Calibration: {}", result.calibration_ts);
-    println!();
-
-    println!("--- Term Structure ---");
-    println!("{:<10} {:>12} {:>10}", "Expiry", "Forward", "TTY (days)");
-    for ((exp, fwd), (_, tte)) in result.forwards.iter().zip(result.time_to_expiries.iter()) {
-        println!("{:<10} {:>12.2} {:>10.1}", exp, fwd, tte * 365.0);
-    }
-    println!();
-
-    println!("--- Calendar Arbitrage ---");
-    if result.calendar_arbitrage_free {
-        println!("Status: ✓ ARBITRAGE-FREE");
-        println!("No violations detected between expiries");
-    } else {
-        println!("Status: ✗ VIOLATIONS DETECTED");
-        println!("Violations: {}", result.num_calendar_violations);
-        println!("Max violation: {:.6}", result.max_calendar_violation);
-        for v in result.calendar_violations.iter().take(5) {
-            println!(
-                "  K={:.0}: {}={:.4} > {}={:.4}",
-                v.strike, v.near_expiry, v.near_call_price, v.far_expiry, v.far_call_price
-            );
-        }
-        if result.num_calendar_violations > 5 {
-            println!("  ... and {} more", result.num_calendar_violations - 5);
-        }
-    }
-    println!();
-
-    println!("=== CERTIFICATION ===");
-    println!(
-        "STATE_CERTIFIED: {}",
-        if result.state_certified {
-            "✓ CERTIFIED"
-        } else {
-            "✗ NOT CERTIFIED"
-        }
-    );
-    for note in &result.certification_notes {
-        println!("  - {}", note);
-    }
+    // Print summary (shared with manifest mode)
+    print_summary(&result);
 
     Ok(())
 }

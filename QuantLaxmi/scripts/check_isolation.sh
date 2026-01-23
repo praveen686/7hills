@@ -17,8 +17,8 @@ cargo build -p quantlaxmi-crypto --release 2>&1 | tail -5
 
 echo ""
 echo "[3/4] Checking India binary has NO Binance/SBE dependencies..."
-# More precise patterns: match "binance" or "kubera-sbe" package names
-if cargo tree -p quantlaxmi-india 2>/dev/null | grep -E "(binance|kubera-sbe|quantlaxmi-connectors-binance)" > /dev/null; then
+# More precise patterns: match "binance" or "quantlaxmi-sbe" package names
+if cargo tree -p quantlaxmi-india 2>/dev/null | grep -E "(binance|quantlaxmi-sbe|quantlaxmi-connectors-binance)" > /dev/null; then
     echo "FAIL: India binary has Binance/SBE dependencies!"
     cargo tree -p quantlaxmi-india | grep -E "(binance|kubera-sbe|quantlaxmi-connectors-binance)"
     exit 1
@@ -50,12 +50,22 @@ else
 fi
 
 echo ""
-echo "[6/6] Checking for QuantKubera1 references..."
+echo "[6/7] Checking for QuantKubera1 references..."
 if [ -d "../QuantKubera1" ]; then
     echo "FAIL: QuantKubera1 directory still exists!"
     exit 1
 else
     echo "PASS: QuantKubera1 directory removed"
+fi
+
+echo ""
+echo "[7/7] Checking that NO crates/kubera-* directories exist..."
+if ls crates/kubera-* >/dev/null 2>&1; then
+    echo "FAIL: Found crates/kubera-* directories (Kubera not fully removed)!"
+    ls -d crates/kubera-* || true
+    exit 1
+else
+    echo "PASS: No crates/kubera-* directories exist"
 fi
 
 echo ""

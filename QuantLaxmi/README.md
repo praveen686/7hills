@@ -1,8 +1,4 @@
-## QuantLaxmi (Rebrand in progress)
-
-This repository is being rebranded from QuantKubera to QuantLaxmi.
-
-# QuantKubera - Institutional-Grade Rust Trading Platform
+# QuantLaxmi - Institutional-Grade Rust Trading Platform
 
 A high-frequency, multi-venue trading system built in Rust for NSE F&O and crypto markets.
 
@@ -18,28 +14,33 @@ A high-frequency, multi-venue trading system built in Rust for NSE F&O and crypt
 ## Project Structure
 
 ```
-QuantKubera/
-├── crates/                    # Rust workspace
-│   ├── kubera-core/           # Event bus, strategies, risk management
-│   ├── kubera-data/           # Market data types, WAL recording
-│   ├── kubera-executor/       # Order execution (simulated + live)
-│   ├── kubera-connectors/     # Zerodha/Binance WebSocket connectors
-│   ├── kubera-options/        # Black-Scholes, Greeks, NSE specs
-│   ├── kubera-backtest/       # Backtesting engine
-│   ├── kubera-risk/           # Position limits, order validation
-│   ├── kubera-runner/         # TUI dashboard, main entry point
-│   └── kubera-mlflow/         # MLFlow experiment tracking
-├── configs/                   # Configuration files
+QuantLaxmi/
+├── apps/                          # Application binaries
+│   ├── quantlaxmi-india/          # India (NSE F&O) trading binary
+│   └── quantlaxmi-crypto/         # Crypto (Binance) trading binary
+├── crates/                        # Rust workspace
+│   ├── quantlaxmi-core/           # Event bus, strategies, risk management
+│   ├── quantlaxmi-models/         # Market data types, depth events
+│   ├── quantlaxmi-data/           # L2 book snapshots, VPIN calculator
+│   ├── quantlaxmi-executor/       # Order execution (simulated + live)
+│   ├── quantlaxmi-options/        # Black-Scholes, Greeks, KiteSim, NSE specs
+│   ├── quantlaxmi-risk/           # Position limits, order validation
+│   ├── quantlaxmi-sbe/            # SBE binary protocol for Binance depth
+│   ├── quantlaxmi-connectors-zerodha/   # Zerodha WebSocket connector
+│   ├── quantlaxmi-connectors-binance/   # Binance WebSocket connector
+│   ├── quantlaxmi-runner-common/  # Shared runner utilities (TUI, artifacts)
+│   ├── quantlaxmi-runner-india/   # India-specific capture and replay
+│   └── quantlaxmi-runner-crypto/  # Crypto-specific capture and replay
+├── configs/                       # Configuration files
 │   ├── backtest.toml
 │   ├── paper.toml
 │   └── live.toml
-├── infra/                     # Infrastructure
-│   └── observability/         # Grafana, Prometheus configs
-├── python/                    # Python utilities (Zerodha auth, data)
-├── research/                  # Research and indicators
-├── ui/                        # Web dashboard (React)
-├── contracts/                 # Solidity contracts
-└── docs/                      # Documentation
+├── infra/                         # Infrastructure
+│   └── observability/             # Grafana, Prometheus configs
+├── python/                        # Python utilities (Zerodha auth, data)
+├── scripts/                       # Build and validation scripts
+├── tests/                         # Integration test fixtures
+└── docs/                          # Documentation
 ```
 
 ## Quick Start
@@ -48,14 +49,43 @@ QuantKubera/
 # Build all crates
 cargo build --release
 
-# Run paper trading mode
-cargo run -p kubera-runner --release -- --mode paper
+# Run India paper trading
+cargo run -p quantlaxmi-india --release
 
-# Run backtest
-cargo run -p kubera-backtest --release
+# Run Crypto paper trading
+cargo run -p quantlaxmi-crypto --release
 
-# Run benchmarks
-cargo bench -p kubera-core
+# Run workspace tests
+cargo test --workspace
+
+# Run isolation checks
+bash scripts/check_isolation.sh
+```
+
+## Binary Commands
+
+### quantlaxmi-india
+```bash
+# Discover NSE F&O universe
+quantlaxmi-india discover-zerodha
+
+# Capture live quotes
+quantlaxmi-india capture-zerodha --symbols BANKNIFTY26JAN48000CE --duration-secs 300
+
+# Run KiteSim backtest
+quantlaxmi-india backtest-kitesim --replay-file data/quotes.jsonl
+```
+
+### quantlaxmi-crypto
+```bash
+# Capture Binance book ticker
+quantlaxmi-crypto capture-binance --symbols BTCUSDT,ETHUSDT --duration-secs 300
+
+# Capture SBE depth stream
+quantlaxmi-crypto capture-sbe-depth --symbols BTCUSDT --duration-secs 60
+
+# Get exchange info
+quantlaxmi-crypto exchange-info
 ```
 
 ## Configuration
@@ -76,6 +106,21 @@ ZERODHA_USER_ID=your_user_id
 ZERODHA_PASSWORD=your_password
 ZERODHA_TOTP_SECRET=your_totp_secret
 ```
+
+Required for Binance:
+```bash
+BINANCE_API_KEY=your_api_key
+BINANCE_API_SECRET=your_api_secret
+```
+
+## Architecture
+
+The platform enforces strict dependency isolation:
+
+- **India binary** (`quantlaxmi-india`): No Binance/SBE dependencies
+- **Crypto binary** (`quantlaxmi-crypto`): No Zerodha dependencies
+
+This isolation is enforced by CI and the `check_isolation.sh` script.
 
 ## License
 

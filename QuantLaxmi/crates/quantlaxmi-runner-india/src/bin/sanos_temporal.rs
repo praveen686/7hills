@@ -4,11 +4,19 @@
 //! temporal stability of the arbitrage-free surface.
 //!
 //! Phase 6 deliverable: Prove SANOS remains feasible, stable, and well-conditioned over time.
+//!
+//! ## Modes (Commit D)
+//! - **Manifest-driven**: When `session_manifest.json` exists, uses deterministic inventory.
+//! - **Legacy**: Falls back to directory scanning + symbol parsing when no manifest.
 
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clap::Parser;
 use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
+use quantlaxmi_runner_india::sanos_io::{
+    SanosManifestInventory, SanosUnderlyingInventory,
+    try_load_sanos_inventory, log_manifest_mode, log_legacy_mode,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -339,6 +347,546 @@ fn compute_metrics(current: &SanosSlice, previous: Option<&SanosSlice>) -> Stabi
     }
 }
 
+// =============================================================================
+// MANIFEST-DRIVEN LOADERS (Commit D)
+// =============================================================================
+
+/// Load ticks for a specific expiry using manifest inventory (no directory scan).
+fn load_ticks_manifest(
+    session_dir: &PathBuf,
+    underlying_inv: &SanosUnderlyingInventory,
+    expiry: NaiveDate,
+) -> Result<HashMap<String, Vec<TickEvent>>> {
+    let mut symbol_ticks: HashMap<String, Vec<TickEvent>> = HashMap::new();
+
+    let symbols = underlying_inv.get_symbols_for_expiry(expiry);
+
+    for symbol in symbols {
+        if let Some(rel_path) = underlying_inv.get_tick_path(&symbol) {
+            let ticks_file = session_dir.join(rel_path);
+            if !ticks_file.exists() {
+                continue;
+            }
+
+            let file = File::open(&ticks_file)?;
+            let reader = BufReader::new(file);
+            let mut ticks = Vec::new();
+
+            for line in reader.lines() {
+                let line = line?;
+                if let Ok(tick) = serde_json::from_str::<TickEvent>(&line) {
+                    ticks.push(tick);
+                }
+            }
+
+            symbol_ticks.insert(symbol, ticks);
+        }
+    }
+
+    Ok(symbol_ticks)
+}
+
+/// Build ExpirySlice from tick data using manifest instrument info (no symbol parsing).
+fn build_slice_manifest(
+    symbol_ticks: &HashMap<String, Vec<TickEvent>>,
+    underlying_inv: &SanosUnderlyingInventory,
+    expiry: NaiveDate,
+    target_ts: DateTime<Utc>,
+    time_to_exp: f64,
+) -> Result<ExpirySlice> {
+    let expiry_str = expiry.format("%Y-%m-%d").to_string();
+    let mut slice = ExpirySlice::new(&underlying_inv.underlying, &expiry_str, target_ts, time_to_exp);
+
+    let instruments = underlying_inv.get_instruments_for_expiry(expiry);
+
+    for instr in instruments {
+        if let Some(ticks) = symbol_ticks.get(&instr.tradingsymbol) {
+            let closest_tick = ticks
+                .iter()
+                .min_by_key(|t| (t.ts - target_ts).num_milliseconds().abs());
+
+            if let Some(tick) = closest_tick {
+                if (tick.ts - target_ts).num_seconds().abs() > 5 {
+                    continue;
+                }
+
+                let price_mult = 10f64.powi(tick.price_exponent);
+                let bid = tick.bid_price as f64 * price_mult;
+                let ask = tick.ask_price as f64 * price_mult;
+
+                if bid <= 0.0 || ask <= 0.0 || ask < bid {
+                    continue;
+                }
+
+                let quote = OptionQuote {
+                    symbol: instr.tradingsymbol.clone(),
+                    strike: instr.strike,
+                    is_call: instr.instrument_type == "CE",
+                    bid,
+                    ask,
+                    timestamp: tick.ts,
+                };
+
+                slice.add_quote(quote);
+            }
+        }
+    }
+
+    Ok(slice)
+}
+
+/// Calculate time to expiry in years from NaiveDate
+fn time_to_expiry_from_date(now: DateTime<Utc>, exp_date: NaiveDate) -> f64 {
+    let exp_datetime = exp_date
+        .and_hms_opt(10, 0, 0)
+        .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+
+    if let Some(exp_dt) = exp_datetime {
+        let days = (exp_dt - now).num_seconds() as f64 / 86400.0;
+        return (days / 365.0).max(1.0 / 365.0);
+    }
+
+    7.0 / 365.0
+}
+
+/// Match a short expiry code (e.g., "26JAN") to a NaiveDate in the manifest.
+fn match_expiry_code(expiry_code: &str, available_expiries: &[NaiveDate]) -> Option<NaiveDate> {
+    let code_upper = expiry_code.to_uppercase();
+
+    for expiry in available_expiries {
+        let formatted = expiry.format("%d%b").to_string().to_uppercase();
+        if formatted == code_upper {
+            return Some(*expiry);
+        }
+
+        let formatted_no_zero = format!("{}{}",
+            expiry.format("%e").to_string().trim(),
+            expiry.format("%b").to_string().to_uppercase()
+        );
+        if formatted_no_zero == code_upper {
+            return Some(*expiry);
+        }
+    }
+
+    None
+}
+
+/// Run manifest-driven temporal analysis.
+fn run_manifest_mode(args: &Args, inventory: &SanosManifestInventory) -> Result<()> {
+    let underlying_inv = inventory
+        .underlyings
+        .iter()
+        .find(|u| u.underlying.eq_ignore_ascii_case(&args.underlying))
+        .ok_or_else(|| {
+            anyhow!(
+                "Underlying {} not found in session manifest. Available: {:?}",
+                args.underlying,
+                inventory.underlyings.iter().map(|u| &u.underlying).collect::<Vec<_>>()
+            )
+        })?;
+
+    let available_expiries = underlying_inv.get_sorted_expiries();
+    info!(
+        "Manifest-driven: {} expiries available, universe_sha256={}",
+        available_expiries.len(),
+        underlying_inv.universe_sha256
+    );
+
+    let target_expiry = match_expiry_code(&args.expiry, &available_expiries)
+        .ok_or_else(|| {
+            anyhow!(
+                "Expiry code {} not found in manifest. Available: {:?}",
+                args.expiry,
+                available_expiries.iter().map(|e| e.format("%d%b").to_string()).collect::<Vec<_>>()
+            )
+        })?;
+
+    info!(
+        "Matched expiry code {} -> {}",
+        args.expiry,
+        target_expiry.format("%Y-%m-%d")
+    );
+
+    // Create output directory
+    std::fs::create_dir_all(&args.output_dir)?;
+
+    // Load ticks using manifest
+    let symbol_ticks = load_ticks_manifest(&inventory.session_dir, underlying_inv, target_expiry)?;
+    info!("Loaded {} symbols (manifest-driven)", symbol_ticks.len());
+
+    if symbol_ticks.is_empty() {
+        return Err(anyhow!("No symbols found"));
+    }
+
+    // Find session time range
+    let mut min_ts: Option<DateTime<Utc>> = None;
+    let mut max_ts: Option<DateTime<Utc>> = None;
+
+    for ticks in symbol_ticks.values() {
+        for tick in ticks {
+            min_ts = Some(min_ts.map_or(tick.ts, |m| m.min(tick.ts)));
+            max_ts = Some(max_ts.map_or(tick.ts, |m| m.max(tick.ts)));
+        }
+    }
+
+    let min_ts = min_ts.ok_or_else(|| anyhow!("No ticks found"))?;
+    let max_ts = max_ts.ok_or_else(|| anyhow!("No ticks found"))?;
+    let session_duration = (max_ts - min_ts).num_seconds();
+
+    info!(
+        "Session: {} to {} ({} seconds)",
+        min_ts, max_ts, session_duration
+    );
+
+    // Run SANOS at each interval
+    let calibrator = SanosCalibrator::with_eta(args.eta);
+    let mut snapshots: Vec<StabilityMetrics> = Vec::new();
+    let mut slices: Vec<SanosSlice> = Vec::new();
+    let mut num_feasible = 0;
+    let mut num_infeasible = 0;
+
+    let mut current_ts = min_ts;
+    while current_ts <= max_ts {
+        info!("Calibrating at {}", current_ts);
+
+        let time_to_expiry = time_to_expiry_from_date(current_ts, target_expiry);
+        let slice = build_slice_manifest(
+            &symbol_ticks,
+            underlying_inv,
+            target_expiry,
+            current_ts,
+            time_to_expiry,
+        )?;
+
+        if slice.calls.is_empty() || slice.puts.is_empty() {
+            info!("  Skipping: insufficient data");
+            current_ts += Duration::seconds(args.interval_secs);
+            continue;
+        }
+
+        match calibrator.calibrate(&slice) {
+            Ok(sanos_slice) => {
+                let prev = slices.last();
+                let metrics = compute_metrics(&sanos_slice, prev);
+
+                info!(
+                    "  F0={:.2}, Σq={:.6}, drift={:.6}",
+                    metrics.forward, metrics.weights_sum, metrics.weight_drift_l1
+                );
+
+                snapshots.push(metrics);
+                slices.push(sanos_slice);
+                num_feasible += 1;
+            }
+            Err(e) => {
+                info!("  INFEASIBLE: {}", e);
+                num_infeasible += 1;
+            }
+        }
+
+        current_ts += Duration::seconds(args.interval_secs);
+    }
+
+    info!(
+        "Completed: {} feasible, {} infeasible",
+        num_feasible, num_infeasible
+    );
+
+    // Build and print analysis (reuse shared logic)
+    let analysis = build_temporal_analysis(
+        &args.underlying,
+        &args.expiry,
+        min_ts,
+        max_ts,
+        args.interval_secs,
+        &snapshots,
+        num_feasible,
+        num_infeasible,
+    );
+
+    // Save JSON output
+    let json_path = args.output_dir.join("temporal_analysis.json");
+    let json = serde_json::to_string_pretty(&analysis)?;
+    std::fs::write(&json_path, &json)?;
+    info!(
+        "Saved analysis to {:?} (universe_sha256={})",
+        json_path,
+        underlying_inv.universe_sha256
+    );
+
+    // Generate density evolution data for plotting
+    let density_csv_path = args.output_dir.join("density_evolution.csv");
+    let mut csv_file = File::create(&density_csv_path)?;
+    writeln!(
+        csv_file,
+        "timestamp,weight_drift,forward,active_weights,entropy"
+    )?;
+    for m in &analysis.snapshots {
+        writeln!(
+            csv_file,
+            "{},{:.6},{:.2},{},{:.4}",
+            m.timestamp, m.weight_drift_l1, m.forward, m.active_weights, m.weight_entropy
+        )?;
+    }
+    info!("Saved density evolution to {:?}", density_csv_path);
+
+    // Print summary
+    print_temporal_summary(&analysis);
+
+    Ok(())
+}
+
+/// Build TemporalAnalysis from collected snapshots.
+fn build_temporal_analysis(
+    underlying: &str,
+    expiry: &str,
+    start_ts: DateTime<Utc>,
+    end_ts: DateTime<Utc>,
+    interval_secs: i64,
+    snapshots: &[StabilityMetrics],
+    num_feasible: usize,
+    num_infeasible: usize,
+) -> TemporalAnalysis {
+    let drift_metrics: Vec<_> = snapshots.iter().skip(1).collect();
+
+    let max_density_drift = drift_metrics
+        .iter()
+        .map(|m| m.density_drift_l1)
+        .fold(0.0, f64::max);
+    let mean_density_drift = if !drift_metrics.is_empty() {
+        drift_metrics
+            .iter()
+            .map(|m| m.density_drift_l1)
+            .sum::<f64>()
+            / drift_metrics.len() as f64
+    } else {
+        0.0
+    };
+
+    let max_weight_drift = drift_metrics
+        .iter()
+        .map(|m| m.weight_drift_l1)
+        .fold(0.0, f64::max);
+    let mean_weight_drift = if !drift_metrics.is_empty() {
+        drift_metrics.iter().map(|m| m.weight_drift_l1).sum::<f64>() / drift_metrics.len() as f64
+    } else {
+        0.0
+    };
+
+    let min_active_weights = snapshots
+        .iter()
+        .map(|m| m.active_weights)
+        .min()
+        .unwrap_or(0);
+    let mean_active_weights = if !snapshots.is_empty() {
+        snapshots
+            .iter()
+            .map(|m| m.active_weights as f64)
+            .sum::<f64>()
+            / snapshots.len() as f64
+    } else {
+        0.0
+    };
+
+    let min_weight_observed = snapshots
+        .iter()
+        .map(|m| m.min_positive_weight)
+        .filter(|&w| w > 0.0)
+        .fold(f64::MAX, f64::min);
+
+    let forward_min = snapshots.iter().map(|m| m.forward).fold(f64::MAX, f64::min);
+    let forward_max = snapshots.iter().map(|m| m.forward).fold(0.0, f64::max);
+    let max_forward_change = drift_metrics
+        .iter()
+        .map(|m| m.forward_change_pct.abs())
+        .fold(0.0, f64::max);
+
+    let max_fitted_call_drift = drift_metrics
+        .iter()
+        .map(|m| m.fitted_call_drift_l1)
+        .fold(0.0, f64::max);
+    let mean_fitted_call_drift = if !drift_metrics.is_empty() {
+        drift_metrics
+            .iter()
+            .map(|m| m.fitted_call_drift_l1)
+            .sum::<f64>()
+            / drift_metrics.len() as f64
+    } else {
+        0.0
+    };
+
+    // Two-tier certification
+    let mut state_certified = true;
+    let mut param_certified = true;
+    let mut notes = Vec::new();
+
+    if num_infeasible > 0 {
+        state_certified = false;
+        param_certified = false;
+        notes.push(format!("{} infeasible snapshots", num_infeasible));
+    }
+
+    for m in snapshots {
+        if (m.weights_sum - 1.0).abs() > 0.01 {
+            state_certified = false;
+            param_certified = false;
+            notes.push(format!("Martingale sum violated at {}", m.timestamp));
+        }
+        if (m.weights_mean - 1.0).abs() > 0.05 {
+            state_certified = false;
+            param_certified = false;
+            notes.push(format!("Martingale mean violated at {}", m.timestamp));
+        }
+    }
+
+    if max_fitted_call_drift > 0.05 {
+        state_certified = false;
+        notes.push(format!(
+            "Surface drift: max Ĉ drift {:.4} > 0.05 threshold",
+            max_fitted_call_drift
+        ));
+    }
+
+    if max_weight_drift > 0.5 {
+        param_certified = false;
+        notes.push(format!(
+            "Parameter non-identifiability: max q drift {:.4} > 0.5 threshold",
+            max_weight_drift
+        ));
+    }
+
+    if min_active_weights < 3 {
+        notes.push(format!(
+            "Corner solution detected: min {} active weights",
+            min_active_weights
+        ));
+    }
+
+    if max_forward_change > 1.0 {
+        notes.push(format!("Large forward change: {:.2}%", max_forward_change));
+    }
+
+    if state_certified && param_certified {
+        notes.push("All stability checks passed".to_string());
+    } else if state_certified && !param_certified {
+        notes.push(
+            "Surface stable (Ĉ), but LP parameters jump (q) - downstream Ĉ use is safe".to_string(),
+        );
+    }
+
+    TemporalAnalysis {
+        underlying: underlying.to_string(),
+        expiry: expiry.to_string(),
+        start_ts,
+        end_ts,
+        interval_secs,
+        num_snapshots: snapshots.len(),
+        num_feasible,
+        num_infeasible,
+        max_density_drift,
+        mean_density_drift,
+        max_weight_drift,
+        mean_weight_drift,
+        max_fitted_call_drift,
+        mean_fitted_call_drift,
+        min_active_weights,
+        mean_active_weights,
+        min_weight_observed: if min_weight_observed == f64::MAX {
+            0.0
+        } else {
+            min_weight_observed
+        },
+        forward_range: (forward_min, forward_max),
+        max_forward_change_pct: max_forward_change,
+        state_certified,
+        param_certified,
+        certification_notes: notes,
+        snapshots: snapshots.to_vec(),
+    }
+}
+
+/// Print temporal analysis summary.
+fn print_temporal_summary(analysis: &TemporalAnalysis) {
+    println!("\n=== SANOS TEMPORAL ANALYSIS ===");
+    println!("Underlying: {}", analysis.underlying);
+    println!("Expiry: {}", analysis.expiry);
+    println!("Session: {} to {}", analysis.start_ts, analysis.end_ts);
+    println!("Interval: {}s", analysis.interval_secs);
+    println!();
+    println!("--- Feasibility ---");
+    println!("Total snapshots: {}", analysis.num_snapshots);
+    println!("Feasible: {}", analysis.num_feasible);
+    println!("Infeasible: {}", analysis.num_infeasible);
+    println!();
+    println!("--- Drift Statistics ---");
+    println!(
+        "Max q drift (L1):  {:.6} (weight stability)",
+        analysis.max_weight_drift
+    );
+    println!("Mean q drift (L1): {:.6}", analysis.mean_weight_drift);
+    println!(
+        "Max Ĉ drift (L1):  {:.6} (surface stability)",
+        analysis.max_fitted_call_drift
+    );
+    println!("Mean Ĉ drift (L1): {:.6}", analysis.mean_fitted_call_drift);
+    println!();
+    println!("--- Conditioning ---");
+    println!("Min active weights: {}", analysis.min_active_weights);
+    println!("Mean active weights: {:.1}", analysis.mean_active_weights);
+    println!("Min positive weight: {:.6}", analysis.min_weight_observed);
+    println!();
+    println!("--- Forward Stability ---");
+    println!(
+        "Forward range: {:.2} - {:.2}",
+        analysis.forward_range.0, analysis.forward_range.1
+    );
+    println!(
+        "Max forward change: {:.2}%",
+        analysis.max_forward_change_pct
+    );
+    println!();
+    println!("=== TWO-TIER CERTIFICATION ===");
+    println!();
+    println!(
+        "STATE_CERTIFIED (Ĉ drift < 0.05): {}",
+        if analysis.state_certified {
+            "✓ CERTIFIED"
+        } else {
+            "✗ NOT CERTIFIED"
+        }
+    );
+    println!(
+        "  → Surface is {} for downstream use",
+        if analysis.state_certified {
+            "STABLE"
+        } else {
+            "UNSTABLE"
+        }
+    );
+    println!();
+    println!(
+        "PARAM_CERTIFIED (q drift < 0.5):  {}",
+        if analysis.param_certified {
+            "✓ CERTIFIED"
+        } else {
+            "✗ NOT CERTIFIED"
+        }
+    );
+    println!(
+        "  → LP parameters are {} between snapshots",
+        if analysis.param_certified {
+            "stable"
+        } else {
+            "jumping (non-identifiable)"
+        }
+    );
+    println!();
+    println!("Notes:");
+    for note in &analysis.certification_notes {
+        println!("  - {}", note);
+    }
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -353,6 +901,15 @@ fn main() -> Result<()> {
     info!("Session: {:?}", args.session_dir);
     info!("Underlying: {}, Expiry: {}", args.underlying, args.expiry);
     info!("Interval: {}s", args.interval_secs);
+
+    // Try manifest-driven mode (Commit D)
+    if let Some(inventory) = try_load_sanos_inventory(&args.session_dir)? {
+        log_manifest_mode(&inventory);
+        return run_manifest_mode(&args, &inventory);
+    }
+
+    // Legacy mode: directory scanning + symbol parsing
+    log_legacy_mode(&args.session_dir);
 
     // Create output directory
     std::fs::create_dir_all(&args.output_dir)?;
@@ -441,175 +998,17 @@ fn main() -> Result<()> {
         num_feasible, num_infeasible
     );
 
-    // Compute aggregate statistics
-    let drift_metrics: Vec<_> = snapshots.iter().skip(1).collect(); // Skip first (no previous)
-
-    let max_density_drift = drift_metrics
-        .iter()
-        .map(|m| m.density_drift_l1)
-        .fold(0.0, f64::max);
-    let mean_density_drift = if !drift_metrics.is_empty() {
-        drift_metrics
-            .iter()
-            .map(|m| m.density_drift_l1)
-            .sum::<f64>()
-            / drift_metrics.len() as f64
-    } else {
-        0.0
-    };
-
-    let max_weight_drift = drift_metrics
-        .iter()
-        .map(|m| m.weight_drift_l1)
-        .fold(0.0, f64::max);
-    let mean_weight_drift = if !drift_metrics.is_empty() {
-        drift_metrics.iter().map(|m| m.weight_drift_l1).sum::<f64>() / drift_metrics.len() as f64
-    } else {
-        0.0
-    };
-
-    let min_active_weights = snapshots
-        .iter()
-        .map(|m| m.active_weights)
-        .min()
-        .unwrap_or(0);
-    let mean_active_weights = if !snapshots.is_empty() {
-        snapshots
-            .iter()
-            .map(|m| m.active_weights as f64)
-            .sum::<f64>()
-            / snapshots.len() as f64
-    } else {
-        0.0
-    };
-
-    let min_weight_observed = snapshots
-        .iter()
-        .map(|m| m.min_positive_weight)
-        .filter(|&w| w > 0.0)
-        .fold(f64::MAX, f64::min);
-
-    let forward_min = snapshots.iter().map(|m| m.forward).fold(f64::MAX, f64::min);
-    let forward_max = snapshots.iter().map(|m| m.forward).fold(0.0, f64::max);
-    let max_forward_change = drift_metrics
-        .iter()
-        .map(|m| m.forward_change_pct.abs())
-        .fold(0.0, f64::max);
-
-    // Compute fitted call (Ĉ) drift statistics - KEY for state certification
-    let max_fitted_call_drift = drift_metrics
-        .iter()
-        .map(|m| m.fitted_call_drift_l1)
-        .fold(0.0, f64::max);
-    let mean_fitted_call_drift = if !drift_metrics.is_empty() {
-        drift_metrics
-            .iter()
-            .map(|m| m.fitted_call_drift_l1)
-            .sum::<f64>()
-            / drift_metrics.len() as f64
-    } else {
-        0.0
-    };
-
-    // Two-tier certification (Lead directive):
-    // - STATE_CERTIFIED: Based on Ĉ (fitted call) drift - surface stability (PRIMARY)
-    // - PARAM_CERTIFIED: Based on q (weight) drift - LP solution stability (SECONDARY)
-
-    let mut state_certified = true;
-    let mut param_certified = true;
-    let mut notes = Vec::new();
-
-    // Check feasibility (blocks both certifications)
-    if num_infeasible > 0 {
-        state_certified = false;
-        param_certified = false;
-        notes.push(format!("{} infeasible snapshots", num_infeasible));
-    }
-
-    // Check martingale constraints (blocks both certifications)
-    for m in &snapshots {
-        if (m.weights_sum - 1.0).abs() > 0.01 {
-            state_certified = false;
-            param_certified = false;
-            notes.push(format!("Martingale sum violated at {}", m.timestamp));
-        }
-        if (m.weights_mean - 1.0).abs() > 0.05 {
-            state_certified = false;
-            param_certified = false;
-            notes.push(format!("Martingale mean violated at {}", m.timestamp));
-        }
-    }
-
-    // STATE certification: Ĉ drift threshold = 0.05 (5% of normalized surface)
-    // This is the PRIMARY certification - surface is stable for downstream use
-    if max_fitted_call_drift > 0.05 {
-        state_certified = false;
-        notes.push(format!(
-            "Surface drift: max Ĉ drift {:.4} > 0.05 threshold",
-            max_fitted_call_drift
-        ));
-    }
-
-    // PARAM certification: q drift threshold = 0.5 (LP solution jumping)
-    // This is SECONDARY - only affects numerical reproducibility
-    if max_weight_drift > 0.5 {
-        param_certified = false;
-        notes.push(format!(
-            "Parameter non-identifiability: max q drift {:.4} > 0.5 threshold",
-            max_weight_drift
-        ));
-    }
-
-    // Informational notes (don't block certification)
-    if min_active_weights < 3 {
-        notes.push(format!(
-            "Corner solution detected: min {} active weights",
-            min_active_weights
-        ));
-    }
-
-    if max_forward_change > 1.0 {
-        notes.push(format!("Large forward change: {:.2}%", max_forward_change));
-    }
-
-    // Summary notes
-    if state_certified && param_certified {
-        notes.push("All stability checks passed".to_string());
-    } else if state_certified && !param_certified {
-        notes.push(
-            "Surface stable (Ĉ), but LP parameters jump (q) - downstream Ĉ use is safe".to_string(),
-        );
-    }
-
-    let analysis = TemporalAnalysis {
-        underlying: args.underlying.clone(),
-        expiry: args.expiry.clone(),
-        start_ts: min_ts,
-        end_ts: max_ts,
-        interval_secs: args.interval_secs,
-        num_snapshots: snapshots.len(),
+    // Build analysis using shared function
+    let analysis = build_temporal_analysis(
+        &args.underlying,
+        &args.expiry,
+        min_ts,
+        max_ts,
+        args.interval_secs,
+        &snapshots,
         num_feasible,
         num_infeasible,
-        max_density_drift,
-        mean_density_drift,
-        max_weight_drift,
-        mean_weight_drift,
-        max_fitted_call_drift,
-        mean_fitted_call_drift,
-        min_active_weights,
-        mean_active_weights,
-        min_weight_observed: if min_weight_observed == f64::MAX {
-            0.0
-        } else {
-            min_weight_observed
-        },
-        forward_range: (forward_min, forward_max),
-        max_forward_change_pct: max_forward_change,
-        state_certified,
-        param_certified,
-        certification_notes: notes,
-        snapshots,
-    };
+    );
 
     // Save JSON output
     let json_path = args.output_dir.join("temporal_analysis.json");
@@ -633,85 +1032,8 @@ fn main() -> Result<()> {
     }
     info!("Saved density evolution to {:?}", density_csv_path);
 
-    // Print summary
-    println!("\n=== SANOS TEMPORAL ANALYSIS ===");
-    println!("Underlying: {}", analysis.underlying);
-    println!("Expiry: {}", analysis.expiry);
-    println!("Session: {} to {}", analysis.start_ts, analysis.end_ts);
-    println!("Interval: {}s", analysis.interval_secs);
-    println!();
-    println!("--- Feasibility ---");
-    println!("Total snapshots: {}", analysis.num_snapshots);
-    println!("Feasible: {}", analysis.num_feasible);
-    println!("Infeasible: {}", analysis.num_infeasible);
-    println!();
-    println!("--- Drift Statistics ---");
-    println!(
-        "Max q drift (L1):  {:.6} (weight stability)",
-        analysis.max_weight_drift
-    );
-    println!("Mean q drift (L1): {:.6}", analysis.mean_weight_drift);
-    println!(
-        "Max Ĉ drift (L1):  {:.6} (surface stability)",
-        analysis.max_fitted_call_drift
-    );
-    println!("Mean Ĉ drift (L1): {:.6}", analysis.mean_fitted_call_drift);
-    println!();
-    println!("--- Conditioning ---");
-    println!("Min active weights: {}", analysis.min_active_weights);
-    println!("Mean active weights: {:.1}", analysis.mean_active_weights);
-    println!("Min positive weight: {:.6}", analysis.min_weight_observed);
-    println!();
-    println!("--- Forward Stability ---");
-    println!(
-        "Forward range: {:.2} - {:.2}",
-        analysis.forward_range.0, analysis.forward_range.1
-    );
-    println!(
-        "Max forward change: {:.2}%",
-        analysis.max_forward_change_pct
-    );
-    println!();
-    println!("=== TWO-TIER CERTIFICATION ===");
-    println!();
-    println!(
-        "STATE_CERTIFIED (Ĉ drift < 0.05): {}",
-        if analysis.state_certified {
-            "✓ CERTIFIED"
-        } else {
-            "✗ NOT CERTIFIED"
-        }
-    );
-    println!(
-        "  → Surface is {} for downstream use",
-        if analysis.state_certified {
-            "STABLE"
-        } else {
-            "UNSTABLE"
-        }
-    );
-    println!();
-    println!(
-        "PARAM_CERTIFIED (q drift < 0.5):  {}",
-        if analysis.param_certified {
-            "✓ CERTIFIED"
-        } else {
-            "✗ NOT CERTIFIED"
-        }
-    );
-    println!(
-        "  → LP parameters are {} between snapshots",
-        if analysis.param_certified {
-            "stable"
-        } else {
-            "jumping (non-identifiable)"
-        }
-    );
-    println!();
-    println!("Notes:");
-    for note in &analysis.certification_notes {
-        println!("  - {}", note);
-    }
+    // Print summary using shared function
+    print_temporal_summary(&analysis);
 
     Ok(())
 }

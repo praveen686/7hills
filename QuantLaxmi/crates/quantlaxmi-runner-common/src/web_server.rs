@@ -1,4 +1,4 @@
-//! # QuantKubera WebSocket Server
+//! # QuantLaxmi WebSocket Server
 //!
 //! Real-time metrics and control interface for paper trading.
 //!
@@ -181,7 +181,7 @@ pub async fn start_server(state: Arc<ServerState>, port: u16) {
 async fn health_handler() -> impl IntoResponse {
     axum::Json(serde_json::json!({
         "status": "ok",
-        "service": "kubera-runner",
+        "service": "quantlaxmi-runner",
         "version": env!("CARGO_PKG_VERSION")
     }))
 }

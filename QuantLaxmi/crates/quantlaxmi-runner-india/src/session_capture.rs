@@ -128,15 +128,29 @@ pub struct SessionCaptureStats {
     pub duration_secs: f64,
     pub total_ticks: usize,
     pub all_certified: bool,
+    /// Subscription mode: "manifest_tokens" (Commit B path) or "api_lookup" (legacy)
+    pub subscribe_mode: String,
+    /// Number of out-of-universe ticks dropped during capture (Commit B validation)
+    pub out_of_universe_ticks_dropped: usize,
+    /// Per-symbol tick output info: (tradingsymbol, relative_path, ticks_written, has_depth)
+    pub tick_outputs: Vec<(String, String, usize, bool)>,
 }
 
 /// Configuration for session capture.
 #[derive(Debug, Clone)]
 pub struct SessionCaptureConfig {
+    /// Instrument symbols (used for display and file naming)
     pub instruments: Vec<String>,
+    /// Output directory for session data
     pub out_dir: PathBuf,
+    /// Capture duration in seconds
     pub duration_secs: u64,
+    /// Price exponent for mantissa conversion (typically -2 for Kite)
     pub price_exponent: i8,
+    /// Manifest-provided tokens for subscription (Commit B: Phase 5.0)
+    /// If provided, these tokens are used directly instead of fetching from API.
+    /// Format: Vec<(tradingsymbol, instrument_token)>
+    pub manifest_tokens: Option<Vec<(String, u32)>>,
 }
 
 /// Authentication response from Python sidecar.
@@ -490,6 +504,9 @@ struct ParsedTick {
 
 /// Capture a multi-instrument session.
 pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCaptureStats> {
+    use std::collections::HashSet;
+    use tracing::{debug, warn};
+
     let session_id = uuid::Uuid::new_v4().to_string();
     let start_time = Utc::now();
 
@@ -507,12 +524,33 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     // Authenticate
     let (api_key, access_token) = authenticate()?;
 
-    // Fetch instrument tokens (auto-detects segment: NFO for options, NSE for indices)
-    println!(
-        "Fetching instrument tokens for {} symbols...",
-        config.instruments.len()
-    );
-    let tokens = fetch_instrument_tokens_auto(&api_key, &access_token, &config.instruments).await?;
+    // Determine tokens: use manifest tokens if provided (Commit B), otherwise fetch from API
+    let (tokens, subscribe_mode): (Vec<(String, u32)>, String) = if let Some(manifest_tokens) = &config.manifest_tokens {
+        println!(
+            "Using {} manifest-provided tokens (subscribe_mode=manifest_tokens)",
+            manifest_tokens.len()
+        );
+        debug!(
+            token_count = manifest_tokens.len(),
+            sample_tokens = ?manifest_tokens.iter().take(5).map(|(_, t)| t).collect::<Vec<_>>(),
+            subscribe_mode = "manifest_tokens",
+            "Subscription tokens from UniverseManifest"
+        );
+        (manifest_tokens.clone(), "manifest_tokens".to_string())
+    } else {
+        // Legacy path: fetch instrument tokens from API (auto-detects segment)
+        println!(
+            "Fetching instrument tokens for {} symbols (subscribe_mode=api_lookup)...",
+            config.instruments.len()
+        );
+        let fetched = fetch_instrument_tokens_auto(&api_key, &access_token, &config.instruments).await?;
+        debug!(
+            token_count = fetched.len(),
+            subscribe_mode = "api_lookup",
+            "Subscription tokens from API lookup"
+        );
+        (fetched, "api_lookup".to_string())
+    };
 
     if tokens.is_empty() {
         bail!(
@@ -521,10 +559,16 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         );
     }
 
-    println!("Found {} instrument tokens:", tokens.len());
-    for (sym, tok) in &tokens {
+    println!("Subscribing to {} instrument tokens:", tokens.len());
+    for (sym, tok) in tokens.iter().take(10) {
         println!("  {} -> {}", sym, tok);
     }
+    if tokens.len() > 10 {
+        println!("  ... and {} more", tokens.len() - 10);
+    }
+
+    // Build token validation set for out-of-universe detection (Commit B)
+    let valid_token_set: HashSet<u32> = tokens.iter().map(|(_, t)| *t).collect();
 
     // Build token -> symbol map
     let token_to_symbol: HashMap<u32, String> =
@@ -533,11 +577,16 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         tokens.iter().map(|(s, t)| (s.clone(), *t)).collect();
 
     // Create per-instrument directories and files
+    // Track relative paths for session manifest (Commit C audit fix 1.2)
     let mut files: HashMap<String, tokio::fs::File> = HashMap::new();
+    let mut tick_paths: HashMap<String, String> = HashMap::new();
     for (sym, _) in &tokens {
         let sym_dir = config.out_dir.join(sym);
         tokio::fs::create_dir_all(&sym_dir).await?;
         let tick_path = sym_dir.join("ticks.jsonl");
+        // Record relative path from out_dir (decoupled from format string)
+        let relative_path = format!("{}/ticks.jsonl", sym);
+        tick_paths.insert(sym.clone(), relative_path);
         let file = tokio::fs::OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -593,6 +642,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let deadline =
         tokio::time::Instant::now() + std::time::Duration::from_secs(config.duration_secs);
     let mut total_ticks = 0usize;
+    let mut out_of_universe_ticks = 0usize;
 
     // Capture loop
     while tokio::time::Instant::now() < deadline {
@@ -615,6 +665,18 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
             Message::Binary(data) => {
                 if let Some(parsed_ticks) = parse_kite_tick(&data, config.price_exponent) {
                     for tick in parsed_ticks {
+                        // Commit B: Validate tick token is in manifest universe
+                        if !valid_token_set.contains(&tick.token) {
+                            out_of_universe_ticks += 1;
+                            if out_of_universe_ticks <= 5 {
+                                warn!(
+                                    token = tick.token,
+                                    "Out-of-universe tick dropped (token not in manifest)"
+                                );
+                            }
+                            continue; // Drop tick - preserves determinism
+                        }
+
                         if let Some(symbol) = token_to_symbol.get(&tick.token) {
                             let event = TickEvent {
                                 ts: Utc::now(),
@@ -713,6 +775,13 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     println!("\n=== Session Capture Complete ===");
     println!("  Duration: {:.1}s", duration_secs);
     println!("  Total ticks: {}", total_ticks);
+    if out_of_universe_ticks > 0 {
+        println!("  Out-of-universe ticks dropped: {}", out_of_universe_ticks);
+        warn!(
+            out_of_universe_ticks,
+            "Session had out-of-universe ticks (dropped)"
+        );
+    }
     for (sym, stats) in &instrument_stats {
         println!(
             "  {}: {} ticks (certified={}, research={})",
@@ -728,6 +797,19 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         }
     );
 
+    // Build tick outputs list for session manifest (Commit C)
+    // Use tracked tick_paths for decoupled path derivation (audit fix 1.2)
+    let tick_outputs: Vec<(String, String, usize, bool)> = instrument_stats
+        .iter()
+        .map(|(sym, stats)| {
+            let relative_path = tick_paths
+                .get(sym)
+                .cloned()
+                .unwrap_or_else(|| format!("{}/ticks.jsonl", sym));
+            (sym.clone(), relative_path, stats.ticks_written, stats.has_depth)
+        })
+        .collect();
+
     Ok(SessionCaptureStats {
         session_id,
         instruments: config.instruments.clone(),
@@ -737,6 +819,9 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         duration_secs,
         total_ticks,
         all_certified,
+        subscribe_mode,
+        out_of_universe_ticks_dropped: out_of_universe_ticks,
+        tick_outputs,
     })
 }
 

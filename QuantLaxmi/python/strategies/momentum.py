@@ -1,6 +1,7 @@
-from kubera_sdk.base import KuberaStrategy, MarketEvent, BarPayload
+from quantlaxmi_sdk import QuantLaxmiStrategy, MarketEvent, BarPayload
 
-class MomentumStrategy(KuberaStrategy):
+
+class MomentumStrategy(QuantLaxmiStrategy):
     def __init__(self, name: str, threshold: float):
         super().__init__(name)
         self.threshold = threshold
