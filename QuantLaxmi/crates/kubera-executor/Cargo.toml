@@ -1,29 +1,10 @@
 [package]
 name = "kubera-executor"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "Legacy shim - re-exports quantlaxmi-executor"
+publish = false
 
 [dependencies]
-kubera-models = { path = "../kubera-models" }
-kubera-core = { path = "../kubera-core" }
-tokio = { workspace = true }
-chrono = { workspace = true }
-uuid = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-rand = { workspace = true }
-rand_pcg = "0.3"
-serde = { workspace = true }
-serde_json = { workspace = true }
-async-trait = { workspace = true }
-reqwest = { workspace = true }
-
-[features]
-live = []  # Enable for live trading support
-
-[dev-dependencies]
-criterion = { workspace = true }
-
-[[bench]]
-name = "benchmark_executor"
-harness = false
+# Re-export from quantlaxmi-executor (implementation moved there)
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
