@@ -17,10 +17,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
-kubera-ffi = { path = "../kubera-ffi", optional = true }
 
 [features]
-cpp_exec = ["kubera-ffi"]
 live = []  # Enable for live trading support
 
 [dev-dependencies]

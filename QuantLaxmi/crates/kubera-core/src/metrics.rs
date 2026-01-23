@@ -35,10 +35,10 @@
 //! └──────────────────────────────────────────────────────────────────────────┘
 //! ```
 
-use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
-use tracing::{info, debug};
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use tracing::{debug, info};
 
 // ============================================================================
 // CONFIGURATION
@@ -248,7 +248,7 @@ impl MetricsSnapshot {
     /// Generate a detailed report
     pub fn detailed_report(&self) -> String {
         format!(
-r#"
+            r#"
 ═══════════════════════════════════════════════════════════════
                     TRADING METRICS REPORT
 ═══════════════════════════════════════════════════════════════
@@ -442,8 +442,12 @@ impl TradingMetrics {
 
         self.trades.push(trade);
 
-        debug!("[METRICS] Trade recorded: total={}, gross_profit={:.2}, gross_loss={:.2}",
-            self.trades.len(), self.gross_profit, self.gross_loss);
+        debug!(
+            "[METRICS] Trade recorded: total={}, gross_profit={:.2}, gross_loss={:.2}",
+            self.trades.len(),
+            self.gross_profit,
+            self.gross_loss
+        );
     }
 
     /// Update equity with a new mark-to-market value
@@ -461,7 +465,10 @@ impl TradingMetrics {
         }
 
         // --- PERIODIC SAMPLING FOR RETURNS ---
-        let elapsed = timestamp.signed_duration_since(self.last_sample_time).num_milliseconds() as f64 / 1000.0;
+        let elapsed = timestamp
+            .signed_duration_since(self.last_sample_time)
+            .num_milliseconds() as f64
+            / 1000.0;
 
         // If timestamp is in the past (backtest mode), reset sample time to sync with market time
         if elapsed < 0.0 {
@@ -685,26 +692,37 @@ impl TradingMetrics {
         let mean_return = returns.iter().sum::<f64>() / n;
 
         // Variance and standard deviation
-        let variance = returns.iter()
+        let variance = returns
+            .iter()
             .map(|r| (r - mean_return).powi(2))
-            .sum::<f64>() / (n - 1.0);
+            .sum::<f64>()
+            / (n - 1.0);
         let std_dev = variance.sqrt();
 
         // Annualized volatility
         // annualization_factor = sqrt(T / t) where T is a year and t is the sampling interval
         let seconds_per_year = self.config.trading_days_per_year * 24.0 * 3600.0;
-        let annualization_factor = (seconds_per_year / self.config.sampling_interval_seconds).sqrt();
+        let annualization_factor =
+            (seconds_per_year / self.config.sampling_interval_seconds).sqrt();
         let volatility = std_dev * annualization_factor;
 
         // Downside deviation (only negative returns)
         let target_return = self.config.risk_free_rate / self.config.trading_days_per_year;
-        let downside_sq: f64 = returns.iter()
-            .map(|r| if *r < target_return { (r - target_return).powi(2) } else { 0.0 })
+        let downside_sq: f64 = returns
+            .iter()
+            .map(|r| {
+                if *r < target_return {
+                    (r - target_return).powi(2)
+                } else {
+                    0.0
+                }
+            })
             .sum();
         let downside_deviation = (downside_sq / n).sqrt() * annualization_factor;
 
         // Sharpe ratio (daily_rf adjusted to sampling interval)
-        let sample_rf = self.config.risk_free_rate * (self.config.sampling_interval_seconds / seconds_per_year);
+        let sample_rf =
+            self.config.risk_free_rate * (self.config.sampling_interval_seconds / seconds_per_year);
 
         // Use trade-based Sharpe if we have enough trades (more stable for backtest)
         let sharpe = if self.trades.len() >= self.config.min_trades_for_metrics {
@@ -735,9 +753,7 @@ impl TradingMetrics {
         let n = pnls.len() as f64;
 
         let mean_pnl = pnls.iter().sum::<f64>() / n;
-        let variance = pnls.iter()
-            .map(|p| (p - mean_pnl).powi(2))
-            .sum::<f64>() / (n - 1.0);
+        let variance = pnls.iter().map(|p| (p - mean_pnl).powi(2)).sum::<f64>() / (n - 1.0);
         let std_dev = variance.sqrt();
 
         if std_dev > 0.0 {
@@ -898,13 +914,13 @@ mod tests {
         let mut metrics = TradingMetrics::default_config();
 
         metrics.update_equity(100_000.0);
-        metrics.update_equity(110_000.0);  // Peak
-        metrics.update_equity(99_000.0);   // Drawdown
+        metrics.update_equity(110_000.0); // Peak
+        metrics.update_equity(99_000.0); // Drawdown
 
         metrics.recalculate();
         let snapshot = metrics.snapshot();
 
-        assert!(snapshot.max_drawdown_pct > 9.0);  // 10% drawdown from peak
+        assert!(snapshot.max_drawdown_pct > 9.0); // 10% drawdown from peak
     }
 
     #[test]

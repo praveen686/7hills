@@ -4,8 +4,8 @@
 //!
 //! ## Description
 //! Implements decoders for Binance's Simple Binary Encoding format, providing
-//! a zero-copy or near-zero-copy interface for high-frequency trading. 
-//! SBE bypasses the overhead of JSON parsing by mapping binary buffers 
+//! a zero-copy or near-zero-copy interface for high-frequency trading.
+//! SBE bypasses the overhead of JSON parsing by mapping binary buffers
 //! directly to structured types.
 //!
 //! ## Supported Message Types
@@ -69,7 +69,10 @@ impl BinanceSbeDecoder {
     /// * `body` - Remaining binary payload.
     pub fn decode_trade(header: &SbeHeader, body: &[u8]) -> anyhow::Result<AggTrade> {
         if header.template_id != 10000 {
-            anyhow::bail!("Invalid template ID for TradesStreamEvent: {}", header.template_id);
+            anyhow::bail!(
+                "Invalid template ID for TradesStreamEvent: {}",
+                header.template_id
+            );
         }
 
         if body.len() < 24 {
@@ -86,8 +89,10 @@ impl BinanceSbeDecoder {
             anyhow::bail!("Trade body too short for group header");
         }
 
-        let trade_block_len = LittleEndian::read_u16(&body[group_offset..group_offset+2]) as usize;
-        let group_count = LittleEndian::read_u32(&body[group_offset+2..group_offset+6]) as usize;
+        let trade_block_len =
+            LittleEndian::read_u16(&body[group_offset..group_offset + 2]) as usize;
+        let group_count =
+            LittleEndian::read_u32(&body[group_offset + 2..group_offset + 6]) as usize;
 
         if trade_block_len == 0 {
             anyhow::bail!("Invalid trade block length: 0");
@@ -101,10 +106,10 @@ impl BinanceSbeDecoder {
                 anyhow::bail!("Trade body too short for trade entry at offset {}", offset);
             }
 
-            let trade_id = LittleEndian::read_i64(&body[offset..offset+8]);
-            let price_mantissa = LittleEndian::read_i64(&body[offset+8..offset+16]);
-            let qty_mantissa = LittleEndian::read_i64(&body[offset+16..offset+24]);
-            let is_buyer_maker = body[offset+24] != 0;
+            let trade_id = LittleEndian::read_i64(&body[offset..offset + 8]);
+            let price_mantissa = LittleEndian::read_i64(&body[offset + 8..offset + 16]);
+            let qty_mantissa = LittleEndian::read_i64(&body[offset + 16..offset + 24]);
+            let is_buyer_maker = body[offset + 24] != 0;
 
             let price = price_mantissa as f64 * 10f64.powi(price_exponent as i32);
             let quantity = qty_mantissa as f64 * 10f64.powi(qty_exponent as i32);
@@ -141,7 +146,10 @@ impl BinanceSbeDecoder {
     /// * `body` - Remaining binary payload.
     pub fn decode_depth_update(header: &SbeHeader, body: &[u8]) -> anyhow::Result<DepthUpdate> {
         if header.template_id != 10003 {
-            anyhow::bail!("Invalid template ID for DepthDiffStreamEvent: {}", header.template_id);
+            anyhow::bail!(
+                "Invalid template ID for DepthDiffStreamEvent: {}",
+                header.template_id
+            );
         }
 
         if body.len() < 26 {
@@ -159,17 +167,21 @@ impl BinanceSbeDecoder {
         if body.len() < offset + 4 {
             anyhow::bail!("Depth body too short for bids group header");
         }
-        let bid_block_len = LittleEndian::read_u16(&body[offset..offset+2]) as usize;
-        let bid_count = LittleEndian::read_u16(&body[offset+2..offset+4]) as usize;
+        let bid_block_len = LittleEndian::read_u16(&body[offset..offset + 2]) as usize;
+        let bid_count = LittleEndian::read_u16(&body[offset + 2..offset + 4]) as usize;
         offset += 4;
 
         let mut bids = Vec::with_capacity(bid_count);
         for i in 0..bid_count {
             if body.len() < offset + 16 {
-                anyhow::bail!("Depth body too short for bid entry {} at offset {}", i, offset);
+                anyhow::bail!(
+                    "Depth body too short for bid entry {} at offset {}",
+                    i,
+                    offset
+                );
             }
-            let price_mantissa = LittleEndian::read_i64(&body[offset..offset+8]);
-            let qty_mantissa = LittleEndian::read_i64(&body[offset+8..offset+16]);
+            let price_mantissa = LittleEndian::read_i64(&body[offset..offset + 8]);
+            let qty_mantissa = LittleEndian::read_i64(&body[offset + 8..offset + 16]);
 
             bids.push(kubera_models::L2Level {
                 price: price_mantissa as f64 * 10f64.powi(price_exponent as i32),
@@ -179,19 +191,26 @@ impl BinanceSbeDecoder {
         }
 
         if body.len() < offset + 4 {
-            anyhow::bail!("Depth body too short for asks group header at offset {}", offset);
+            anyhow::bail!(
+                "Depth body too short for asks group header at offset {}",
+                offset
+            );
         }
-        let ask_block_len = LittleEndian::read_u16(&body[offset..offset+2]) as usize;
-        let ask_count = LittleEndian::read_u16(&body[offset+2..offset+4]) as usize;
+        let ask_block_len = LittleEndian::read_u16(&body[offset..offset + 2]) as usize;
+        let ask_count = LittleEndian::read_u16(&body[offset + 2..offset + 4]) as usize;
         offset += 4;
 
         let mut asks = Vec::with_capacity(ask_count);
         for i in 0..ask_count {
             if body.len() < offset + 16 {
-                anyhow::bail!("Depth body too short for ask entry {} at offset {}", i, offset);
+                anyhow::bail!(
+                    "Depth body too short for ask entry {} at offset {}",
+                    i,
+                    offset
+                );
             }
-            let price_mantissa = LittleEndian::read_i64(&body[offset..offset+8]);
-            let qty_mantissa = LittleEndian::read_i64(&body[offset+8..offset+16]);
+            let price_mantissa = LittleEndian::read_i64(&body[offset..offset + 8]);
+            let qty_mantissa = LittleEndian::read_i64(&body[offset + 8..offset + 16]);
 
             asks.push(kubera_models::L2Level {
                 price: price_mantissa as f64 * 10f64.powi(price_exponent as i32),

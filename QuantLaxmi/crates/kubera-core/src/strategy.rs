@@ -3,8 +3,8 @@
 //! Orchestrates the execution and monitoring of systematic trading strategies.
 //!
 //! ## Description
-//! Defines the `Strategy` contract for signal generation and the `StrategyRunner` 
-//! for event-driven execution. Implements panic isolation and multi-channel 
+//! Defines the `Strategy` contract for signal generation and the `StrategyRunner`
+//! for event-driven execution. Implements panic isolation and multi-channel
 //! event processing.
 //!
 //! ## Architecture
@@ -16,8 +16,8 @@
 //! ## References
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use kubera_models::{MarketEvent, OrderEvent, SignalEvent, RiskEvent};
 use crate::EventBus;
+use kubera_models::{MarketEvent, OrderEvent, RiskEvent, SignalEvent};
 use std::sync::Arc;
 
 /// Core interface for systematic trading logic.
@@ -32,28 +32,28 @@ use std::sync::Arc;
 pub trait Strategy: Send + Sync {
     /// Initializes state when the runner activates.
     fn on_start(&mut self, bus: Arc<EventBus>);
-    
+
     /// Logic for L1 tick-level events.
     fn on_tick(&mut self, event: &MarketEvent);
-    
+
     /// Logic for L2 or OHLCV bar events.
     fn on_bar(&mut self, event: &MarketEvent);
-    
+
     /// Logic specifically for execution fills.
     fn on_fill(&mut self, fill: &OrderEvent);
-    
+
     /// Logic for general order status changes (e.g. Cancelled, Rejected).
     fn on_order_update(&mut self, _order: &OrderEvent) {}
-    
+
     /// Periodic pulse for time-dependent alpha generation.
     fn on_signal_timer(&mut self, _elapsed_ms: u64) {}
-    
+
     /// Out-of-band notification of risk engine violations.
     fn on_risk_event(&mut self, _event: &RiskEvent) {}
-    
+
     /// Cleanup logic for graceful shutdown.
     fn on_stop(&mut self);
-    
+
     /// Unique identifier for the strategy instance.
     fn name(&self) -> &str;
 }
@@ -75,7 +75,7 @@ impl StrategyRunner {
     pub fn new(strategy: Box<dyn Strategy>, bus: Arc<EventBus>) -> Self {
         Self { strategy, bus }
     }
-    
+
     /// Executes the main event-processing loop.
     ///
     /// # Error Handling
@@ -83,23 +83,23 @@ impl StrategyRunner {
     /// are logged but do not necessarily terminate the loop until the threshold is met.
     pub async fn run(&mut self) -> anyhow::Result<()> {
         tracing::info!("Starting strategy: {}", self.strategy.name());
-        
+
         let bus = self.bus.clone();
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.strategy.on_start(bus);
         }));
-        
+
         let mut market_rx = self.bus.subscribe_market();
         let mut order_update_rx = self.bus.subscribe_order_update();
         let mut risk_rx = self.bus.subscribe_risk();
-        
+
         // 1-second pulse for temporal signal generation.
         let mut timer = tokio::time::interval(tokio::time::Duration::from_secs(1));
         let mut total_elapsed_ms = 0;
 
         let mut panic_count: u32 = 0;
         const MAX_PANICS: u32 = 5;
-        
+
         loop {
             tokio::select! {
                 Ok(event) = market_rx.recv() => {
@@ -144,17 +144,17 @@ impl StrategyRunner {
                     if let Err(_) = result { panic_count += 1; }
                 }
             }
-            
+
             if panic_count >= MAX_PANICS {
                 tracing::error!("Strategy exceeded max panics, stopping");
                 break;
             }
         }
-        
+
         self.strategy.on_stop();
         Ok(())
     }
-    
+
     /// Requests an immediate shutdown of the strategy.
     pub fn stop(&mut self) {
         tracing::info!("Stopping strategy: {}", self.strategy.name());
@@ -165,7 +165,7 @@ impl StrategyRunner {
 /// Baseline implementation of a momentum-based trading algorithm.
 ///
 /// # Logic
-/// Generates 'Buy' signals when momentum over a window is positive and 
+/// Generates 'Buy' signals when momentum over a window is positive and
 /// 'Sell' signals when it turns negative, provided a position exists.
 pub struct MomentumStrategy {
     name: String,
@@ -186,7 +186,7 @@ impl MomentumStrategy {
             position: 0.0,
         }
     }
-    
+
     fn emit_signal(&self, event: &MarketEvent, side: kubera_models::Side, price: f64) {
         if let Some(bus) = &self.bus {
             let signal = SignalEvent {
@@ -215,19 +215,19 @@ impl Strategy for MomentumStrategy {
         tracing::info!("[{}] Starting with lookback={}", self.name, self.lookback);
         self.bus = Some(bus);
     }
-    
+
     fn on_tick(&mut self, _event: &MarketEvent) {}
-    
+
     fn on_bar(&mut self, event: &MarketEvent) {
         if let kubera_models::MarketPayload::Bar { close, .. } = &event.payload {
             self.prices.push(*close);
             if self.prices.len() > self.lookback {
                 self.prices.remove(0);
             }
-            
+
             if self.prices.len() == self.lookback {
                 let momentum = self.prices.last().unwrap() - self.prices.first().unwrap();
-                
+
                 if momentum > 0.0 && self.position == 0.0 {
                     tracing::info!("[{}] BUY signal @ {}", self.name, close);
                     self.position = 1.0;
@@ -240,14 +240,16 @@ impl Strategy for MomentumStrategy {
             }
         }
     }
-    
+
     fn on_fill(&mut self, fill: &OrderEvent) {
         tracing::info!("[{}] Fill: {:?}", self.name, fill.order_id);
     }
-    
+
     fn on_stop(&mut self) {
         tracing::info!("[{}] Stopped. Position: {}", self.name, self.position);
     }
-    
-    fn name(&self) -> &str { &self.name }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
 }

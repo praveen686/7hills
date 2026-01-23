@@ -3,7 +3,7 @@
 //! Exports equity curves, signals, and trade data to Parquet format
 //! for analysis in VectorBT Pro and other Python-based tools.
 
-use arrow::array::{Float64Array, Int64Array, StringArray, ArrayRef};
+use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
@@ -28,8 +28,8 @@ pub struct EquityPoint {
 pub struct SignalRecord {
     pub timestamp_ms: i64,
     pub symbol: String,
-    pub signal: f64,       // -1.0 to 1.0
-    pub direction: i64,    // -1 = sell, 0 = hold, 1 = buy
+    pub signal: f64,    // -1.0 to 1.0
+    pub direction: i64, // -1 = sell, 0 = hold, 1 = buy
     pub price: f64,
     pub expert: String,
 }
@@ -39,7 +39,7 @@ pub struct SignalRecord {
 pub struct TradeRecord {
     pub timestamp_ms: i64,
     pub symbol: String,
-    pub side: String,      // "BUY" or "SELL"
+    pub side: String, // "BUY" or "SELL"
     pub quantity: f64,
     pub price: f64,
     pub commission: f64,
@@ -122,7 +122,11 @@ impl ParquetExporter {
         writer.write(&batch)?;
         writer.close()?;
 
-        info!("Exported {} equity points to {}", self.equity_curve.len(), path);
+        info!(
+            "Exported {} equity points to {}",
+            self.equity_curve.len(),
+            path
+        );
         Ok(())
     }
 

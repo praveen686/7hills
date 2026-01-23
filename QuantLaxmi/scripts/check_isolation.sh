@@ -39,13 +39,14 @@ fi
 
 echo ""
 echo "[5/6] Checking that banned kubera crates are removed..."
-# kubera-runner and kubera-connectors were retired and must not return
-if cargo tree -e normal 2>/dev/null | grep -E "kubera-runner|kubera-connectors" > /dev/null; then
+# Retired crates that must not return
+BANNED="kubera-runner|kubera-connectors|kubera-backtest|kubera-mlflow|kubera-ffi|kubera-strategy-host"
+if cargo tree -e normal 2>/dev/null | grep -E "$BANNED" > /dev/null; then
     echo "FAIL: Banned kubera crates still in dependency tree!"
-    cargo tree -e normal | grep -E "kubera-runner|kubera-connectors"
+    cargo tree -e normal | grep -E "$BANNED"
     exit 1
 else
-    echo "PASS: No banned kubera crates (runner/connectors) in workspace"
+    echo "PASS: No banned kubera crates in workspace"
 fi
 
 echo ""

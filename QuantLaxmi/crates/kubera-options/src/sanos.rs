@@ -16,9 +16,9 @@
 //! - Background variance V = σ_ATM² * T with smoothness factor η
 
 use crate::pricing::implied_volatility;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
-use good_lp::{constraint, variable, Expression, ProblemVariables, Solution, SolverModel};
+use good_lp::{Expression, ProblemVariables, Solution, SolverModel, constraint, variable};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -77,12 +77,22 @@ pub struct StrikeMeta {
 impl StrikeMeta {
     /// Create boundary point metadata
     pub fn boundary(k: f64) -> Self {
-        Self { k, is_boundary: true, is_market: false, is_interior: false }
+        Self {
+            k,
+            is_boundary: true,
+            is_market: false,
+            is_interior: false,
+        }
     }
 
     /// Create market point metadata
     pub fn market(k: f64, is_interior: bool) -> Self {
-        Self { k, is_boundary: false, is_market: true, is_interior }
+        Self {
+            k,
+            is_boundary: false,
+            is_market: true,
+            is_interior,
+        }
     }
 
     /// Check if this strike is safe for feature extraction
@@ -128,7 +138,12 @@ pub struct ExpirySlice {
 }
 
 impl ExpirySlice {
-    pub fn new(underlying: &str, expiry: &str, timestamp: DateTime<Utc>, time_to_expiry: f64) -> Self {
+    pub fn new(
+        underlying: &str,
+        expiry: &str,
+        timestamp: DateTime<Utc>,
+        time_to_expiry: f64,
+    ) -> Self {
         Self {
             underlying: underlying.to_string(),
             expiry: expiry.to_string(),
@@ -152,14 +167,14 @@ impl ExpirySlice {
 /// Normalized market data (forward units)
 #[derive(Debug, Clone)]
 pub struct NormalizedSlice {
-    pub forward: f64,              // Estimated forward price F0
-    pub time_to_expiry: f64,       // T in years
-    pub strikes: Vec<f64>,         // Normalized strikes K/F0
-    pub call_prices: Vec<f64>,     // Normalized call prices C/F0
-    pub call_bids: Vec<f64>,       // Normalized bid prices
-    pub call_asks: Vec<f64>,       // Normalized ask prices
-    pub atm_iv: f64,               // ATM implied volatility
-    pub raw_strikes: Vec<f64>,     // Original strikes (for reporting)
+    pub forward: f64,          // Estimated forward price F0
+    pub time_to_expiry: f64,   // T in years
+    pub strikes: Vec<f64>,     // Normalized strikes K/F0
+    pub call_prices: Vec<f64>, // Normalized call prices C/F0
+    pub call_bids: Vec<f64>,   // Normalized bid prices
+    pub call_asks: Vec<f64>,   // Normalized ask prices
+    pub atm_iv: f64,           // ATM implied volatility
+    pub raw_strikes: Vec<f64>, // Original strikes (for reporting)
 }
 
 /// Result of SANOS calibration
@@ -194,13 +209,13 @@ pub struct SanosDiagnostics {
     pub objective_value: f64,
     pub max_fit_error: f64,
     pub mean_fit_error: f64,
-    pub weights_sum: f64,           // Should be 1.0
-    pub weights_mean: f64,          // Should be 1.0 (unit mean constraint)
+    pub weights_sum: f64,  // Should be 1.0
+    pub weights_mean: f64, // Should be 1.0 (unit mean constraint)
     pub convexity_violations: usize,
-    pub boundary_check: bool,       // C(0) ≈ 1, C(∞) → 0
-    pub spread_compliance: f64,     // % of prices within bid-ask
-    pub background_variance: f64,   // V used in calibration
-    pub eta: f64,                   // Smoothness parameter
+    pub boundary_check: bool,     // C(0) ≈ 1, C(∞) → 0
+    pub spread_compliance: f64,   // % of prices within bid-ask
+    pub background_variance: f64, // V used in calibration
+    pub eta: f64,                 // Smoothness parameter
 }
 
 /// SANOS calibrator for a single expiry
@@ -251,11 +266,7 @@ impl SanosCalibrator {
 
         // Weighted average for forward estimate
         let total_weight: f64 = parity_estimates.iter().map(|(_, w)| w).sum();
-        let forward: f64 = parity_estimates
-            .iter()
-            .map(|(f, w)| f * w)
-            .sum::<f64>()
-            / total_weight;
+        let forward: f64 = parity_estimates.iter().map(|(f, w)| f * w).sum::<f64>() / total_weight;
 
         tracing::info!(
             "Forward estimate F0 = {:.2} from {} put-call pairs",
@@ -288,7 +299,9 @@ impl SanosCalibrator {
             .iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| {
-                ((**a - 1.0).abs()).partial_cmp(&((**b - 1.0).abs())).unwrap()
+                ((**a - 1.0).abs())
+                    .partial_cmp(&((**b - 1.0).abs()))
+                    .unwrap()
             })
             .map(|(i, _)| i)
             .unwrap_or(0);
@@ -369,7 +382,11 @@ impl SanosCalibrator {
     }
 
     /// STEP 5.4-5.5: Setup model grid and background variance
-    fn setup_model_grid(&self, augmented_strikes: &[f64], norm: &NormalizedSlice) -> (Vec<f64>, f64) {
+    fn setup_model_grid(
+        &self,
+        augmented_strikes: &[f64],
+        norm: &NormalizedSlice,
+    ) -> (Vec<f64>, f64) {
         // Use augmented strikes as model grid
         let model_strikes = augmented_strikes.to_vec();
 
@@ -492,13 +509,14 @@ impl SanosCalibrator {
             let c_market = augmented_prices[j];
 
             // Build fitted price expression
-            let fitted: Expression = q.iter().zip(model_strikes).fold(
-                Expression::from(0.0),
-                |acc, (&qi, &ki)| {
-                    let payoff = Self::shifted_lognormal_call(ki, k_market, background_variance);
-                    acc + payoff * qi
-                },
-            );
+            let fitted: Expression =
+                q.iter()
+                    .zip(model_strikes)
+                    .fold(Expression::from(0.0), |acc, (&qi, &ki)| {
+                        let payoff =
+                            Self::shifted_lognormal_call(ki, k_market, background_variance);
+                        acc + payoff * qi
+                    });
 
             // fitted = c_market + slack_plus - slack_minus
             // => fitted - slack_plus + slack_minus = c_market
@@ -507,7 +525,9 @@ impl SanosCalibrator {
         }
 
         // Solve
-        let solution = problem.solve().map_err(|e| anyhow!("LP solve failed: {:?}", e))?;
+        let solution = problem
+            .solve()
+            .map_err(|e| anyhow!("LP solve failed: {:?}", e))?;
 
         // Extract weights
         let weights: Vec<f64> = q.iter().map(|&qi| solution.value(qi)).collect();
@@ -541,11 +561,7 @@ impl SanosCalibrator {
 
         // Weights constraints
         let weights_sum: f64 = weights.iter().sum();
-        let weights_mean: f64 = weights
-            .iter()
-            .zip(model_strikes)
-            .map(|(q, k)| q * k)
-            .sum();
+        let weights_mean: f64 = weights.iter().zip(model_strikes).map(|(q, k)| q * k).sum();
 
         // Convexity check: d²C/dK² >= 0 (call prices should be convex in strike)
         let mut convexity_violations = 0;
@@ -598,7 +614,8 @@ impl SanosCalibrator {
         // STEP 5.2: Call prices from mid (already done in normalize)
 
         // STEP 5.3: Strike augmentation (with strike metadata for boundary hardening)
-        let (aug_strikes, aug_prices, aug_bids, aug_asks, strike_meta) = self.augment_strikes(&norm);
+        let (aug_strikes, aug_prices, aug_bids, aug_asks, strike_meta) =
+            self.augment_strikes(&norm);
 
         // STEP 5.4-5.5: Model grid and background variance
         let (model_strikes, background_variance) = self.setup_model_grid(&aug_strikes, &norm);
@@ -626,8 +643,14 @@ impl SanosCalibrator {
             .collect();
 
         // STEP 5.7: Certification
-        let mut diagnostics =
-            self.certify(&fitted_calls, &aug_prices, &aug_bids, &aug_asks, &weights, &model_strikes);
+        let mut diagnostics = self.certify(
+            &fitted_calls,
+            &aug_prices,
+            &aug_bids,
+            &aug_asks,
+            &weights,
+            &model_strikes,
+        );
         diagnostics.objective_value = obj_value;
         diagnostics.background_variance = background_variance;
         diagnostics.lp_status = lp_status;
@@ -692,12 +715,32 @@ impl std::fmt::Display for SanosSlice {
         writeln!(f, "Objective: {:.6}", self.diagnostics.objective_value)?;
         writeln!(f, "Max Fit Error: {:.6}", self.diagnostics.max_fit_error)?;
         writeln!(f, "Mean Fit Error: {:.6}", self.diagnostics.mean_fit_error)?;
-        writeln!(f, "Weights Sum: {:.6} (should be 1.0)", self.diagnostics.weights_sum)?;
-        writeln!(f, "Weights Mean: {:.6} (should be 1.0)", self.diagnostics.weights_mean)?;
-        writeln!(f, "Convexity Violations: {}", self.diagnostics.convexity_violations)?;
+        writeln!(
+            f,
+            "Weights Sum: {:.6} (should be 1.0)",
+            self.diagnostics.weights_sum
+        )?;
+        writeln!(
+            f,
+            "Weights Mean: {:.6} (should be 1.0)",
+            self.diagnostics.weights_mean
+        )?;
+        writeln!(
+            f,
+            "Convexity Violations: {}",
+            self.diagnostics.convexity_violations
+        )?;
         writeln!(f, "Boundary Check: {}", self.diagnostics.boundary_check)?;
-        writeln!(f, "Spread Compliance: {:.1}%", self.diagnostics.spread_compliance)?;
-        writeln!(f, "Background Variance: {:.6}", self.diagnostics.background_variance)?;
+        writeln!(
+            f,
+            "Spread Compliance: {:.1}%",
+            self.diagnostics.spread_compliance
+        )?;
+        writeln!(
+            f,
+            "Background Variance: {:.6}",
+            self.diagnostics.background_variance
+        )?;
         writeln!(f, "η: {}", self.diagnostics.eta)?;
         Ok(())
     }
@@ -713,7 +756,9 @@ mod tests {
         let mut slice = ExpirySlice::new("NIFTY", "26JAN", ts, 3.0 / 365.0); // 3 days to expiry
 
         // Add synthetic quotes around ATM (forward ~ 25500)
-        let strikes = [25300, 25350, 25400, 25450, 25500, 25550, 25600, 25650, 25700];
+        let strikes = [
+            25300, 25350, 25400, 25450, 25500, 25550, 25600, 25650, 25700,
+        ];
         let call_mids = [220.0, 180.0, 145.0, 112.0, 85.0, 62.0, 44.0, 30.0, 19.0];
         let put_mids = [20.0, 30.0, 45.0, 62.0, 85.0, 112.0, 144.0, 180.0, 219.0];
 
@@ -758,7 +803,11 @@ mod tests {
             .strikes
             .iter()
             .enumerate()
-            .min_by(|(_, a), (_, b)| ((**a - 1.0).abs()).partial_cmp(&((**b - 1.0).abs())).unwrap())
+            .min_by(|(_, a), (_, b)| {
+                ((**a - 1.0).abs())
+                    .partial_cmp(&((**b - 1.0).abs()))
+                    .unwrap()
+            })
             .map(|(i, _)| i)
             .unwrap();
         assert!(
@@ -788,7 +837,10 @@ mod tests {
         );
 
         // Boundary check should pass
-        assert!(result.diagnostics.boundary_check, "Boundary check should pass");
+        assert!(
+            result.diagnostics.boundary_check,
+            "Boundary check should pass"
+        );
 
         // Allow minor convexity violations at boundary augmentation points
         // SANOS v0 uses simple augmentation which can cause edge effects

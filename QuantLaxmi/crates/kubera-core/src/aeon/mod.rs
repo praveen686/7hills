@@ -1,26 +1,26 @@
-pub mod kernels;
 pub mod fti;
+pub mod kernels;
 pub mod strategy;
 
 pub use self::strategy::AeonStrategy;
 
-use std::collections::VecDeque;
-use self::kernels::{ShannonEntropy, MutualInformation};
+use self::kernels::{MutualInformation, ShannonEntropy};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AeonConfig {
     pub entropy_word_len: usize,
     pub mi_word_len: usize,
     pub lookback: usize,
-    
+
     // FTI Config
     pub fti_min_period: usize,
     pub fti_max_period: usize,
     pub fti_half_length: usize,
     pub fti_beta: f64,
     pub fti_noise_cut: f64,
-    
+
     // Gating thresholds
     pub bif_predictability_threshold: f64, // e.g. 0.4
     pub fti_trend_threshold: f64,          // e.g. 2.0
@@ -63,12 +63,12 @@ impl BifIndicator {
     pub fn calculate(&self, prices: &VecDeque<f64>) -> f64 {
         let ent = self.entropy.calculate(prices);
         let mi = self.mi.calculate(prices);
-        
+
         // Predictability signal: High MI relative to Entropy
         // Normalizing: (MI / log(nbins_mi)) / Entropy
         // For simplicity: (MI / (ent + 0.1)) captured as a score.
         let score = mi / (ent + 0.05);
-        
+
         // Clamp and normalize to 0-1 range
         score.clamp(0.0, 1.0)
     }

@@ -4,7 +4,7 @@
 //!
 //! ## Description
 //! Defines the three primary operational modes for the QuantKubera system,
-//! enabling seamless transition between historical simulation, real-time 
+//! enabling seamless transition between historical simulation, real-time
 //! paper trading, and production live trading.
 //!
 //! ## References
@@ -72,7 +72,7 @@ impl ModeConfig {
             wal_path: Some(wal_path.to_string()),
         }
     }
-    
+
     /// Factory for creating paper trading environment configurations.
     pub fn paper(venue: &str, symbol: &str) -> Self {
         Self {
@@ -82,7 +82,7 @@ impl ModeConfig {
             wal_path: None,
         }
     }
-    
+
     /// Factory for creating production live environment configurations.
     pub fn live(venue: &str, symbol: &str) -> Self {
         Self {

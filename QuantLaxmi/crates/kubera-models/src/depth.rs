@@ -72,7 +72,10 @@ impl DepthLevel {
     pub fn from_f64(price: f64, qty: f64, price_exp: i8, qty_exp: i8) -> Self {
         let price_mantissa = (price / 10f64.powi(price_exp as i32)).round() as i64;
         let qty_mantissa = (qty / 10f64.powi(qty_exp as i32)).round() as i64;
-        Self { price: price_mantissa, qty: qty_mantissa }
+        Self {
+            price: price_mantissa,
+            qty: qty_mantissa,
+        }
     }
 }
 
@@ -141,7 +144,8 @@ impl DepthEvent {
 
     /// Get best bid price as f64 (None if no bids).
     pub fn best_bid_f64(&self) -> Option<f64> {
-        self.bids.iter()
+        self.bids
+            .iter()
             .filter(|l| l.qty > 0)
             .map(|l| self.price_to_f64(l.price))
             .max_by(|a, b| a.partial_cmp(b).unwrap())
@@ -149,7 +153,8 @@ impl DepthEvent {
 
     /// Get best ask price as f64 (None if no asks).
     pub fn best_ask_f64(&self) -> Option<f64> {
-        self.asks.iter()
+        self.asks
+            .iter()
             .filter(|l| l.qty > 0)
             .map(|l| self.price_to_f64(l.price))
             .min_by(|a, b| a.partial_cmp(b).unwrap())
@@ -164,7 +169,12 @@ impl DepthEvent {
     /// 4. Symbol (alphabetical tie-breaker)
     pub fn sort_key(&self) -> (DateTime<Utc>, u8, u64, &str) {
         let kind_rank = if self.is_snapshot { 0 } else { 1 };
-        (self.ts, kind_rank, self.first_update_id, &self.tradingsymbol)
+        (
+            self.ts,
+            kind_rank,
+            self.first_update_id,
+            &self.tradingsymbol,
+        )
     }
 }
 
@@ -175,7 +185,10 @@ mod tests {
 
     #[test]
     fn test_depth_level_conversion() {
-        let level = DepthLevel { price: 9000012, qty: 150000000 };
+        let level = DepthLevel {
+            price: 9000012,
+            qty: 150000000,
+        };
         let (price, qty) = level.to_f64(-2, -8);
         assert!((price - 90000.12).abs() < 0.001);
         assert!((qty - 1.5).abs() < 0.0001);
@@ -198,12 +211,24 @@ mod tests {
             price_exponent: -2,
             qty_exponent: -8,
             bids: vec![
-                DepthLevel { price: 9000000, qty: 100000000 },
-                DepthLevel { price: 8999500, qty: 200000000 },
+                DepthLevel {
+                    price: 9000000,
+                    qty: 100000000,
+                },
+                DepthLevel {
+                    price: 8999500,
+                    qty: 200000000,
+                },
             ],
             asks: vec![
-                DepthLevel { price: 9000100, qty: 100000000 },
-                DepthLevel { price: 9000500, qty: 200000000 },
+                DepthLevel {
+                    price: 9000100,
+                    qty: 100000000,
+                },
+                DepthLevel {
+                    price: 9000500,
+                    qty: 200000000,
+                },
             ],
             is_snapshot: true,
             integrity_tier: IntegrityTier::Certified,

@@ -14,8 +14,10 @@
 //! - `L1Quote`: Uses best bid/ask snapshots (backward compatible)
 //! - `L2Book`: Uses full order book depth for realistic multi-level fills
 
-use crate::execution::{LegOrder, LegOrderType, LegSide, LegStatus, MultiLegOrder, MultiLegResult, LegExecutionResult};
-use crate::replay::{QuoteEvent, ReplayEvent, DepthEvent};
+use crate::execution::{
+    LegExecutionResult, LegOrder, LegOrderType, LegSide, LegStatus, MultiLegOrder, MultiLegResult,
+};
+use crate::replay::{DepthEvent, QuoteEvent, ReplayEvent};
 use crate::specs::SpecStore;
 use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
@@ -34,20 +36,24 @@ pub enum KiteSimError {
         actual: u64,
     },
     /// Price or quantity exponent mismatch in depth event.
-    ExponentMismatch {
-        symbol: String,
-        detail: String,
-    },
+    ExponentMismatch { symbol: String, detail: String },
 }
 
 impl std::fmt::Display for KiteSimError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            KiteSimError::DepthSequenceGap { symbol, expected, actual } => {
+            KiteSimError::DepthSequenceGap {
+                symbol,
+                expected,
+                actual,
+            } => {
                 write!(
                     f,
                     "FATAL: Depth sequence gap for {}: expected update_id={}, got {} (gap={})",
-                    symbol, expected, actual, actual.saturating_sub(*expected)
+                    symbol,
+                    expected,
+                    actual,
+                    actual.saturating_sub(*expected)
                 )
             }
             KiteSimError::ExponentMismatch { symbol, detail } => {
@@ -248,7 +254,9 @@ impl KiteSim {
 
     /// Record slippage sample in bps (Patch 3).
     fn record_slip(&mut self, side: LegSide, fill_px: f64, mid: f64) {
-        if mid <= 0.0 { return; }
+        if mid <= 0.0 {
+            return;
+        }
         let bps = match side {
             LegSide::Buy => ((fill_px - mid) / mid) * 10000.0,
             LegSide::Sell => ((mid - fill_px) / mid) * 10000.0,
@@ -310,9 +318,10 @@ impl KiteSim {
 
         // Get or create the order book for this symbol
         // OrderBook requires (symbol, price_exponent, qty_exponent)
-        let book = self.order_books.entry(symbol.clone()).or_insert_with(|| {
-            OrderBook::new(symbol.clone(), d.price_exponent, d.qty_exponent)
-        });
+        let book = self
+            .order_books
+            .entry(symbol.clone())
+            .or_insert_with(|| OrderBook::new(symbol.clone(), d.price_exponent, d.qty_exponent));
 
         // Apply the depth update with strict gap checking
         if is_snapshot {
@@ -356,7 +365,9 @@ impl KiteSim {
         let order_id = format!("SIM-{}", id);
 
         // Capture mid price at placement for adverse selection (Patch 3)
-        let mid_at_place = self.last_quotes.get(&leg.tradingsymbol)
+        let mid_at_place = self
+            .last_quotes
+            .get(&leg.tradingsymbol)
             .map(|q| Self::mid(q))
             .unwrap_or(0.0);
 
@@ -388,7 +399,10 @@ impl KiteSim {
     /// Attempts to cancel an order. Filled orders remain Filled.
     pub fn cancel_order(&mut self, order_id: &str) {
         if let Some(o) = self.orders.get_mut(order_id) {
-            if matches!(o.status, LegStatus::Placed | LegStatus::Pending | LegStatus::PartiallyFilled) {
+            if matches!(
+                o.status,
+                LegStatus::Placed | LegStatus::Pending | LegStatus::PartiallyFilled
+            ) {
                 o.status = LegStatus::Cancelled;
             }
         }
@@ -396,11 +410,15 @@ impl KiteSim {
 
     /// Returns a current snapshot of a simulated order.
     pub fn get_order(&self, order_id: &str) -> Option<(LegStatus, Option<f64>, u32, u32)> {
-        self.orders.get(order_id).map(|o| (o.status, o.avg_price, o.filled_qty, o.qty))
+        self.orders
+            .get(order_id)
+            .map(|o| (o.status, o.avg_price, o.filled_qty, o.qty))
     }
 
     fn match_eligible_orders_for(&mut self, tradingsymbol: &str) {
-        let Some(q) = self.last_quotes.get(tradingsymbol).copied() else { return; };
+        let Some(q) = self.last_quotes.get(tradingsymbol).copied() else {
+            return;
+        };
 
         // Collect order ids to avoid borrowing issues.
         let ids: Vec<String> = self
@@ -418,7 +436,9 @@ impl KiteSim {
         for id in ids {
             let eligible;
             {
-                let Some(o) = self.orders.get(&id) else { continue; };
+                let Some(o) = self.orders.get(&id) else {
+                    continue;
+                };
                 eligible = self.now >= o.eligible_ts
                     && matches!(o.status, LegStatus::Placed | LegStatus::PartiallyFilled);
             }
@@ -431,7 +451,9 @@ impl KiteSim {
 
     /// L2 order matching using the full order book.
     fn match_eligible_orders_for_l2(&mut self, tradingsymbol: &str) {
-        let Some(book) = self.order_books.get(tradingsymbol) else { return; };
+        let Some(book) = self.order_books.get(tradingsymbol) else {
+            return;
+        };
 
         // Extract book data to avoid borrow conflicts
         let mid = book.mid_f64();
@@ -453,7 +475,9 @@ impl KiteSim {
             let eligible;
             let (rem, side, order_type, limit_price, mid_at_place, filled_qty, avg_price);
             {
-                let Some(o) = self.orders.get(&id) else { continue; };
+                let Some(o) = self.orders.get(&id) else {
+                    continue;
+                };
                 eligible = self.now >= o.eligible_ts
                     && matches!(o.status, LegStatus::Placed | LegStatus::PartiallyFilled);
                 rem = o.remaining();
@@ -470,7 +494,9 @@ impl KiteSim {
             }
 
             // Get book reference again for simulation
-            let Some(book) = self.order_books.get(tradingsymbol) else { continue; };
+            let Some(book) = self.order_books.get(tradingsymbol) else {
+                continue;
+            };
 
             // Convert order quantity to mantissa for L2 book simulation
             // qty_mantissa = qty * 10^(-qty_exponent)
@@ -548,8 +574,18 @@ impl KiteSim {
     fn try_fill_order(&mut self, order_id: &str, q: Quote) {
         // Extract order info to avoid borrow conflicts
         let (rem, side, order_type, limit_price, mid_at_place, filled_qty, avg_price) = {
-            let Some(o) = self.orders.get(order_id) else { return; };
-            (o.remaining(), o.side, o.order_type, o.limit_price, o.mid_at_place, o.filled_qty, o.avg_price)
+            let Some(o) = self.orders.get(order_id) else {
+                return;
+            };
+            (
+                o.remaining(),
+                o.side,
+                o.order_type,
+                o.limit_price,
+                o.mid_at_place,
+                o.filled_qty,
+                o.avg_price,
+            )
         };
 
         if rem == 0 {
@@ -709,14 +745,22 @@ impl<'a> MultiLegCoordinator<'a> {
                     }
                 }
 
-                let Some((st, avg, filled, qty)) = self.sim.get_order(&oid) else { break; };
+                let Some((st, avg, filled, qty)) = self.sim.get_order(&oid) else {
+                    break;
+                };
 
-                if matches!(st, LegStatus::Filled | LegStatus::Rejected | LegStatus::Cancelled) {
+                if matches!(
+                    st,
+                    LegStatus::Filled | LegStatus::Rejected | LegStatus::Cancelled
+                ) {
                     // Record premium for filled leg.
                     if st == LegStatus::Filled {
                         if let Some(px) = avg {
                             // Premium sign convention: buys pay premium (negative), sells receive (positive)
-                            let sgn = match leg.side { LegSide::Buy => -1.0, LegSide::Sell => 1.0 };
+                            let sgn = match leg.side {
+                                LegSide::Buy => -1.0,
+                                LegSide::Sell => 1.0,
+                            };
                             total_premium += sgn * px * (filled as f64);
                         }
                     }
@@ -746,7 +790,10 @@ impl<'a> MultiLegCoordinator<'a> {
             }
 
             // If this leg did not fill, rollback.
-            let this_ok = leg_results.last().map(|r| r.status == LegStatus::Filled).unwrap_or(false);
+            let this_ok = leg_results
+                .last()
+                .map(|r| r.status == LegStatus::Filled)
+                .unwrap_or(false);
             if !this_ok {
                 self.rollback(&order.legs, &placed_ids, &leg_results).await;
                 return Ok(MultiLegResult {
@@ -786,14 +833,21 @@ impl<'a> MultiLegCoordinator<'a> {
             if res.status != LegStatus::Filled {
                 continue;
             }
-            let Some(oid) = res.order_id.as_deref() else { continue; };
-            let Some((_, _, filled, _)) = self.sim.get_order(oid) else { continue; };
+            let Some(oid) = res.order_id.as_deref() else {
+                continue;
+            };
+            let Some((_, _, filled, _)) = self.sim.get_order(oid) else {
+                continue;
+            };
             if filled == 0 {
                 continue;
             }
 
             let leg = &legs[idx];
-            let hedge_side = match leg.side { LegSide::Buy => LegSide::Sell, LegSide::Sell => LegSide::Buy };
+            let hedge_side = match leg.side {
+                LegSide::Buy => LegSide::Sell,
+                LegSide::Sell => LegSide::Buy,
+            };
             let hedge_leg = LegOrder {
                 tradingsymbol: leg.tradingsymbol.clone(),
                 exchange: leg.exchange.clone(),
@@ -837,7 +891,7 @@ impl<'a> MultiLegCoordinator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replay::{ReplayFeed, ReplayEvent};
+    use crate::replay::{ReplayEvent, ReplayFeed};
     use chrono::TimeZone;
 
     /// Integration-level test (within crate): a two-leg order where the second
@@ -907,14 +961,22 @@ mod tests {
             hedge_on_failure: true,
         };
         let mut coord = MultiLegCoordinator::new(&mut sim, policy);
-        let res = coord.execute_with_feed(&order, &mut feed).await
+        let res = coord
+            .execute_with_feed(&order, &mut feed)
+            .await
             .expect("execute_with_feed should not fail on L1 mode");
 
         assert!(!res.all_filled);
         assert_eq!(res.leg_results.len(), 2);
         assert_eq!(res.leg_results[0].status, LegStatus::Filled);
         assert_eq!(res.leg_results[1].status, LegStatus::PartiallyFilled);
-        assert!(res.leg_results[1].error.as_ref().unwrap().contains("partial fill"));
+        assert!(
+            res.leg_results[1]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("partial fill")
+        );
     }
 
     /// P1.3: Golden determinism test - same input always produces identical output.
@@ -937,12 +999,24 @@ mod tests {
                     price_exponent: -2,
                     qty_exponent: -8,
                     bids: vec![
-                        DepthLevel { price: 9000000, qty: 100000000 }, // 90000.00 @ 1.0
-                        DepthLevel { price: 8999500, qty: 200000000 }, // 89995.00 @ 2.0
+                        DepthLevel {
+                            price: 9000000,
+                            qty: 100000000,
+                        }, // 90000.00 @ 1.0
+                        DepthLevel {
+                            price: 8999500,
+                            qty: 200000000,
+                        }, // 89995.00 @ 2.0
                     ],
                     asks: vec![
-                        DepthLevel { price: 9000100, qty: 100000000 }, // 90001.00 @ 1.0
-                        DepthLevel { price: 9000500, qty: 200000000 }, // 90005.00 @ 2.0
+                        DepthLevel {
+                            price: 9000100,
+                            qty: 100000000,
+                        }, // 90001.00 @ 1.0
+                        DepthLevel {
+                            price: 9000500,
+                            qty: 200000000,
+                        }, // 90005.00 @ 2.0
                     ],
                     is_snapshot: true,
                     integrity_tier: IntegrityTier::Certified,
@@ -956,10 +1030,16 @@ mod tests {
                     price_exponent: -2,
                     qty_exponent: -8,
                     bids: vec![
-                        DepthLevel { price: 9000050, qty: 50000000 }, // 90000.50 @ 0.5
+                        DepthLevel {
+                            price: 9000050,
+                            qty: 50000000,
+                        }, // 90000.50 @ 0.5
                     ],
                     asks: vec![
-                        DepthLevel { price: 9000100, qty: 150000000 }, // 90001.00 @ 1.5
+                        DepthLevel {
+                            price: 9000100,
+                            qty: 150000000,
+                        }, // 90001.00 @ 1.5
                     ],
                     is_snapshot: false,
                     integrity_tier: IntegrityTier::Certified,
@@ -997,7 +1077,9 @@ mod tests {
         });
         let mut feed1 = ReplayFeed::new(make_depth_events());
         let mut coord1 = MultiLegCoordinator::new(&mut sim1, policy.clone());
-        let res1 = coord1.execute_with_feed(&order, &mut feed1).await
+        let res1 = coord1
+            .execute_with_feed(&order, &mut feed1)
+            .await
             .expect("run 1 should succeed");
 
         // Run 2 (identical input)
@@ -1011,17 +1093,26 @@ mod tests {
         });
         let mut feed2 = ReplayFeed::new(make_depth_events());
         let mut coord2 = MultiLegCoordinator::new(&mut sim2, policy.clone());
-        let res2 = coord2.execute_with_feed(&order, &mut feed2).await
+        let res2 = coord2
+            .execute_with_feed(&order, &mut feed2)
+            .await
             .expect("run 2 should succeed");
 
         // Golden assertion: results must be IDENTICAL
         assert_eq!(res1.all_filled, res2.all_filled, "all_filled must match");
-        assert_eq!(res1.leg_results.len(), res2.leg_results.len(), "leg count must match");
+        assert_eq!(
+            res1.leg_results.len(),
+            res2.leg_results.len(),
+            "leg count must match"
+        );
 
         for (lr1, lr2) in res1.leg_results.iter().zip(res2.leg_results.iter()) {
             assert_eq!(lr1.status, lr2.status, "status must match");
             assert_eq!(lr1.filled_qty, lr2.filled_qty, "filled_qty must match");
-            assert_eq!(lr1.fill_price, lr2.fill_price, "fill_price must match exactly");
+            assert_eq!(
+                lr1.fill_price, lr2.fill_price,
+                "fill_price must match exactly"
+            );
         }
     }
 
@@ -1043,8 +1134,14 @@ mod tests {
                 last_update_id: 1000,
                 price_exponent: -2,
                 qty_exponent: -8,
-                bids: vec![DepthLevel { price: 9000000, qty: 100000000 }],
-                asks: vec![DepthLevel { price: 9000100, qty: 100000000 }],
+                bids: vec![DepthLevel {
+                    price: 9000000,
+                    qty: 100000000,
+                }],
+                asks: vec![DepthLevel {
+                    price: 9000100,
+                    qty: 100000000,
+                }],
                 is_snapshot: true,
                 integrity_tier: IntegrityTier::Certified,
                 source: None,
@@ -1057,7 +1154,10 @@ mod tests {
                 last_update_id: 1002,
                 price_exponent: -2,
                 qty_exponent: -8,
-                bids: vec![DepthLevel { price: 9000050, qty: 50000000 }],
+                bids: vec![DepthLevel {
+                    price: 9000050,
+                    qty: 50000000,
+                }],
                 asks: vec![],
                 is_snapshot: false,
                 integrity_tier: IntegrityTier::Certified,
@@ -1088,7 +1188,11 @@ mod tests {
 
         assert!(result2.is_err(), "gap should cause hard failure");
         match result2 {
-            Err(KiteSimError::DepthSequenceGap { symbol, expected, actual }) => {
+            Err(KiteSimError::DepthSequenceGap {
+                symbol,
+                expected,
+                actual,
+            }) => {
                 assert_eq!(symbol, "BTCUSDT");
                 assert_eq!(expected, 1001, "expected update ID should be 1001");
                 assert_eq!(actual, 1002, "actual update ID should be 1002");

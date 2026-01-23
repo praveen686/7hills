@@ -14,7 +14,7 @@
 //! - NSE Circulars on F&O contract specifications
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use chrono::{NaiveTime, Weekday, NaiveDate, Datelike};
+use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
 use serde::{Deserialize, Serialize};
 
 /// NSE Index identifiers with their specifications.
@@ -158,19 +158,24 @@ pub struct NseTradingHours;
 
 impl NseTradingHours {
     /// Pre-market start time (09:00 IST)
-    pub const PRE_OPEN_START: NaiveTime = unsafe { NaiveTime::from_hms_opt(9, 0, 0).unwrap_unchecked() };
+    pub const PRE_OPEN_START: NaiveTime =
+        unsafe { NaiveTime::from_hms_opt(9, 0, 0).unwrap_unchecked() };
 
     /// Pre-market end, normal trading start (09:15 IST)
-    pub const MARKET_OPEN: NaiveTime = unsafe { NaiveTime::from_hms_opt(9, 15, 0).unwrap_unchecked() };
+    pub const MARKET_OPEN: NaiveTime =
+        unsafe { NaiveTime::from_hms_opt(9, 15, 0).unwrap_unchecked() };
 
     /// Normal trading end (15:30 IST)
-    pub const MARKET_CLOSE: NaiveTime = unsafe { NaiveTime::from_hms_opt(15, 30, 0).unwrap_unchecked() };
+    pub const MARKET_CLOSE: NaiveTime =
+        unsafe { NaiveTime::from_hms_opt(15, 30, 0).unwrap_unchecked() };
 
     /// Post-close session start (15:40 IST)
-    pub const POST_CLOSE_START: NaiveTime = unsafe { NaiveTime::from_hms_opt(15, 40, 0).unwrap_unchecked() };
+    pub const POST_CLOSE_START: NaiveTime =
+        unsafe { NaiveTime::from_hms_opt(15, 40, 0).unwrap_unchecked() };
 
     /// Post-close session end (16:00 IST)
-    pub const POST_CLOSE_END: NaiveTime = unsafe { NaiveTime::from_hms_opt(16, 0, 0).unwrap_unchecked() };
+    pub const POST_CLOSE_END: NaiveTime =
+        unsafe { NaiveTime::from_hms_opt(16, 0, 0).unwrap_unchecked() };
 
     /// Determines the current trading phase based on time.
     pub fn current_phase(time: NaiveTime) -> TradingPhase {
@@ -323,8 +328,7 @@ impl NseOrderValidator {
         if price > 0.0 && !self.tick_validator.is_valid(price) {
             errors.push(format!(
                 "Price {:.2} is not a multiple of tick size {:.2}",
-                price,
-                self.tick_validator.tick_size
+                price, self.tick_validator.tick_size
             ));
         }
 
@@ -362,9 +366,18 @@ mod tests {
 
     #[test]
     fn test_symbol_detection() {
-        assert_eq!(NseIndex::from_symbol("NIFTY2612025400CE"), Some(NseIndex::Nifty));
-        assert_eq!(NseIndex::from_symbol("BANKNIFTY2611552000CE"), Some(NseIndex::BankNifty));
-        assert_eq!(NseIndex::from_symbol("FINNIFTY2612025000PE"), Some(NseIndex::FinNifty));
+        assert_eq!(
+            NseIndex::from_symbol("NIFTY2612025400CE"),
+            Some(NseIndex::Nifty)
+        );
+        assert_eq!(
+            NseIndex::from_symbol("BANKNIFTY2611552000CE"),
+            Some(NseIndex::BankNifty)
+        );
+        assert_eq!(
+            NseIndex::from_symbol("FINNIFTY2612025000PE"),
+            Some(NseIndex::FinNifty)
+        );
         assert_eq!(NseIndex::from_symbol("RELIANCE"), None);
     }
 
@@ -432,8 +445,14 @@ mod tests {
         let normal = NaiveTime::from_hms_opt(10, 30, 0).unwrap();
         let closed = NaiveTime::from_hms_opt(16, 30, 0).unwrap();
 
-        assert_eq!(NseTradingHours::current_phase(pre_open), TradingPhase::PreOpen);
-        assert_eq!(NseTradingHours::current_phase(normal), TradingPhase::NormalMarket);
+        assert_eq!(
+            NseTradingHours::current_phase(pre_open),
+            TradingPhase::PreOpen
+        );
+        assert_eq!(
+            NseTradingHours::current_phase(normal),
+            TradingPhase::NormalMarket
+        );
         assert_eq!(NseTradingHours::current_phase(closed), TradingPhase::Closed);
 
         assert!(NseTradingHours::is_trading_time(normal));

@@ -82,50 +82,67 @@ impl IVSurface {
     pub fn iv_skew(&self, expiry: NaiveDate, otm_distance: f64) -> Option<f64> {
         let put_strike = self.spot_price - otm_distance;
         let call_strike = self.spot_price + otm_distance;
-        
-        let put_iv = self.points.iter()
-            .find(|p| p.expiry == expiry && p.option_type == OptionType::Put 
-                  && (p.strike - put_strike).abs() < 25.0)?
+
+        let put_iv = self
+            .points
+            .iter()
+            .find(|p| {
+                p.expiry == expiry
+                    && p.option_type == OptionType::Put
+                    && (p.strike - put_strike).abs() < 25.0
+            })?
             .iv;
-        
-        let call_iv = self.points.iter()
-            .find(|p| p.expiry == expiry && p.option_type == OptionType::Call 
-                  && (p.strike - call_strike).abs() < 25.0)?
+
+        let call_iv = self
+            .points
+            .iter()
+            .find(|p| {
+                p.expiry == expiry
+                    && p.option_type == OptionType::Call
+                    && (p.strike - call_strike).abs() < 25.0
+            })?
             .iv;
-        
+
         Some(put_iv - call_iv)
     }
 
     /// Get ATM IV for an expiry
     pub fn atm_iv(&self, expiry: NaiveDate) -> Option<f64> {
         let atm_strike = (self.spot_price / 50.0).round() * 50.0;
-        
-        let call_iv = self.points.iter()
-            .find(|p| p.expiry == expiry && p.option_type == OptionType::Call 
-                  && (p.strike - atm_strike).abs() < 25.0)?
+
+        let call_iv = self
+            .points
+            .iter()
+            .find(|p| {
+                p.expiry == expiry
+                    && p.option_type == OptionType::Call
+                    && (p.strike - atm_strike).abs() < 25.0
+            })?
             .iv;
-        
+
         Some(call_iv)
     }
 
     /// Get IV percentile (how current IV compares to historical range)
-    pub fn iv_percentile(&self, expiry: NaiveDate, historical_min: f64, historical_max: f64) -> Option<f64> {
+    pub fn iv_percentile(
+        &self,
+        expiry: NaiveDate,
+        historical_min: f64,
+        historical_max: f64,
+    ) -> Option<f64> {
         let atm_iv = self.atm_iv(expiry)?;
         Some((atm_iv - historical_min) / (historical_max - historical_min) * 100.0)
     }
 
     /// Get term structure - ATM IV across multiple expiries
     pub fn term_structure(&self) -> Vec<(NaiveDate, f64)> {
-        let mut expiries: Vec<NaiveDate> = self.points.iter()
-            .map(|p| p.expiry)
-            .collect();
+        let mut expiries: Vec<NaiveDate> = self.points.iter().map(|p| p.expiry).collect();
         expiries.sort();
         expiries.dedup();
-        
-        expiries.iter()
-            .filter_map(|expiry| {
-                self.atm_iv(*expiry).map(|iv| (*expiry, iv))
-            })
+
+        expiries
+            .iter()
+            .filter_map(|expiry| self.atm_iv(*expiry).map(|iv| (*expiry, iv)))
             .collect()
     }
 
@@ -178,17 +195,22 @@ impl OptionChainFetcher {
     /// Fetch and cache NFO instruments
     pub async fn refresh_instruments(&mut self) -> anyhow::Result<()> {
         info!("Fetching NFO instruments from Zerodha...");
-        
-        let response = self.client.get(KITE_INSTRUMENTS_URL)
+
+        let response = self
+            .client
+            .get(KITE_INSTRUMENTS_URL)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?
             .text()
             .await?;
-        
+
         let mut instruments: HashMap<String, Vec<ZerodhaInstrument>> = HashMap::new();
-        
+
         for line in response.lines().skip(1) {
             let parts: Vec<&str> = line.split(',').collect();
             if parts.len() >= 12 {
@@ -206,53 +228,65 @@ impl OptionChainFetcher {
                     segment: parts[10].to_string(),
                     exchange: parts[11].to_string(),
                 };
-                
+
                 if inst.instrument_type == "CE" || inst.instrument_type == "PE" {
-                    instruments.entry(inst.name.clone())
-                        .or_default()
-                        .push(inst);
+                    instruments.entry(inst.name.clone()).or_default().push(inst);
                 }
             }
         }
-        
+
         info!("Cached {} underlyings with options", instruments.len());
         self.instruments_cache = instruments;
         Ok(())
     }
 
     /// Get option chain for an underlying and expiry
-    pub fn get_chain(&self, underlying: &str, expiry: NaiveDate) -> Option<Vec<&ZerodhaInstrument>> {
+    pub fn get_chain(
+        &self,
+        underlying: &str,
+        expiry: NaiveDate,
+    ) -> Option<Vec<&ZerodhaInstrument>> {
         let expiry_str = expiry.format("%Y-%m-%d").to_string();
-        
+
         self.instruments_cache.get(underlying).map(|instruments| {
-            instruments.iter()
+            instruments
+                .iter()
                 .filter(|i| i.expiry == expiry_str)
                 .collect()
         })
     }
 
     /// Fetch live quotes for option chain
-    pub async fn fetch_chain_quotes(&self, instruments: &[&ZerodhaInstrument]) -> anyhow::Result<HashMap<u32, KiteQuote>> {
+    pub async fn fetch_chain_quotes(
+        &self,
+        instruments: &[&ZerodhaInstrument],
+    ) -> anyhow::Result<HashMap<u32, KiteQuote>> {
         if instruments.is_empty() {
             return Ok(HashMap::new());
         }
-        
+
         // Build query params
-        let params: Vec<(&str, String)> = instruments.iter()
+        let params: Vec<(&str, String)> = instruments
+            .iter()
             .map(|i| ("i", format!("NFO:{}", i.tradingsymbol)))
             .collect();
-        
-        let response = self.client.get(KITE_QUOTE_URL)
+
+        let response = self
+            .client
+            .get(KITE_QUOTE_URL)
             .query(&params)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?
             .json::<serde_json::Value>()
             .await?;
-        
+
         let mut quotes = HashMap::new();
-        
+
         if let Some(data) = response.get("data").and_then(|d| d.as_object()) {
             for (_key, value) in data {
                 if let Ok(quote) = serde_json::from_value::<KiteQuote>(value.clone()) {
@@ -263,7 +297,7 @@ impl OptionChainFetcher {
                 }
             }
         }
-        
+
         Ok(quotes)
     }
 
@@ -275,19 +309,20 @@ impl OptionChainFetcher {
         expiry: NaiveDate,
         rate: f64,
     ) -> anyhow::Result<IVSurface> {
-        let instruments = self.get_chain(underlying, expiry)
+        let instruments = self
+            .get_chain(underlying, expiry)
             .ok_or_else(|| anyhow::anyhow!("No instruments found for {}", underlying))?;
-        
+
         let quotes = self.fetch_chain_quotes(&instruments).await?;
-        
+
         let time_to_expiry = (expiry - Utc::now().date_naive()).num_days() as f64 / 365.0;
-        
+
         let mut surface = IVSurface::new(underlying.to_string(), spot_price);
-        
+
         for inst in instruments {
             if let Some(quote) = quotes.get(&inst.instrument_token) {
                 let is_call = inst.instrument_type == "CE";
-                
+
                 if let Some(iv) = implied_volatility(
                     quote.last_price,
                     spot_price,
@@ -298,15 +333,33 @@ impl OptionChainFetcher {
                 ) {
                     // Calculate delta
                     let delta = if is_call {
-                        crate::greeks::OptionGreeks::for_call(spot_price, inst.strike, time_to_expiry, rate, iv).delta
+                        crate::greeks::OptionGreeks::for_call(
+                            spot_price,
+                            inst.strike,
+                            time_to_expiry,
+                            rate,
+                            iv,
+                        )
+                        .delta
                     } else {
-                        crate::greeks::OptionGreeks::for_put(spot_price, inst.strike, time_to_expiry, rate, iv).delta
+                        crate::greeks::OptionGreeks::for_put(
+                            spot_price,
+                            inst.strike,
+                            time_to_expiry,
+                            rate,
+                            iv,
+                        )
+                        .delta
                     };
-                    
+
                     surface.points.push(IVPoint {
                         strike: inst.strike,
                         expiry,
-                        option_type: if is_call { OptionType::Call } else { OptionType::Put },
+                        option_type: if is_call {
+                            OptionType::Call
+                        } else {
+                            OptionType::Put
+                        },
                         iv,
                         delta,
                         last_price: quote.last_price,
@@ -314,10 +367,14 @@ impl OptionChainFetcher {
                 }
             }
         }
-        
-        info!("Built IV surface with {} points for {} expiry {}", 
-              surface.points.len(), underlying, expiry);
-        
+
+        info!(
+            "Built IV surface with {} points for {} expiry {}",
+            surface.points.len(),
+            underlying,
+            expiry
+        );
+
         Ok(surface)
     }
 }
@@ -330,7 +387,7 @@ mod tests {
     fn test_iv_surface_skew() {
         let mut surface = IVSurface::new("NIFTY".to_string(), 25800.0);
         let expiry = NaiveDate::from_ymd_opt(2024, 12, 26).unwrap();
-        
+
         // Add some test points
         surface.points.push(IVPoint {
             strike: 25600.0,
@@ -340,7 +397,7 @@ mod tests {
             delta: -0.3,
             last_price: 50.0,
         });
-        
+
         surface.points.push(IVPoint {
             strike: 26000.0,
             expiry,
@@ -349,7 +406,7 @@ mod tests {
             delta: 0.3,
             last_price: 45.0,
         });
-        
+
         let skew = surface.iv_skew(expiry, 200.0).unwrap();
         assert!((skew - 0.02).abs() < 0.001, "Skew should be 0.02: {}", skew);
     }

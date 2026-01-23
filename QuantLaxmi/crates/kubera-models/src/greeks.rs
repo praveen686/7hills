@@ -107,8 +107,7 @@ impl OptionGreeks {
         Self {
             delta: nd1,
             gamma: npd1 / (spot * volatility * sqrt_t),
-            theta: -(spot * npd1 * volatility) / (2.0 * sqrt_t)
-                   - rate * strike * discount * nd2,
+            theta: -(spot * npd1 * volatility) / (2.0 * sqrt_t) - rate * strike * discount * nd2,
             vega: spot * sqrt_t * npd1 / 100.0, // Per 1% vol
             rho: strike * time * discount * nd2 / 100.0, // Per 1% rate
         }
@@ -145,7 +144,7 @@ impl OptionGreeks {
             delta: nd1_neg - 1.0, // Put delta is negative
             gamma: npd1 / (spot * volatility * sqrt_t),
             theta: -(spot * npd1 * volatility) / (2.0 * sqrt_t)
-                   + rate * strike * discount * nd2_neg,
+                + rate * strike * discount * nd2_neg,
             vega: spot * sqrt_t * npd1 / 100.0, // Same as call
             rho: -strike * time * discount * nd2_neg / 100.0,
         }
@@ -226,12 +225,12 @@ fn norm_pdf(x: f64) -> f64 {
 }
 
 fn erf(x: f64) -> f64 {
-    let a1 =  0.254829592;
+    let a1 = 0.254829592;
     let a2 = -0.284496736;
-    let a3 =  1.421413741;
+    let a3 = 1.421413741;
     let a4 = -1.453152027;
-    let a5 =  1.061405429;
-    let p  =  0.3275911;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
 
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
     let x = x.abs();
@@ -244,7 +243,7 @@ fn erf(x: f64) -> f64 {
 
 fn d1_d2(spot: f64, strike: f64, time: f64, rate: f64, volatility: f64) -> (f64, f64) {
     let d1 = ((spot / strike).ln() + (rate + volatility * volatility / 2.0) * time)
-             / (volatility * time.sqrt());
+        / (volatility * time.sqrt());
     let d2 = d1 - volatility * time.sqrt();
     (d1, d2)
 }
@@ -266,15 +265,22 @@ mod tests {
         let put_greeks = OptionGreeks::for_put(spot, strike, time, rate, vol);
         let straddle = call_greeks.add(&put_greeks);
 
-        assert!(straddle.delta.abs() < 0.1, "ATM straddle delta should be near zero: {}", straddle.delta);
+        assert!(
+            straddle.delta.abs() < 0.1,
+            "ATM straddle delta should be near zero: {}",
+            straddle.delta
+        );
         assert!(straddle.gamma > 0.0, "Straddle should have positive gamma");
         assert!(straddle.vega > 0.0, "Straddle should have positive vega");
     }
 
     #[test]
     fn test_call_delta_range() {
-        let greeks = OptionGreeks::for_call(25800.0, 25800.0, 30.0/365.0, 0.05, 0.18);
-        assert!(greeks.delta > 0.0 && greeks.delta < 1.0, "Call delta should be between 0 and 1");
+        let greeks = OptionGreeks::for_call(25800.0, 25800.0, 30.0 / 365.0, 0.05, 0.18);
+        assert!(
+            greeks.delta > 0.0 && greeks.delta < 1.0,
+            "Call delta should be between 0 and 1"
+        );
     }
 
     #[test]

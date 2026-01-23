@@ -1,7 +1,7 @@
 //! Instrument validation rules (lot size, tick size)
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstrumentSpec {
@@ -28,19 +28,28 @@ impl SpecStore {
     }
 
     pub fn insert_with_scale(&mut self, sym: &str, lot: i64, tick: f64, qty_scale: u32) {
-        self.specs.insert(sym.to_string(), InstrumentSpec {
-            lot_size: lot,
-            tick_size: tick,
-            qty_scale,
-        });
+        self.specs.insert(
+            sym.to_string(),
+            InstrumentSpec {
+                lot_size: lot,
+                tick_size: tick,
+                qty_scale,
+            },
+        );
     }
 
     pub fn valid_qty(&self, sym: &str, qty: i64) -> bool {
-        self.specs.get(sym).map(|s| qty % s.lot_size == 0).unwrap_or(true)
+        self.specs
+            .get(sym)
+            .map(|s| qty % s.lot_size == 0)
+            .unwrap_or(true)
     }
 
     pub fn valid_price(&self, sym: &str, px: f64) -> bool {
-        self.specs.get(sym).map(|s| ((px / s.tick_size).round() * s.tick_size - px).abs() < 1e-6).unwrap_or(true)
+        self.specs
+            .get(sym)
+            .map(|s| ((px / s.tick_size).round() * s.tick_size - px).abs() < 1e-6)
+            .unwrap_or(true)
     }
 
     pub fn qty_scale(&self, sym: &str) -> u32 {

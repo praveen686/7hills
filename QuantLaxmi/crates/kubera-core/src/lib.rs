@@ -48,42 +48,44 @@
 //! - LMAX Disruptor: <https://lmax-exchange.github.io/disruptor/>
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use kubera_models::{MarketEvent, OrderEvent, SignalEvent, RiskEvent, SystemHealthEvent, FillEvent};
-use tokio::sync::broadcast;
-use tracing::{warn, info};
-use std::sync::Arc;
 use async_trait::async_trait;
+use kubera_models::{
+    FillEvent, MarketEvent, OrderEvent, RiskEvent, SignalEvent, SystemHealthEvent,
+};
+use std::sync::Arc;
+use tokio::sync::broadcast;
+use tracing::{info, warn};
 
-pub mod strategy;
-pub mod mode;
-pub mod portfolio;
+pub mod aeon;
 pub mod connector;
+pub mod hydra;
+pub mod lob;
+pub mod metrics;
+pub mod mode;
+pub mod null_observer;
 pub mod observability;
 pub mod oras;
-pub mod hydra;
-pub mod rmt;
-pub mod metrics;
-pub mod aeon;
 pub mod parquet_export;
-pub mod lob;
-pub mod null_observer;
+pub mod portfolio;
+pub mod rmt;
+pub mod strategy;
 
-pub use strategy::{Strategy, StrategyRunner, MomentumStrategy};
-pub use oras::OrasStrategy;
-pub use hydra::HydraStrategy;
 pub use aeon::AeonStrategy;
+pub use hydra::HydraStrategy;
 pub use null_observer::{NullObserverStrategy, OptionChainReport};
+pub use oras::OrasStrategy;
+pub use strategy::{MomentumStrategy, Strategy, StrategyRunner};
 
+pub use lob::{LevelDelta, LobError, OrderBook};
+pub use metrics::{MetricsConfig, MetricsSnapshot, TradeRecord, TradingMetrics};
 pub use mode::{ExecutionMode, ModeConfig};
 pub use portfolio::Portfolio;
-pub use metrics::{TradingMetrics, MetricsConfig, MetricsSnapshot, TradeRecord};
-pub use lob::{OrderBook, LevelDelta, LobError};
 
 /// Unified event container for the QuantKubera ecosystem.
 ///
 /// # Description
 /// Decouples event producers from consumers by wrapping all system signals
-/// into a single strongly-typed enumeration. This promotes architectural 
+/// into a single strongly-typed enumeration. This promotes architectural
 /// flexibility and simplifies logging/audit persistence.
 pub enum Event {
     /// Incremental price or orderbook updates.
@@ -120,7 +122,7 @@ pub struct EventBus {
     order_sender: broadcast::Sender<OrderEvent>,
     /// Broadcast sender for order status updates (from executor/connector to strategy/monitor).
     order_update_sender: broadcast::Sender<OrderEvent>,
-    
+
     /// Keep-alive handles.
     _market_handle: broadcast::Receiver<MarketEvent>,
     _risk_handle: broadcast::Receiver<RiskEvent>,
@@ -180,7 +182,7 @@ impl EventBus {
         }
         Ok(())
     }
-    
+
     pub fn publish_signal_sync(&self, event: SignalEvent) -> anyhow::Result<()> {
         let _ = self.signal_sender.send(event);
         Ok(())
@@ -243,14 +245,12 @@ impl EventBus {
     }
 }
 
-
-
 /// Write-Ahead Logging (WAL) for persistent audit trails and replay.
 pub mod wal {
     use super::*;
-    use serde::{Serialize, Deserialize};
+    use serde::{Deserialize, Serialize};
     use std::fs::{File, OpenOptions};
-    use std::io::{Write, BufWriter};
+    use std::io::{BufWriter, Write};
     use std::path::Path;
 
     /// Buffered file writer optimized for sequential event logging.
@@ -264,10 +264,7 @@ pub mod wal {
         /// # Parameters
         /// * `path` - The target filesystem location for the log.
         pub fn new<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let file = OpenOptions::new().create(true).append(true).open(path)?;
             Ok(Self {
                 writer: BufWriter::new(file),
             })
@@ -311,7 +308,11 @@ pub mod wal {
         /// Writes typed metadata to the WAL as JSON.
         /// Line format: META:<json(MetaEvent)>
         /// This is extensible for lot sizes, instrument info, venue configs, etc.
-        pub fn write_meta<V: serde::Serialize>(&mut self, key: &str, value: &V) -> anyhow::Result<()> {
+        pub fn write_meta<V: serde::Serialize>(
+            &mut self,
+            key: &str,
+            value: &V,
+        ) -> anyhow::Result<()> {
             let meta = MetaEvent {
                 key: key.to_string(),
                 value: serde_json::to_value(value)?,
@@ -376,7 +377,9 @@ pub mod wal {
 
         /// Reads all typed metadata records from the WAL file.
         /// Returns key -> JSON value map. Call this early (before replay).
-        pub fn read_meta_all(&mut self) -> anyhow::Result<std::collections::HashMap<String, serde_json::Value>> {
+        pub fn read_meta_all(
+            &mut self,
+        ) -> anyhow::Result<std::collections::HashMap<String, serde_json::Value>> {
             use std::io::{BufRead, Seek, SeekFrom};
 
             let pos = self.reader.stream_position()?;
@@ -471,14 +474,18 @@ pub mod wal {
 
         /// Counts total number of market events in the WAL file.
         pub fn count_events(&mut self) -> anyhow::Result<usize> {
-            use std::io::{Seek, SeekFrom, BufRead};
+            use std::io::{BufRead, Seek, SeekFrom};
             let current_pos = self.reader.stream_position()?;
             self.reader.seek(SeekFrom::Start(0))?;
-            
+
             let mut count = 0;
             let mut line = String::new();
             while self.reader.read_line(&mut line)? > 0 {
-                if !line.starts_with("ORDER:") && !line.starts_with("RISK:") && !line.starts_with("FILL:") && !line.starts_with("HEALTH:") {
+                if !line.starts_with("ORDER:")
+                    && !line.starts_with("RISK:")
+                    && !line.starts_with("FILL:")
+                    && !line.starts_with("HEALTH:")
+                {
                     count += 1;
                 }
                 line.clear();
@@ -489,15 +496,21 @@ pub mod wal {
 
         /// Seeks to the N-th market event in the file.
         pub fn seek_event(&mut self, target_idx: usize) -> anyhow::Result<()> {
-            use std::io::{Seek, SeekFrom, BufRead};
+            use std::io::{BufRead, Seek, SeekFrom};
             self.reader.seek(SeekFrom::Start(0))?;
-            
+
             let mut current_idx = 0;
             let mut line = String::new();
             while current_idx < target_idx {
                 let bytes = self.reader.read_line(&mut line)?;
-                if bytes == 0 { break; }
-                if !line.starts_with("ORDER:") && !line.starts_with("RISK:") && !line.starts_with("FILL:") && !line.starts_with("HEALTH:") {
+                if bytes == 0 {
+                    break;
+                }
+                if !line.starts_with("ORDER:")
+                    && !line.starts_with("RISK:")
+                    && !line.starts_with("FILL:")
+                    && !line.starts_with("HEALTH:")
+                {
                     current_idx += 1;
                 }
                 line.clear();
@@ -563,9 +576,9 @@ use std::path::PathBuf;
 /// EventBus with integrated Write-Ahead Log (WAL) persistence.
 ///
 /// # Description
-/// Composes the basic `EventBus` with a `WalWriter` to ensure all critical 
-/// events (Market, Order, Risk, etc.) are synchronously persisted before 
-/// being broadcast to subscribers. This provides a durable audit trail 
+/// Composes the basic `EventBus` with a `WalWriter` to ensure all critical
+/// events (Market, Order, Risk, etc.) are synchronously persisted before
+/// being broadcast to subscribers. This provides a durable audit trail
 /// required for compliance and deterministic backtesting.
 pub struct PersistentEventBus {
     /// Underlying high-performance event bus.
@@ -588,7 +601,7 @@ impl PersistentEventBus {
     pub fn new<P: Into<PathBuf>>(capacity: usize, wal_path: P) -> anyhow::Result<Arc<Self>> {
         let path = wal_path.into();
         let wal_writer = wal::WalWriter::new(&path)?;
-        
+
         Ok(Arc::new(Self {
             bus: EventBus::new(capacity),
             wal_writer: std::sync::Mutex::new(Some(wal_writer)),
@@ -754,7 +767,10 @@ impl PersistentEventBus {
             total_count += 1;
         }
 
-        info!("WAL replay complete: {} total events ({} market)", total_count, market_count);
+        info!(
+            "WAL replay complete: {} total events ({} market)",
+            total_count, market_count
+        );
         Ok((market_count, total_count))
     }
 }
@@ -768,8 +784,8 @@ use crate::connector::MarketConnector;
 /// Integration bridge for real-time market simulation.
 ///
 /// # Description
-/// Leverages the Decorator pattern to wrap any `MarketConnector`. It 
-/// diverts order flow from live venues while maintaining real-time 
+/// Leverages the Decorator pattern to wrap any `MarketConnector`. It
+/// diverts order flow from live venues while maintaining real-time
 /// market data streams, creating an "Order Sandbox" for live-market simulation.
 pub struct PaperTradingConnector<C: MarketConnector> {
     /// The live data source (e.g., Binance, Zerodha).

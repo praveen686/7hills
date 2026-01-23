@@ -9,12 +9,12 @@
 //! ## References
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use kubera_risk::{RiskEngine, RiskConfig};
-use kubera_models::{OrderEvent, OrderPayload, Side, OrderType};
+use chrono::Utc;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use kubera_models::{OrderEvent, OrderPayload, OrderType, Side};
+use kubera_risk::{RiskConfig, RiskEngine};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use chrono::Utc;
 use uuid::Uuid;
 
 fn bench_risk_check(c: &mut Criterion) {
@@ -24,7 +24,7 @@ fn bench_risk_check(c: &mut Criterion) {
     };
     let kill_switch = Arc::new(AtomicBool::new(false));
     let engine = RiskEngine::new(config, kill_switch);
-    
+
     let order = OrderEvent {
         order_id: Uuid::new_v4(),
         intent_id: None,
@@ -39,7 +39,7 @@ fn bench_risk_check(c: &mut Criterion) {
             order_type: OrderType::Limit,
         },
     };
-    
+
     c.bench_function("risk_engine_check_order", |b| {
         b.iter(|| {
             let _ = black_box(engine.check_order(&order, 50000.0));

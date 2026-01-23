@@ -17,10 +17,10 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
 use crate::contract::{OptionContract, OptionType};
+use crate::execution::{Position, PositionManager};
 use crate::pricing::implied_volatility;
-use crate::strategy::{OptionsStrategy, StrategyType, StrategyLeg};
-use crate::execution::{PositionManager, Position};
-use chrono::{NaiveDate, DateTime, Utc};
+use crate::strategy::{OptionsStrategy, StrategyLeg, StrategyType};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -50,9 +50,16 @@ impl OptionBar {
         if time <= 0.0 {
             return None;
         }
-        
+
         let is_call = matches!(self.option_type, OptionType::Call);
-        implied_volatility(self.close, self.underlying_price, self.strike, time, rate, is_call)
+        implied_volatility(
+            self.close,
+            self.underlying_price,
+            self.strike,
+            time,
+            rate,
+            is_call,
+        )
     }
 }
 
@@ -150,32 +157,39 @@ impl FnOBacktester {
         prices: &HashMap<String, f64>,
     ) {
         for leg in &strategy.legs {
-            let price = prices.get(&leg.contract.tradingsymbol).copied().unwrap_or(leg.entry_price);
+            let price = prices
+                .get(&leg.contract.tradingsymbol)
+                .copied()
+                .unwrap_or(leg.entry_price);
             let slippage = price * (self.config.slippage_bps / 10000.0);
-            
+
             let fill_price = if leg.quantity > 0 {
-                price + slippage 
+                price + slippage
             } else {
-                price - slippage 
+                price - slippage
             };
-            
+
             let total_quantity = leg.quantity * self.config.lot_size as i32;
             let commission = self.config.commission_per_lot * leg.quantity.abs() as f64;
-            
+
             self.position_manager.on_fill(
                 &leg.contract.tradingsymbol,
                 total_quantity,
                 fill_price,
                 "NRML",
             );
-            
+
             self.current_equity -= commission;
-            
+
             self.trades.push(TradeRecord {
                 timestamp,
                 strategy_name: strategy.name.clone(),
                 symbol: leg.contract.tradingsymbol.clone(),
-                side: if leg.quantity > 0 { "BUY".to_string() } else { "SELL".to_string() },
+                side: if leg.quantity > 0 {
+                    "BUY".to_string()
+                } else {
+                    "SELL".to_string()
+                },
                 quantity: total_quantity,
                 entry_price: fill_price,
                 exit_price: None,
@@ -189,10 +203,10 @@ impl FnOBacktester {
     pub fn mark_to_market(&mut self, timestamp: DateTime<Utc>, prices: &HashMap<String, f64>) {
         self.position_manager.update_prices(prices);
         let mtm_pnl = self.position_manager.total_pnl();
-        
+
         self.current_equity = self.config.initial_capital + mtm_pnl;
         self.equity_curve.push((timestamp, self.current_equity));
-        
+
         if self.current_equity > self.peak_equity {
             self.peak_equity = self.current_equity;
         }
@@ -204,38 +218,44 @@ impl FnOBacktester {
 
     /// Liquidates all open positions at current market prices.
     pub fn close_all_positions(&mut self, timestamp: DateTime<Utc>, prices: &HashMap<String, f64>) {
-        let positions: Vec<Position> = self.position_manager.all_positions()
+        let positions: Vec<Position> = self
+            .position_manager
+            .all_positions()
             .iter()
             .map(|p| (*p).clone())
             .collect();
-        
+
         for pos in positions {
-            let price = prices.get(&pos.tradingsymbol).copied().unwrap_or(pos.last_price);
+            let price = prices
+                .get(&pos.tradingsymbol)
+                .copied()
+                .unwrap_or(pos.last_price);
             let slippage = price * (self.config.slippage_bps / 10000.0);
-            
+
             let fill_price = if pos.quantity > 0 {
-                price - slippage 
+                price - slippage
             } else {
-                price + slippage 
+                price + slippage
             };
-            
+
             let pnl = (fill_price - pos.average_price) * pos.quantity as f64;
-            let commission = self.config.commission_per_lot * (pos.quantity.abs() as f64 / self.config.lot_size as f64);
-            
+            let commission = self.config.commission_per_lot
+                * (pos.quantity.abs() as f64 / self.config.lot_size as f64);
+
             self.current_equity += pnl - commission;
-            
-            self.position_manager.on_fill(
-                &pos.tradingsymbol,
-                -pos.quantity,
-                fill_price,
-                "NRML",
-            );
-            
+
+            self.position_manager
+                .on_fill(&pos.tradingsymbol, -pos.quantity, fill_price, "NRML");
+
             self.trades.push(TradeRecord {
                 timestamp,
                 strategy_name: "CLOSE".to_string(),
                 symbol: pos.tradingsymbol.clone(),
-                side: if pos.quantity > 0 { "SELL".to_string() } else { "BUY".to_string() },
+                side: if pos.quantity > 0 {
+                    "SELL".to_string()
+                } else {
+                    "BUY".to_string()
+                },
                 quantity: -pos.quantity,
                 entry_price: fill_price,
                 exit_price: Some(fill_price),
@@ -253,31 +273,65 @@ impl FnOBacktester {
         let gross_pnl = self.trades.iter().map(|t| t.pnl).sum();
         let total_commission: f64 = self.trades.iter().map(|t| t.commission).sum();
         let net_pnl = gross_pnl - total_commission;
-        
-        let gross_profit: f64 = self.trades.iter().filter(|t| t.pnl > 0.0).map(|t| t.pnl).sum();
-        let gross_loss: f64 = self.trades.iter().filter(|t| t.pnl < 0.0).map(|t| t.pnl.abs()).sum();
-        let profit_factor = if gross_loss > 0.0 { gross_profit / gross_loss } else { 0.0 };
-        
-        let win_rate = if total_trades > 0 { winning_trades as f64 / total_trades as f64 } else { 0.0 };
-        let avg_trade_pnl = if total_trades > 0 { net_pnl / total_trades as f64 } else { 0.0 };
-        
+
+        let gross_profit: f64 = self
+            .trades
+            .iter()
+            .filter(|t| t.pnl > 0.0)
+            .map(|t| t.pnl)
+            .sum();
+        let gross_loss: f64 = self
+            .trades
+            .iter()
+            .filter(|t| t.pnl < 0.0)
+            .map(|t| t.pnl.abs())
+            .sum();
+        let profit_factor = if gross_loss > 0.0 {
+            gross_profit / gross_loss
+        } else {
+            0.0
+        };
+
+        let win_rate = if total_trades > 0 {
+            winning_trades as f64 / total_trades as f64
+        } else {
+            0.0
+        };
+        let avg_trade_pnl = if total_trades > 0 {
+            net_pnl / total_trades as f64
+        } else {
+            0.0
+        };
+
         // Sharpe calculation
-        let returns: Vec<f64> = self.equity_curve.windows(2)
+        let returns: Vec<f64> = self
+            .equity_curve
+            .windows(2)
             .map(|w| (w[1].1 - w[0].1) / w[0].1)
             .collect();
-        
-        let mean_return = if !returns.is_empty() { returns.iter().sum::<f64>() / returns.len() as f64 } else { 0.0 };
+
+        let mean_return = if !returns.is_empty() {
+            returns.iter().sum::<f64>() / returns.len() as f64
+        } else {
+            0.0
+        };
         let std_dev = if returns.len() > 1 {
-            let variance = returns.iter()
+            let variance = returns
+                .iter()
                 .map(|r| (r - mean_return).powi(2))
-                .sum::<f64>() / (returns.len() - 1) as f64;
+                .sum::<f64>()
+                / (returns.len() - 1) as f64;
             variance.sqrt()
         } else {
             0.0
         };
-        
-        let sharpe_ratio = if std_dev > 0.0 { (mean_return * 252.0_f64.sqrt()) / std_dev } else { 0.0 };
-        
+
+        let sharpe_ratio = if std_dev > 0.0 {
+            (mean_return * 252.0_f64.sqrt()) / std_dev
+        } else {
+            0.0
+        };
+
         BacktestResult {
             total_trades,
             winning_trades,
@@ -320,9 +374,13 @@ impl StrategyRunner {
     fn build_straddle(spot: f64, expiry: NaiveDate, is_long: bool) -> OptionsStrategy {
         let atm_strike = (spot / 50.0).round() * 50.0;
         let qty = if is_long { 1 } else { -1 };
-        
+
         OptionsStrategy {
-            name: format!("{} Straddle {}", if is_long { "Long" } else { "Short" }, atm_strike),
+            name: format!(
+                "{} Straddle {}",
+                if is_long { "Long" } else { "Short" },
+                atm_strike
+            ),
             strategy_type: StrategyType::Straddle,
             legs: vec![
                 StrategyLeg {
@@ -383,13 +441,13 @@ mod tests {
     #[test]
     fn test_strategy_runner_atm_straddle() {
         let runner = StrategyRunner::atm_straddle(0.12, 0.25);
-        
+
         // Low IV should generate long straddle
         let expiry = NaiveDate::from_ymd_opt(2024, 12, 26).unwrap();
         let strategy = runner.evaluate(25800.0, 0.10, expiry);
         assert!(strategy.is_some());
         assert_eq!(strategy.unwrap().legs.len(), 2);
-        
+
         // Normal IV should not generate signal
         let strategy = runner.evaluate(25800.0, 0.18, expiry);
         assert!(strategy.is_none());

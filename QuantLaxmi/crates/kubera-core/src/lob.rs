@@ -22,8 +22,8 @@
 //! └─────────────────────────────────────────────────────┘
 //! ```
 
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 // Import from models (leaf crate) - breaks kubera-core -> kubera-options cycle
 use kubera_models::DepthEvent;
 
@@ -45,7 +45,11 @@ impl std::fmt::Display for LobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LobError::SequenceGap { expected, actual } => {
-                write!(f, "Sequence gap: expected first_update_id={}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Sequence gap: expected first_update_id={}, got {}",
+                    expected, actual
+                )
             }
             LobError::PriceExponentMismatch { book, event } => {
                 write!(f, "Price exponent mismatch: book={}, event={}", book, event)
@@ -244,11 +248,21 @@ impl OrderBook {
         }
 
         // Convert DepthLevels to LevelDeltas
-        let bid_deltas: Vec<LevelDelta> = event.bids.iter()
-            .map(|l| LevelDelta { price: l.price, qty: l.qty })
+        let bid_deltas: Vec<LevelDelta> = event
+            .bids
+            .iter()
+            .map(|l| LevelDelta {
+                price: l.price,
+                qty: l.qty,
+            })
             .collect();
-        let ask_deltas: Vec<LevelDelta> = event.asks.iter()
-            .map(|l| LevelDelta { price: l.price, qty: l.qty })
+        let ask_deltas: Vec<LevelDelta> = event
+            .asks
+            .iter()
+            .map(|l| LevelDelta {
+                price: l.price,
+                qty: l.qty,
+            })
             .collect();
 
         // Apply with gap detection
@@ -262,11 +276,21 @@ impl OrderBook {
 
     /// Applies a DepthEvent without validation (for initial snapshots or testing).
     pub fn apply_depth_event_unchecked(&mut self, event: &DepthEvent) {
-        let bid_deltas: Vec<LevelDelta> = event.bids.iter()
-            .map(|l| LevelDelta { price: l.price, qty: l.qty })
+        let bid_deltas: Vec<LevelDelta> = event
+            .bids
+            .iter()
+            .map(|l| LevelDelta {
+                price: l.price,
+                qty: l.qty,
+            })
             .collect();
-        let ask_deltas: Vec<LevelDelta> = event.asks.iter()
-            .map(|l| LevelDelta { price: l.price, qty: l.qty })
+        let ask_deltas: Vec<LevelDelta> = event
+            .asks
+            .iter()
+            .map(|l| LevelDelta {
+                price: l.price,
+                qty: l.qty,
+            })
             .collect();
 
         self.apply_delta_unchecked(&bid_deltas, &ask_deltas, event.last_update_id);
@@ -369,7 +393,8 @@ impl OrderBook {
             return None;
         }
 
-        let cost_f64 = (total_cost as f64) * 10f64.powi((self.price_exponent + self.qty_exponent) as i32);
+        let cost_f64 =
+            (total_cost as f64) * 10f64.powi((self.price_exponent + self.qty_exponent) as i32);
         let filled_f64 = self.qty_to_f64(total_filled);
         let avg_price = cost_f64 / filled_f64;
 
@@ -401,7 +426,8 @@ impl OrderBook {
             return None;
         }
 
-        let proceeds_f64 = (total_proceeds as f64) * 10f64.powi((self.price_exponent + self.qty_exponent) as i32);
+        let proceeds_f64 =
+            (total_proceeds as f64) * 10f64.powi((self.price_exponent + self.qty_exponent) as i32);
         let filled_f64 = self.qty_to_f64(total_filled);
         let avg_price = proceeds_f64 / filled_f64;
 
@@ -436,12 +462,24 @@ mod tests {
 
         // Apply initial snapshot
         let bids = vec![
-            LevelDelta { price: 9000000, qty: 100000000 }, // 90000.00 @ 1.0
-            LevelDelta { price: 8999000, qty: 200000000 }, // 89990.00 @ 2.0
+            LevelDelta {
+                price: 9000000,
+                qty: 100000000,
+            }, // 90000.00 @ 1.0
+            LevelDelta {
+                price: 8999000,
+                qty: 200000000,
+            }, // 89990.00 @ 2.0
         ];
         let asks = vec![
-            LevelDelta { price: 9001000, qty: 50000000 },  // 90010.00 @ 0.5
-            LevelDelta { price: 9002000, qty: 100000000 }, // 90020.00 @ 1.0
+            LevelDelta {
+                price: 9001000,
+                qty: 50000000,
+            }, // 90010.00 @ 0.5
+            LevelDelta {
+                price: 9002000,
+                qty: 100000000,
+            }, // 90020.00 @ 1.0
         ];
 
         book.apply_delta_unchecked(&bids, &asks, 100);
@@ -456,12 +494,21 @@ mod tests {
     fn test_level_removal() {
         let mut book = OrderBook::new("BTCUSDT".to_string(), -2, -8);
 
-        let bids = vec![LevelDelta { price: 9000000, qty: 100000000 }];
-        let asks = vec![LevelDelta { price: 9001000, qty: 50000000 }];
+        let bids = vec![LevelDelta {
+            price: 9000000,
+            qty: 100000000,
+        }];
+        let asks = vec![LevelDelta {
+            price: 9001000,
+            qty: 50000000,
+        }];
         book.apply_delta_unchecked(&bids, &asks, 100);
 
         // Remove the bid level
-        let remove_bids = vec![LevelDelta { price: 9000000, qty: 0 }];
+        let remove_bids = vec![LevelDelta {
+            price: 9000000,
+            qty: 0,
+        }];
         book.apply_delta(&remove_bids, &[], 101, 101).unwrap();
 
         assert_eq!(book.best_bid(), None);
@@ -472,12 +519,21 @@ mod tests {
     fn test_gap_detection() {
         let mut book = OrderBook::new("BTCUSDT".to_string(), -2, -8);
 
-        let bids = vec![LevelDelta { price: 9000000, qty: 100000000 }];
+        let bids = vec![LevelDelta {
+            price: 9000000,
+            qty: 100000000,
+        }];
         book.apply_delta_unchecked(&bids, &[], 100);
 
         // Try to apply update with gap
         let result = book.apply_delta(&[], &[], 102, 102);
-        assert!(matches!(result, Err(LobError::SequenceGap { expected: 101, actual: 102 })));
+        assert!(matches!(
+            result,
+            Err(LobError::SequenceGap {
+                expected: 101,
+                actual: 102
+            })
+        ));
     }
 
     #[test]
@@ -486,8 +542,14 @@ mod tests {
 
         // Set up asks: 90010 @ 0.5, 90020 @ 1.0
         let asks = vec![
-            LevelDelta { price: 9001000, qty: 50000000 },  // 90010.00 @ 0.5
-            LevelDelta { price: 9002000, qty: 100000000 }, // 90020.00 @ 1.0
+            LevelDelta {
+                price: 9001000,
+                qty: 50000000,
+            }, // 90010.00 @ 0.5
+            LevelDelta {
+                price: 9002000,
+                qty: 100000000,
+            }, // 90020.00 @ 1.0
         ];
         book.apply_delta_unchecked(&[], &asks, 100);
 
@@ -510,9 +572,18 @@ mod tests {
 
         // Apply same updates in same order
         let bids = vec![
-            LevelDelta { price: 100, qty: 10 },
-            LevelDelta { price: 200, qty: 20 },
-            LevelDelta { price: 150, qty: 15 },
+            LevelDelta {
+                price: 100,
+                qty: 10,
+            },
+            LevelDelta {
+                price: 200,
+                qty: 20,
+            },
+            LevelDelta {
+                price: 150,
+                qty: 15,
+            },
         ];
 
         book1.apply_delta_unchecked(&bids, &[], 1);
@@ -541,12 +612,14 @@ mod tests {
             last_update_id: 1,
             price_exponent: -2,
             qty_exponent: -8,
-            bids: vec![
-                DepthLevel { price: 9000000, qty: 100000000 },
-            ],
-            asks: vec![
-                DepthLevel { price: 9001000, qty: 50000000 },
-            ],
+            bids: vec![DepthLevel {
+                price: 9000000,
+                qty: 100000000,
+            }],
+            asks: vec![DepthLevel {
+                price: 9001000,
+                qty: 50000000,
+            }],
             is_snapshot: false,
             integrity_tier: IntegrityTier::Certified,
             source: None,
@@ -605,7 +678,10 @@ mod tests {
         };
 
         let result = book.apply_depth_event(&event);
-        assert!(matches!(result, Err(LobError::PriceExponentMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(LobError::PriceExponentMismatch { .. })
+        ));
     }
 
     #[test]
@@ -623,7 +699,10 @@ mod tests {
             last_update_id: 100,
             price_exponent: -2,
             qty_exponent: -8,
-            bids: vec![DepthLevel { price: 9000000, qty: 100000000 }],
+            bids: vec![DepthLevel {
+                price: 9000000,
+                qty: 100000000,
+            }],
             asks: vec![],
             is_snapshot: false,
             integrity_tier: IntegrityTier::Certified,
@@ -647,6 +726,12 @@ mod tests {
         };
 
         let result = book.apply_depth_event(&event2);
-        assert!(matches!(result, Err(LobError::SequenceGap { expected: 101, actual: 103 })));
+        assert!(matches!(
+            result,
+            Err(LobError::SequenceGap {
+                expected: 101,
+                actual: 103
+            })
+        ));
     }
 }

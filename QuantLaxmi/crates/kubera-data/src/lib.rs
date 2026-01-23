@@ -19,10 +19,10 @@
 //! - Easley, D., Lopez de Prado, M., & O'Hara, M. (2012). VPIN
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use kubera_models::{MarketEvent, MarketPayload, Side, L2Snapshot, L2Update};
 use chrono::{DateTime, Utc};
-use std::collections::{HashMap, BTreeMap};
+use kubera_models::{L2Snapshot, L2Update, MarketEvent, MarketPayload, Side};
 use ordered_float::OrderedFloat;
+use std::collections::{BTreeMap, HashMap};
 
 pub mod parquet_exporter;
 pub use parquet_exporter::ParquetExporter;
@@ -81,14 +81,17 @@ impl BarAggregator {
         };
 
         let bar_start = self.get_bar_start(event.exchange_time);
-        let state = self.current_bars.entry(event.symbol.clone()).or_insert_with(|| BarState {
-            open: price,
-            high: price,
-            low: price,
-            close: price,
-            volume: 0.0,
-            start_time: bar_start,
-        });
+        let state = self
+            .current_bars
+            .entry(event.symbol.clone())
+            .or_insert_with(|| BarState {
+                open: price,
+                high: price,
+                low: price,
+                close: price,
+                volume: 0.0,
+                start_time: bar_start,
+            });
 
         // Check if bar closed
         if bar_start > state.start_time {
@@ -128,7 +131,9 @@ impl BarAggregator {
         let timestamp = time.timestamp_millis();
         let interval = self.interval_ms as i64;
         let start_ms = (timestamp / interval) * interval;
-        DateTime::from_timestamp_millis(start_ms).unwrap_or(time).with_timezone(&Utc)
+        DateTime::from_timestamp_millis(start_ms)
+            .unwrap_or(time)
+            .with_timezone(&Utc)
     }
 }
 
@@ -226,7 +231,7 @@ impl VpinCalculator {
         while remaining_size > 0.0 {
             let space_in_bucket = self.bucket_size - self.current_bucket_volume;
             let trade_size_in_bucket = f64::min(remaining_size, space_in_bucket);
-            
+
             let sign = match side {
                 Side::Buy => 1.0,
                 Side::Sell => -1.0,
@@ -264,9 +269,9 @@ impl VpinCalculator {
 pub mod simulator {
     use super::*;
     use kubera_core::EventBus;
-    use std::sync::Arc;
-    use tokio::time::{sleep, Duration as TokioDuration};
     use rand::Rng;
+    use std::sync::Arc;
+    use tokio::time::{Duration as TokioDuration, sleep};
 
     pub async fn run_simulated_feed(
         bus: Arc<EventBus>,
@@ -280,7 +285,7 @@ pub mod simulator {
                 let mut rng = rand::thread_rng();
                 let change = (rng.r#gen::<f64>() - 0.5) * 0.1;
                 current_price += change;
-                
+
                 let tick = MarketEvent {
                     exchange_time: Utc::now(),
                     local_time: Utc::now(),
@@ -308,8 +313,26 @@ mod tests {
     fn test_l2_book_snapshot_and_update() {
         let mut book = Level2Book::new("BTC-USDT".to_string());
         let snapshot = L2Snapshot {
-            bids: vec![L2Level { price: 50000.0, size: 1.0 }, L2Level { price: 49990.0, size: 2.0 }],
-            asks: vec![L2Level { price: 50010.0, size: 1.0 }, L2Level { price: 50020.0, size: 2.0 }],
+            bids: vec![
+                L2Level {
+                    price: 50000.0,
+                    size: 1.0,
+                },
+                L2Level {
+                    price: 49990.0,
+                    size: 2.0,
+                },
+            ],
+            asks: vec![
+                L2Level {
+                    price: 50010.0,
+                    size: 1.0,
+                },
+                L2Level {
+                    price: 50020.0,
+                    size: 2.0,
+                },
+            ],
             update_id: 100,
         };
         book.apply_snapshot(snapshot, 100);
@@ -317,7 +340,16 @@ mod tests {
         assert_eq!(book.get_best_ask(), Some((50010.0, 1.0)));
 
         let update = L2Update {
-            bids: vec![L2Level { price: 50000.0, size: 0.0 }, L2Level { price: 50005.0, size: 0.5 }],
+            bids: vec![
+                L2Level {
+                    price: 50000.0,
+                    size: 0.0,
+                },
+                L2Level {
+                    price: 50005.0,
+                    size: 0.5,
+                },
+            ],
             asks: vec![],
             first_update_id: 101,
             last_update_id: 101,
@@ -329,10 +361,10 @@ mod tests {
     #[test]
     fn test_vpin_calculator() {
         let mut calc = VpinCalculator::new("BTC-USDT".to_string(), 10.0, 5);
-        
+
         // Buy 5 units - Bucket [5/10] Imbalance +5
         assert!(calc.on_trade(50000.0, 5.0, Side::Buy).is_none());
-        
+
         // Sell 5 units - Bucket [10/10] Imbalance 0 (5 - 5)
         // VPIN for 1 bucket: 0 / (1 * 10) = 0
         let vpin = calc.on_trade(50005.0, 5.0, Side::Sell);

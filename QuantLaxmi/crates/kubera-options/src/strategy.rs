@@ -4,13 +4,13 @@
 //!
 //! ## Description
 //! Provides structures and logic for composing complex options strategies
-//! (e.g., Straddles, Iron Condors). Implements aggregate risk metrics 
+//! (e.g., Straddles, Iron Condors). Implements aggregate risk metrics
 //! and profit/loss surface calculations.
 //!
 //! ## References
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use crate::contract::{OptionContract, OptionType, OptionChain};
+use crate::contract::{OptionChain, OptionContract, OptionType};
 use crate::greeks::OptionGreeks;
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +42,7 @@ pub enum StrategyType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyLeg {
     pub contract: OptionContract,
-    pub quantity: i32,  
+    pub quantity: i32,
     pub entry_price: f64,
 }
 
@@ -75,7 +75,8 @@ impl OptionsStrategy {
     /// Value > 0: Net debit (payment).
     /// Value < 0: Net credit (receipt).
     pub fn net_premium(&self) -> f64 {
-        self.legs.iter()
+        self.legs
+            .iter()
             .map(|leg| leg.entry_price * leg.quantity as f64)
             .sum()
     }
@@ -86,9 +87,9 @@ impl OptionsStrategy {
     /// `Some(value)` for defined-risk, `None` for unlimited profit strategies.
     pub fn max_profit(&self) -> Option<f64> {
         match self.strategy_type {
-            StrategyType::Straddle => None, 
+            StrategyType::Straddle => None,
             StrategyType::IronCondor => {
-                let premium = -self.net_premium(); 
+                let premium = -self.net_premium();
                 Some(premium)
             }
             _ => None,
@@ -98,12 +99,11 @@ impl OptionsStrategy {
     /// Theoretical maximum loss if loss is bounded.
     pub fn max_loss(&self) -> Option<f64> {
         match self.strategy_type {
-            StrategyType::Straddle => {
-                Some(self.net_premium())
-            }
+            StrategyType::Straddle => Some(self.net_premium()),
             StrategyType::IronCondor => {
                 if self.legs.len() == 4 {
-                    let put_spread_width = (self.legs[1].contract.strike - self.legs[0].contract.strike).abs();
+                    let put_spread_width =
+                        (self.legs[1].contract.strike - self.legs[0].contract.strike).abs();
                     let premium = -self.net_premium();
                     Some(put_spread_width - premium)
                 } else {
@@ -123,15 +123,19 @@ impl OptionsStrategy {
     /// * `volatility` - Implied volatility.
     pub fn greeks(&self, spot: f64, time: f64, rate: f64, volatility: f64) -> OptionGreeks {
         let mut total = OptionGreeks::default();
-        
+
         for leg in &self.legs {
             let leg_greeks = match leg.contract.option_type {
-                OptionType::Call => OptionGreeks::for_call(spot, leg.contract.strike, time, rate, volatility),
-                OptionType::Put => OptionGreeks::for_put(spot, leg.contract.strike, time, rate, volatility),
+                OptionType::Call => {
+                    OptionGreeks::for_call(spot, leg.contract.strike, time, rate, volatility)
+                }
+                OptionType::Put => {
+                    OptionGreeks::for_put(spot, leg.contract.strike, time, rate, volatility)
+                }
             };
             total = total.add(&leg_greeks.scale(leg.quantity as f64));
         }
-        
+
         total
     }
 }
@@ -139,13 +143,21 @@ impl OptionsStrategy {
 /// Builder for constructing an At-The-Money (ATM) Straddle.
 pub fn build_straddle(chain: &OptionChain, quantity: i32) -> Option<OptionsStrategy> {
     let (call, put) = chain.atm_straddle()?;
-    
+
     Some(OptionsStrategy {
         name: format!("{} Straddle {}", chain.underlying, chain.expiry),
         strategy_type: StrategyType::Straddle,
         legs: vec![
-            StrategyLeg { contract: call, quantity, entry_price: 0.0 },
-            StrategyLeg { contract: put, quantity, entry_price: 0.0 },
+            StrategyLeg {
+                contract: call,
+                quantity,
+                entry_price: 0.0,
+            },
+            StrategyLeg {
+                contract: put,
+                quantity,
+                entry_price: 0.0,
+            },
         ],
         underlying_price: chain.spot_price,
     })
@@ -160,19 +172,47 @@ pub fn build_iron_condor(
     call_buy_strike: f64,
     quantity: i32,
 ) -> Option<OptionsStrategy> {
-    let put_buy = chain.puts.iter().find(|p| (p.strike - put_buy_strike).abs() < 0.01)?;
-    let put_sell = chain.puts.iter().find(|p| (p.strike - put_sell_strike).abs() < 0.01)?;
-    let call_sell = chain.calls.iter().find(|c| (c.strike - call_sell_strike).abs() < 0.01)?;
-    let call_buy = chain.calls.iter().find(|c| (c.strike - call_buy_strike).abs() < 0.01)?;
-    
+    let put_buy = chain
+        .puts
+        .iter()
+        .find(|p| (p.strike - put_buy_strike).abs() < 0.01)?;
+    let put_sell = chain
+        .puts
+        .iter()
+        .find(|p| (p.strike - put_sell_strike).abs() < 0.01)?;
+    let call_sell = chain
+        .calls
+        .iter()
+        .find(|c| (c.strike - call_sell_strike).abs() < 0.01)?;
+    let call_buy = chain
+        .calls
+        .iter()
+        .find(|c| (c.strike - call_buy_strike).abs() < 0.01)?;
+
     Some(OptionsStrategy {
         name: format!("{} Iron Condor {}", chain.underlying, chain.expiry),
         strategy_type: StrategyType::IronCondor,
         legs: vec![
-            StrategyLeg { contract: put_buy.clone(), quantity, entry_price: 0.0 },
-            StrategyLeg { contract: put_sell.clone(), quantity: -quantity, entry_price: 0.0 },
-            StrategyLeg { contract: call_sell.clone(), quantity: -quantity, entry_price: 0.0 },
-            StrategyLeg { contract: call_buy.clone(), quantity, entry_price: 0.0 },
+            StrategyLeg {
+                contract: put_buy.clone(),
+                quantity,
+                entry_price: 0.0,
+            },
+            StrategyLeg {
+                contract: put_sell.clone(),
+                quantity: -quantity,
+                entry_price: 0.0,
+            },
+            StrategyLeg {
+                contract: call_sell.clone(),
+                quantity: -quantity,
+                entry_price: 0.0,
+            },
+            StrategyLeg {
+                contract: call_buy.clone(),
+                quantity,
+                entry_price: 0.0,
+            },
         ],
         underlying_price: chain.spot_price,
     })
@@ -192,7 +232,10 @@ mod tests {
 
         let straddle_greeks = OptionGreeks::for_call(spot, spot, time, rate, vol)
             .add(&OptionGreeks::for_put(spot, spot, time, rate, vol));
-        
-        assert!(straddle_greeks.delta.abs() < 0.1, "Straddle delta should be near zero");
+
+        assert!(
+            straddle_greeks.delta.abs() < 0.1,
+            "Straddle delta should be near zero"
+        );
     }
 }

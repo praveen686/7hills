@@ -4,7 +4,7 @@
 //!
 //! ## Description
 //! Implements the core traits and mock providers for the QuantKubera ecosystem.
-//! Following the Adapter pattern, this module decouples strategy logic from 
+//! Following the Adapter pattern, this module decouples strategy logic from
 //! exchange-specific API nuances.
 //!
 //! ## References
@@ -20,10 +20,10 @@ pub trait MarketConnector: Send + Sync {
     /// # Returns
     /// An `anyhow::Result` which resolves when the connector stops or fails.
     async fn run(&self) -> anyhow::Result<()>;
-    
+
     /// Signals the connector to stop ingestion gracefully.
     fn stop(&self);
-    
+
     /// Provides the human-readable name of the venue.
     fn name(&self) -> &'static str;
 }
@@ -55,9 +55,9 @@ impl MarketConnector for MockConnector {
     async fn run(&self) -> anyhow::Result<()> {
         Ok(())
     }
-    
+
     fn stop(&self) {}
-    
+
     fn name(&self) -> &'static str {
         self.name
     }

@@ -203,27 +203,33 @@ impl NullObserverStrategy {
             }
             // Running average
             obs.avg_spread_bps = (obs.avg_spread_bps * obs.spread_samples as f64 + spread)
-                                 / (obs.spread_samples + 1) as f64;
+                / (obs.spread_samples + 1) as f64;
             obs.spread_samples += 1;
         }
 
         // Parse and track in ladder
         if !self.parsed_options.contains_key(symbol) {
             if let Some(parsed) = Self::parse_symbol(symbol) {
-                self.parsed_options.insert(symbol.to_string(), parsed.clone());
+                self.parsed_options
+                    .insert(symbol.to_string(), parsed.clone());
 
                 // Add to ladder
-                let ladder = self.ladders.entry(parsed.expiry.clone()).or_insert_with(|| {
-                    StrikeLadder {
+                let ladder = self
+                    .ladders
+                    .entry(parsed.expiry.clone())
+                    .or_insert_with(|| StrikeLadder {
                         expiry: parsed.expiry.clone(),
                         ..Default::default()
-                    }
-                });
+                    });
 
                 ladder.strikes.insert(parsed.strike);
                 match parsed.option_type {
-                    OptionType::Call => { ladder.call_strikes.insert(parsed.strike); }
-                    OptionType::Put => { ladder.put_strikes.insert(parsed.strike); }
+                    OptionType::Call => {
+                        ladder.call_strikes.insert(parsed.strike);
+                    }
+                    OptionType::Put => {
+                        ladder.put_strikes.insert(parsed.strike);
+                    }
                 }
             }
         }
@@ -235,10 +241,8 @@ impl NullObserverStrategy {
             let intrinsic_estimate = mid; // Premium-based estimate
             if intrinsic_estimate > 50.0 && intrinsic_estimate < 1000.0 {
                 // Reasonable option premium range - likely near ATM
-                self.underlying_prices.insert(
-                    parsed.underlying.clone(),
-                    parsed.strike as f64
-                );
+                self.underlying_prices
+                    .insert(parsed.underlying.clone(), parsed.strike as f64);
             }
         }
     }
@@ -252,9 +256,7 @@ impl NullObserverStrategy {
 
             // Detect strike interval
             let strikes: Vec<u32> = ladder.strikes.iter().cloned().collect();
-            let intervals: Vec<u32> = strikes.windows(2)
-                .map(|w| w[1] - w[0])
-                .collect();
+            let intervals: Vec<u32> = strikes.windows(2).map(|w| w[1] - w[0]).collect();
 
             // Most common interval
             let mut interval_counts: HashMap<u32, usize> = HashMap::new();
@@ -262,7 +264,8 @@ impl NullObserverStrategy {
                 *interval_counts.entry(i).or_insert(0) += 1;
             }
 
-            let expected_interval = interval_counts.into_iter()
+            let expected_interval = interval_counts
+                .into_iter()
                 .max_by_key(|(_, count)| *count)
                 .map(|(interval, _)| interval)
                 .unwrap_or(50);
@@ -299,7 +302,10 @@ impl NullObserverStrategy {
                 strike_range: if ladder.strikes.is_empty() {
                     (0, 0)
                 } else {
-                    (*ladder.strikes.first().unwrap(), *ladder.strikes.last().unwrap())
+                    (
+                        *ladder.strikes.first().unwrap(),
+                        *ladder.strikes.last().unwrap(),
+                    )
                 },
             });
         }
@@ -309,8 +315,10 @@ impl NullObserverStrategy {
         for (symbol, obs) in &self.observations {
             if let Some(parsed) = self.parsed_options.get(symbol) {
                 if let Some(&underlying_price) = self.underlying_prices.get(&parsed.underlying) {
-                    let moneyness = (parsed.strike as f64 - underlying_price).abs() / underlying_price * 100.0;
-                    if moneyness < 2.0 { // Within 2% of ATM
+                    let moneyness =
+                        (parsed.strike as f64 - underlying_price).abs() / underlying_price * 100.0;
+                    if moneyness < 2.0 {
+                        // Within 2% of ATM
                         atm_spreads.push(AtmSpreadReport {
                             symbol: symbol.clone(),
                             strike: parsed.strike,
@@ -358,8 +366,18 @@ impl Strategy for NullObserverStrategy {
                 (bid, ask)
             }
             MarketPayload::L2Update(update) => {
-                let bid = update.bids.iter().find(|l| l.size > 0.0).map(|l| l.price).unwrap_or(0.0);
-                let ask = update.asks.iter().find(|l| l.size > 0.0).map(|l| l.price).unwrap_or(0.0);
+                let bid = update
+                    .bids
+                    .iter()
+                    .find(|l| l.size > 0.0)
+                    .map(|l| l.price)
+                    .unwrap_or(0.0);
+                let ask = update
+                    .asks
+                    .iter()
+                    .find(|l| l.size > 0.0)
+                    .map(|l| l.price)
+                    .unwrap_or(0.0);
                 (bid, ask)
             }
             MarketPayload::Tick { price, .. } => (*price, *price), // Tick has single price, use as both bid/ask
@@ -382,16 +400,24 @@ impl Strategy for NullObserverStrategy {
             self.last_heartbeat_ms = elapsed_ms;
             tracing::debug!(
                 "[{}] Heartbeat: {} events, {} symbols observed",
-                self.name, self.total_events, self.observations.len()
+                self.name,
+                self.total_events,
+                self.observations.len()
             );
         }
     }
 
     fn on_stop(&mut self) {
-        tracing::info!("[{}] Stopped. Total events: {}", self.name, self.total_events);
+        tracing::info!(
+            "[{}] Stopped. Total events: {}",
+            self.name,
+            self.total_events
+        );
     }
 
-    fn name(&self) -> &str { &self.name }
+    fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 /// Report structures for option chain analysis
@@ -435,17 +461,32 @@ impl std::fmt::Display for OptionChainReport {
 
         writeln!(f, "EXPIRIES:")?;
         for exp in &self.expiries {
-            writeln!(f, "  {} | Strikes: {} (CE:{}, PE:{}) | Range: {}-{} | Missing: CE={}, PE={}",
-                exp.expiry, exp.total_strikes, exp.call_strikes, exp.put_strikes,
-                exp.strike_range.0, exp.strike_range.1,
-                exp.missing_calls, exp.missing_puts)?;
+            writeln!(
+                f,
+                "  {} | Strikes: {} (CE:{}, PE:{}) | Range: {}-{} | Missing: CE={}, PE={}",
+                exp.expiry,
+                exp.total_strikes,
+                exp.call_strikes,
+                exp.put_strikes,
+                exp.strike_range.0,
+                exp.strike_range.1,
+                exp.missing_calls,
+                exp.missing_puts
+            )?;
         }
         writeln!(f)?;
 
         writeln!(f, "ATM SPREAD BEHAVIOR:")?;
         for atm in &self.atm_spreads {
-            writeln!(f, "  {} | Avg: {:.1} bps | Min: {:.1} | Max: {:.1} | Ticks: {}",
-                atm.symbol, atm.avg_spread_bps, atm.min_spread_bps, atm.max_spread_bps, atm.tick_count)?;
+            writeln!(
+                f,
+                "  {} | Avg: {:.1} bps | Min: {:.1} | Max: {:.1} | Ticks: {}",
+                atm.symbol,
+                atm.avg_spread_bps,
+                atm.min_spread_bps,
+                atm.max_spread_bps,
+                atm.tick_count
+            )?;
         }
         writeln!(f)?;
 

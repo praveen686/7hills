@@ -17,16 +17,16 @@
 //! Comprehensive toolkit for modeling, pricing, and executing option strategies.
 //!
 //! ## Description
-//! QuantKubera's options crate provides a high-performance foundation for 
+//! QuantKubera's options crate provides a high-performance foundation for
 //! derivative trading. It handles the entire lifecycle from contract definition
 //! and pricing to multi-leg strategy execution and risk management.
 //!
 //! ### Core Subsystems
-//! - **Pricing & Greeks**: Black-Scholes implementations for theoretical valuation 
+//! - **Pricing & Greeks**: Black-Scholes implementations for theoretical valuation
 //!   and sensitivity analysis (Delta, Gamma, Theta, Vega, Rho).
-//! - **Strategy Management**: Abstractions for complex multi-leg structures like 
+//! - **Strategy Management**: Abstractions for complex multi-leg structures like
 //!   Straddles, Iron Condors, and Spreads.
-//! - **Analytics**: 3D Implied Volatility (IV) surface modeling and Greeks decay 
+//! - **Analytics**: 3D Implied Volatility (IV) surface modeling and Greeks decay
 //!   projections.
 //! - **Execution**: Atomic multi-leg order routing with integrated rollback logic.
 //!
@@ -34,30 +34,34 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 //! - Black, F., & Scholes, M. (1973). The Pricing of Options and Corporate Liabilities.
 
-pub mod contract;
-pub mod greeks;
-pub mod pricing;
-pub mod strategy;
-pub mod chain;
-pub mod signals;
-pub mod margin;
-pub mod execution;
-pub mod kitesim;
-pub mod replay;
-pub mod backtest;
 pub mod analytics;
+pub mod backtest;
+pub mod chain;
+pub mod contract;
+pub mod execution;
+pub mod greeks;
+pub mod kitesim;
+pub mod margin;
 pub mod nse_specs;
+pub mod pricing;
+pub mod replay;
 pub mod report;
-pub mod specs;
 pub mod sanos;
+pub mod signals;
+pub mod specs;
 pub mod strategies;
+pub mod strategy;
 
-pub use contract::{OptionContract, OptionType, OptionChain};
+pub use chain::{IVPoint, IVSurface, OptionChainFetcher};
+pub use contract::{OptionChain, OptionContract, OptionType};
 pub use greeks::OptionGreeks;
-pub use pricing::{black_scholes_call, black_scholes_put, implied_volatility};
-pub use strategy::{OptionsStrategy, StrategyType, StrategyLeg, build_straddle, build_iron_condor};
-pub use chain::{OptionChainFetcher, IVSurface, IVPoint};
-pub use signals::{OptionsSignal, SignalType, OptionsSignalGenerator};
 pub use margin::{OptionsMargin, PortfolioGreeks};
-pub use nse_specs::{NseIndex, NseTradingHours, TradingPhase, LotSizeValidator, TickSizeValidator, NseOrderValidator};
-pub use sanos::{SanosCalibrator, SanosSlice, SanosDiagnostics, ExpirySlice, OptionQuote, NormalizedSlice};
+pub use nse_specs::{
+    LotSizeValidator, NseIndex, NseOrderValidator, NseTradingHours, TickSizeValidator, TradingPhase,
+};
+pub use pricing::{black_scholes_call, black_scholes_put, implied_volatility};
+pub use sanos::{
+    ExpirySlice, NormalizedSlice, OptionQuote, SanosCalibrator, SanosDiagnostics, SanosSlice,
+};
+pub use signals::{OptionsSignal, OptionsSignalGenerator, SignalType};
+pub use strategy::{OptionsStrategy, StrategyLeg, StrategyType, build_iron_condor, build_straddle};

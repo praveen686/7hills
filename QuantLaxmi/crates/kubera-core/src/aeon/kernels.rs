@@ -60,7 +60,7 @@ impl ShannonEntropy {
 #[derive(Debug, Clone)]
 pub struct MutualInformation {
     word_len: usize,
-    nbins: usize, 
+    nbins: usize,
 }
 
 impl MutualInformation {
@@ -82,7 +82,7 @@ impl MutualInformation {
 
         for i in 0..n {
             // Current value (dependent variable)
-            let current_k = if prices[i] > prices[i+1] { 1 } else { 0 };
+            let current_k = if prices[i] > prices[i + 1] { 1 } else { 0 };
             dep_marg[current_k] += 1.0;
 
             let mut k = current_k;
@@ -105,7 +105,9 @@ impl MutualInformation {
         for i in 0..m {
             // History marginal
             let hist_marg = (bins[i] + bins[i + m]) as f64 / n_f;
-            if hist_marg <= 0.0 { continue; }
+            if hist_marg <= 0.0 {
+                continue;
+            }
 
             // p for current=0
             let p0 = bins[i] as f64 / n_f;

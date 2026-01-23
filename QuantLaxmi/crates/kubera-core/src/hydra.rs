@@ -41,17 +41,19 @@
 //! └──────────────────────────────────────────────────────────────────────────┘
 //! ```
 
-use kubera_models::{MarketEvent, OrderEvent, SignalEvent, MarketPayload, Side, OrderPayload, L2Update};
-use kubera_models::{OptionGreeks, OptionType};
 use crate::EventBus;
+use crate::rmt;
+use chrono::{DateTime, Utc};
+use kubera_models::{
+    L2Update, MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side, SignalEvent,
+};
+use kubera_models::{OptionGreeks, OptionType};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{info, warn, error, debug, trace};
-use crate::rmt;
-use std::collections::{HashMap, VecDeque};
-use chrono::{DateTime, Utc};
+use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
 
 // ============================================================================
 // UTILITIES
@@ -68,11 +70,18 @@ pub struct KalmanFilter {
 
 impl KalmanFilter {
     pub fn new(initial_value: f64, q: f64, r: f64) -> Self {
-        Self { x: initial_value, p: 1.0, q, r }
+        Self {
+            x: initial_value,
+            p: 1.0,
+            q,
+            r,
+        }
     }
-    
+
     pub fn update(&mut self, measurement: f64) -> f64 {
-        if self.x == 0.0 { self.x = measurement; }
+        if self.x == 0.0 {
+            self.x = measurement;
+        }
         // Predict
         self.p += self.q;
         // Update
@@ -134,7 +143,7 @@ pub struct HydraConfig {
     pub max_position_per_expert: f64,
     /// Regime history window size
     pub regime_history_window: usize,
-    
+
     // --- V2 MEDALLION FEATURES ---
     /// Lookback for Z-score normalization of signals
     pub signal_zscore_lookback: usize,
@@ -192,17 +201,17 @@ impl Default for HydraConfig {
             lambda_tail: 1.0,
             lambda_exec: 0.3,
             position_hysteresis: 1.0, // V2: Higher threshold to avoid commission churn
-            slippage_bps: 0.5, // Conservative slippage
-            commission_bps: 6.0, // V2: Cover round-trip ZerodhaFnO costs
-            max_position_abs: 40.0, // MASTERPIECE: Balanced leverage
+            slippage_bps: 0.5,        // Conservative slippage
+            commission_bps: 6.0,      // V2: Cover round-trip ZerodhaFnO costs
+            max_position_abs: 40.0,   // MASTERPIECE: Balanced leverage
             max_position_per_expert: 10.0, // MASTERPIECE: Balanced contribution
             regime_history_window: 100,
-            
+
             // V2 Medallion features
             signal_zscore_lookback: 50,
             vol_target_window: 30,
             zscore_action_threshold: 1.0, // V2: Lowered to allow high-conviction trades
-            
+
             cusum_threshold: 15.0, // MEDALLION: Higher threshold to avoid false Event detection
             spread_ratio_threshold: 2.0,
             volume_surprise_threshold: 2.0,
@@ -214,7 +223,7 @@ impl Default for HydraConfig {
             hurst_range_threshold: 0.45,
             autocorrelation_range_threshold: -0.1,
             edge_hurdle_multiplier: 2.5, // Default to strict Masterpiece filter
-            coherence_min: 0.65, // Require broad expert alignment
+            coherence_min: 0.65,         // Require broad expert alignment
             edge_scale_mult: 1.0,
             rankspace_window: 240,
             rankspace_edge_scale_bps: 18.0,
@@ -286,11 +295,11 @@ impl HydraRegime {
     pub fn risk_multiplier(&self) -> f64 {
         match self {
             // MEDALLION: Higher multipliers for more aggressive trading
-            HydraRegime::Trend => 1.2,  // Boost trend trading
-            HydraRegime::Range => 1.0,  // Full allocation for range trading
-            HydraRegime::HighVolatility => 0.4,  
-            HydraRegime::LowVolatility => 0.8,  
-            HydraRegime::Event => 0.1,  // MASTERPIECE: Extreme caution in events
+            HydraRegime::Trend => 1.2, // Boost trend trading
+            HydraRegime::Range => 1.0, // Full allocation for range trading
+            HydraRegime::HighVolatility => 0.4,
+            HydraRegime::LowVolatility => 0.8,
+            HydraRegime::Event => 0.1, // MASTERPIECE: Extreme caution in events
             HydraRegime::Toxic => 0.0,
         }
     }
@@ -299,9 +308,21 @@ impl HydraRegime {
     pub fn allowed_experts(&self) -> Vec<&'static str> {
         match self {
             HydraRegime::Trend => vec!["Expert-A-Trend", "Expert-D-Microstructure"],
-            HydraRegime::Range => vec!["Expert-B-MeanRev", "Expert-E-RelValue", "Expert-D-Microstructure"],
-            HydraRegime::HighVolatility => vec!["Expert-C-Volatility", "Expert-A-Trend", "Expert-D-Microstructure"],
-            HydraRegime::LowVolatility => vec!["Expert-B-MeanRev", "Expert-E-RelValue", "Expert-D-Microstructure"],
+            HydraRegime::Range => vec![
+                "Expert-B-MeanRev",
+                "Expert-E-RelValue",
+                "Expert-D-Microstructure",
+            ],
+            HydraRegime::HighVolatility => vec![
+                "Expert-C-Volatility",
+                "Expert-A-Trend",
+                "Expert-D-Microstructure",
+            ],
+            HydraRegime::LowVolatility => vec![
+                "Expert-B-MeanRev",
+                "Expert-E-RelValue",
+                "Expert-D-Microstructure",
+            ],
             HydraRegime::Event => vec!["Expert-C-Volatility", "Expert-D-Microstructure"],
             HydraRegime::Toxic => vec![],
         }
@@ -385,7 +406,11 @@ impl RegimeEngine {
                 regime: HydraRegime::Range,
                 confidence: 0.5,
                 risk_multiplier: 0.8,
-                allowed_experts: HydraRegime::Range.allowed_experts().iter().map(|s| s.to_string()).collect(),
+                allowed_experts: HydraRegime::Range
+                    .allowed_experts()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
                 features: RegimeFeatures::default(),
             },
             regime_history: VecDeque::with_capacity(config.regime_history_window),
@@ -404,10 +429,18 @@ impl RegimeEngine {
             MarketPayload::Tick { price, size, .. } => {
                 self.update_price(*price, *size);
             }
-            MarketPayload::Trade { price, quantity, .. } => {
+            MarketPayload::Trade {
+                price, quantity, ..
+            } => {
                 self.update_price(*price, *quantity);
             }
-            MarketPayload::Bar { close, volume, high, low, .. } => {
+            MarketPayload::Bar {
+                close,
+                volume,
+                high,
+                low,
+                ..
+            } => {
                 self.update_price(*close, *volume);
                 self.ranges.push_back(high - low);
                 if self.ranges.len() > self.window_long {
@@ -500,7 +533,11 @@ impl RegimeEngine {
             regime: final_regime,
             confidence,
             risk_multiplier: final_regime.risk_multiplier() * confidence,
-            allowed_experts: final_regime.allowed_experts().iter().map(|s| s.to_string()).collect(),
+            allowed_experts: final_regime
+                .allowed_experts()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             features,
         };
     }
@@ -509,8 +546,15 @@ impl RegimeEngine {
         let returns_vec: Vec<f64> = self.returns.iter().cloned().collect();
 
         // Realized volatility (annualized)
-        let short_vol = self.calculate_std(&self.returns.iter().rev().take(self.window_short).cloned().collect::<VecDeque<_>>())
-                        * (252.0_f64).sqrt();
+        let short_vol = self.calculate_std(
+            &self
+                .returns
+                .iter()
+                .rev()
+                .take(self.window_short)
+                .cloned()
+                .collect::<VecDeque<_>>(),
+        ) * (252.0_f64).sqrt();
         let long_vol = self.calculate_std(&self.returns) * (252.0_f64).sqrt();
         let realized_vol = short_vol;
 
@@ -559,17 +603,23 @@ impl RegimeEngine {
 
     fn classify_from_features(&self, f: &RegimeFeatures) -> HydraRegime {
         // Change-point detection triggers Event regime
-        if self.cusum_pos > self.config.cusum_threshold || self.cusum_neg > self.config.cusum_threshold {
+        if self.cusum_pos > self.config.cusum_threshold
+            || self.cusum_neg > self.config.cusum_threshold
+        {
             return HydraRegime::Event;
         }
 
         // Toxic flow: spread expansion + volume spike
-        if f.spread_ratio > self.config.spread_ratio_threshold && f.volume_surprise > self.config.volume_surprise_threshold {
+        if f.spread_ratio > self.config.spread_ratio_threshold
+            && f.volume_surprise > self.config.volume_surprise_threshold
+        {
             return HydraRegime::Toxic;
         }
 
         // High volatility regime
-        if f.short_vol > self.config.vol_high_threshold || (f.short_vol / f.long_vol.max(0.001)) > self.config.vol_ratio_threshold {
+        if f.short_vol > self.config.vol_high_threshold
+            || (f.short_vol / f.long_vol.max(0.001)) > self.config.vol_ratio_threshold
+        {
             return HydraRegime::HighVolatility;
         }
 
@@ -579,11 +629,15 @@ impl RegimeEngine {
         }
 
         // Trend vs Range based on Hurst and trend strength
-        if f.hurst_estimate > self.config.hurst_trend_threshold && f.trend_strength > self.config.trend_strength_threshold {
+        if f.hurst_estimate > self.config.hurst_trend_threshold
+            && f.trend_strength > self.config.trend_strength_threshold
+        {
             return HydraRegime::Trend;
         }
 
-        if f.hurst_estimate < self.config.hurst_range_threshold || f.autocorrelation < self.config.autocorrelation_range_threshold {
+        if f.hurst_estimate < self.config.hurst_range_threshold
+            || f.autocorrelation < self.config.autocorrelation_range_threshold
+        {
             return HydraRegime::Range;
         }
 
@@ -603,12 +657,11 @@ impl RegimeEngine {
                 let acf_conf = ((-f.autocorrelation) * 5.0).clamp(0.0, 1.0);
                 (hurst_conf + acf_conf) / 2.0
             }
-            HydraRegime::HighVolatility => {
-                (f.short_vol / 0.30).clamp(0.5, 1.0)
-            }
+            HydraRegime::HighVolatility => (f.short_vol / 0.30).clamp(0.5, 1.0),
             HydraRegime::Toxic => 0.9,
             HydraRegime::Event => {
-                let cusum_conf = (self.cusum_pos.max(self.cusum_neg) / self.cusum_threshold).clamp(0.5, 1.0);
+                let cusum_conf =
+                    (self.cusum_pos.max(self.cusum_neg) / self.cusum_threshold).clamp(0.5, 1.0);
                 cusum_conf
             }
             _ => 0.5,
@@ -616,21 +669,28 @@ impl RegimeEngine {
     }
 
     fn calculate_std(&self, data: &VecDeque<f64>) -> f64 {
-        if data.len() < 2 { return 0.0; }
+        if data.len() < 2 {
+            return 0.0;
+        }
         let mean = data.iter().sum::<f64>() / data.len() as f64;
-        let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (data.len() - 1) as f64;
+        let variance =
+            data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (data.len() - 1) as f64;
         variance.sqrt()
     }
 
     fn estimate_hurst(&self, returns: &[f64]) -> f64 {
-        if returns.len() < 20 { return 0.5; }
+        if returns.len() < 20 {
+            return 0.5;
+        }
 
         // Simplified R/S analysis
         let n = returns.len();
         let mean = returns.iter().sum::<f64>() / n as f64;
         let std = (returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / n as f64).sqrt();
 
-        if std < 1e-10 { return 0.5; }
+        if std < 1e-10 {
+            return 0.5;
+        }
 
         // Cumulative deviations
         let mut cumsum = 0.0;
@@ -655,7 +715,9 @@ impl RegimeEngine {
     }
 
     fn calculate_trend_strength(&self) -> f64 {
-        if self.prices.len() < self.window_short { return 0.0; }
+        if self.prices.len() < self.window_short {
+            return 0.0;
+        }
 
         let prices: Vec<f64> = self.prices.iter().cloned().collect();
         let n = prices.len();
@@ -666,10 +728,18 @@ impl RegimeEngine {
         let mut tr_sum = 0.0;
 
         for i in 1..n {
-            let high_diff = if i > 0 { prices[i] - prices[i-1] } else { 0.0 };
-            let low_diff = if i > 0 { prices[i-1] - prices[i] } else { 0.0 };
+            let high_diff = if i > 0 {
+                prices[i] - prices[i - 1]
+            } else {
+                0.0
+            };
+            let low_diff = if i > 0 {
+                prices[i - 1] - prices[i]
+            } else {
+                0.0
+            };
 
-            let tr = (prices[i] - prices[i-1]).abs();
+            let tr = (prices[i] - prices[i - 1]).abs();
             tr_sum += tr;
 
             if high_diff > low_diff && high_diff > 0.0 {
@@ -680,20 +750,26 @@ impl RegimeEngine {
             }
         }
 
-        if tr_sum < 1e-10 { return 0.0; }
+        if tr_sum < 1e-10 {
+            return 0.0;
+        }
 
         let plus_di = plus_dm_sum / tr_sum * 100.0;
         let minus_di = minus_dm_sum / tr_sum * 100.0;
         let di_sum = plus_di + minus_di;
 
-        if di_sum < 1e-10 { return 0.0; }
+        if di_sum < 1e-10 {
+            return 0.0;
+        }
 
         // ADX-like value
         ((plus_di - minus_di).abs() / di_sum * 100.0).clamp(0.0, 100.0)
     }
 
     fn calculate_autocorrelation(&self, returns: &[f64], lag: usize) -> f64 {
-        if returns.len() <= lag + 1 { return 0.0; }
+        if returns.len() <= lag + 1 {
+            return 0.0;
+        }
 
         let _n = returns.len() - lag;
         let mean = returns.iter().sum::<f64>() / returns.len() as f64;
@@ -706,22 +782,31 @@ impl RegimeEngine {
             var += (returns[i] - mean).powi(2);
         }
 
-        if var < 1e-10 { return 0.0; }
+        if var < 1e-10 {
+            return 0.0;
+        }
 
         (cov / var).clamp(-1.0, 1.0)
     }
 
     fn calculate_jump_indicator(&self, returns: &[f64]) -> f64 {
-        if returns.len() < 10 { return 0.0; }
+        if returns.len() < 10 {
+            return 0.0;
+        }
 
         // Bipower variation vs realized variance
         let rv: f64 = returns.iter().map(|r| r.powi(2)).sum();
 
-        let bv: f64 = returns.windows(2)
+        let bv: f64 = returns
+            .windows(2)
             .map(|w| w[0].abs() * w[1].abs())
-            .sum::<f64>() * std::f64::consts::PI / 2.0;
+            .sum::<f64>()
+            * std::f64::consts::PI
+            / 2.0;
 
-        if bv < 1e-10 { return 0.0; }
+        if bv < 1e-10 {
+            return 0.0;
+        }
 
         // Jump ratio: high value indicates jumps
         ((rv - bv) / bv).max(0.0)
@@ -874,7 +959,9 @@ impl TrendExpert {
     }
 
     fn update_ema(&self, prev_ema: f64, price: f64, period: usize) -> f64 {
-        if prev_ema == 0.0 { return price; }
+        if prev_ema == 0.0 {
+            return price;
+        }
         let alpha = 2.0 / (period as f64 + 1.0);
         alpha * price + (1.0 - alpha) * prev_ema
     }
@@ -896,10 +983,13 @@ impl TrendExpert {
         };
 
         // EMA slope signal (Production multiplier)
-        let ema_signal = ((self.ema_fast - self.ema_slow) / self.ema_slow * 5000.0).clamp(-1.0, 1.0);
+        let ema_signal =
+            ((self.ema_fast - self.ema_slow) / self.ema_slow * 5000.0).clamp(-1.0, 1.0);
 
         // 3. Volatility-adjusted momentum
-        let returns: Vec<f64> = self.prices_1m.iter()
+        let returns: Vec<f64> = self
+            .prices_1m
+            .iter()
             .zip(self.prices_1m.iter().skip(1))
             .map(|(a, b)| (b / a).ln())
             .collect();
@@ -920,12 +1010,17 @@ impl TrendExpert {
         let kalman_mom = ((self.kf.x - self.ema_slow) / self.ema_slow * 5000.0).clamp(-1.0, 1.0);
 
         // Combine signals with weights (Masterpiece weighting)
-        let raw_signal = 0.2 * breakout_signal + 0.3 * ema_signal + 0.2 * vol_adj_momentum + 0.3 * kalman_mom;
+        let raw_signal =
+            0.2 * breakout_signal + 0.3 * ema_signal + 0.2 * vol_adj_momentum + 0.3 * kalman_mom;
 
         // Only generate signal if all timeframes agree on direction
         let agrees = self.check_timeframe_agreement(raw_signal);
 
-        self.signal = if agrees { raw_signal.clamp(-1.0, 1.0) } else { 0.0 };
+        self.signal = if agrees {
+            raw_signal.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
     }
 
     fn check_timeframe_agreement(&self, primary_signal: f64) -> bool {
@@ -933,25 +1028,35 @@ impl TrendExpert {
             return primary_signal.abs() > 0.3; // Allow if not enough data
         }
 
-        let trend_5m = (*self.prices_5m.back().unwrap_or(&0.0) - *self.prices_5m.front().unwrap_or(&0.0)).signum();
-        let trend_15m = (*self.prices_15m.back().unwrap_or(&0.0) - *self.prices_15m.front().unwrap_or(&0.0)).signum();
+        let trend_5m = (*self.prices_5m.back().unwrap_or(&0.0)
+            - *self.prices_5m.front().unwrap_or(&0.0))
+        .signum();
+        let trend_15m = (*self.prices_15m.back().unwrap_or(&0.0)
+            - *self.prices_15m.front().unwrap_or(&0.0))
+        .signum();
 
         // All timeframes should agree
-        (primary_signal.signum() == trend_5m || trend_5m == 0.0) &&
-        (primary_signal.signum() == trend_15m || trend_15m == 0.0)
+        (primary_signal.signum() == trend_5m || trend_5m == 0.0)
+            && (primary_signal.signum() == trend_15m || trend_15m == 0.0)
     }
 }
 
 impl Expert for TrendExpert {
-    fn name(&self) -> &str { "Expert-A-Trend" }
+    fn name(&self) -> &str {
+        "Expert-A-Trend"
+    }
 
-    fn signal_family(&self) -> &str { "trend-momentum" }
+    fn signal_family(&self) -> &str {
+        "trend-momentum"
+    }
 
     fn update_market(&mut self, event: &MarketEvent) {
         let price = match &event.payload {
             MarketPayload::Tick { price, .. } => *price,
             MarketPayload::Trade { price, .. } => *price,
-            MarketPayload::Bar { close, high, low, .. } => {
+            MarketPayload::Bar {
+                close, high, low, ..
+            } => {
                 // Update ATR with bar data
                 let tr = high - low;
                 self.atr_window.push_back(tr);
@@ -979,7 +1084,9 @@ impl Expert for TrendExpert {
         self.ema_slow = self.update_ema(self.ema_slow, smoothed_price, self.slow_period);
 
         // Update breakout levels (rolling window)
-        let breakout_prices: Vec<f64> = self.prices_1m.iter()
+        let breakout_prices: Vec<f64> = self
+            .prices_1m
+            .iter()
             .rev()
             .take(self.breakout_period)
             .cloned()
@@ -1019,16 +1126,16 @@ impl Expert for TrendExpert {
     fn generate_intent(&self, regime: &RegimeState) -> Option<ExpertIntent> {
         // MEDALLION: Use calculated signal or momentum fallback
         let dynamic_signal = if self.signal.abs() >= 0.05 {
-            self.signal  // Use the properly calculated signal
+            self.signal // Use the properly calculated signal
         } else if self.prices_1m.len() >= 20 {
             // Fallback: Simple momentum with z-score normalization
             let recent: Vec<f64> = self.prices_1m.iter().rev().take(20).cloned().collect();
-            let returns: Vec<f64> = (0..19).map(|i| (recent[i] / recent[i+1]).ln()).collect();
-            let momentum = returns.iter().sum::<f64>();  // Cumulative log return
+            let returns: Vec<f64> = (0..19).map(|i| (recent[i] / recent[i + 1]).ln()).collect();
+            let momentum = returns.iter().sum::<f64>(); // Cumulative log return
             // Scale by volatility to get a z-score-like signal
             let vol = (returns.iter().map(|r| r.powi(2)).sum::<f64>() / 19.0).sqrt();
             if vol > 0.0001 {
-                (momentum / (vol * 4.5)).clamp(-1.0, 1.0)  // ~4.5 std for full signal
+                (momentum / (vol * 4.5)).clamp(-1.0, 1.0) // ~4.5 std for full signal
             } else {
                 0.0
             }
@@ -1037,7 +1144,9 @@ impl Expert for TrendExpert {
         };
 
         // MEDALLION: High conviction threshold for production (Project AEON)
-        if dynamic_signal.abs() < 0.15 { return None; }
+        if dynamic_signal.abs() < 0.15 {
+            return None;
+        }
 
         let stop_distance = self.atr * 2.0;
         let stop_loss = if self.signal > 0.0 {
@@ -1057,7 +1166,7 @@ impl Expert for TrendExpert {
             signal_family: self.signal_family().to_string(),
             order_style: OrderStyle::Taker, // Trend-following uses taker
             stop_loss,
-            take_profit: None, // Trail stops instead
+            take_profit: None,          // Trail stops instead
             time_exit_ticks: Some(500), // Time-based exit after 500 ticks
         })
     }
@@ -1115,11 +1224,14 @@ impl MeanRevExpert {
     }
 
     fn calculate_bollinger(&mut self) {
-        if self.prices.len() < self.window { return; }
+        if self.prices.len() < self.window {
+            return;
+        }
 
         let prices: Vec<f64> = self.prices.iter().cloned().collect();
         let mean = prices.iter().sum::<f64>() / prices.len() as f64;
-        let std = (prices.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / prices.len() as f64).sqrt();
+        let std =
+            (prices.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / prices.len() as f64).sqrt();
 
         self.bb_mid = mean;
         self.bb_upper = mean + self.bb_std_mult * std;
@@ -1133,10 +1245,15 @@ impl MeanRevExpert {
         }
 
         // VWAP z-score
-        let vwap = if self.vwap_v_sum > 0.0 { self.vwap_pv_sum / self.vwap_v_sum } else { self.bb_mid };
+        let vwap = if self.vwap_v_sum > 0.0 {
+            self.vwap_pv_sum / self.vwap_v_sum
+        } else {
+            self.bb_mid
+        };
         let prices_std = {
             let mean = self.prices.iter().sum::<f64>() / self.prices.len() as f64;
-            (self.prices.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / self.prices.len() as f64).sqrt()
+            (self.prices.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / self.prices.len() as f64)
+                .sqrt()
         };
 
         let vwap_zscore = if prices_std > 0.0 {
@@ -1155,21 +1272,21 @@ impl MeanRevExpert {
 
         // Liquidity vacuum detection (spike followed by volume drop)
         let is_post_spike = self.tick_count - self.last_spike_tick < 50;
-        let volume_depleted = self.volume_ma > 0.0 &&
-            self.volumes.back().unwrap_or(&0.0) < &(self.volume_ma * 0.3);
+        let volume_depleted =
+            self.volume_ma > 0.0 && self.volumes.back().unwrap_or(&0.0) < &(self.volume_ma * 0.3);
 
         let liquidity_vacuum = is_post_spike && volume_depleted;
 
         // Combined signal - MEDALLION GRADE: Use continuous signal, not binary
         // The alpha is in the magnitude, not just direction
         let vwap_signal = if vwap_zscore.abs() > 0.5 {
-            (-vwap_zscore / 2.0).clamp(-1.0, 1.0)  // Fade the move
+            (-vwap_zscore / 2.0).clamp(-1.0, 1.0) // Fade the move
         } else {
             0.0
         };
 
         let bb_signal = if bb_zscore.abs() > 0.5 {
-            (-bb_zscore / 2.0).clamp(-1.0, 1.0)  // Fade the move
+            (-bb_zscore / 2.0).clamp(-1.0, 1.0) // Fade the move
         } else {
             0.0
         };
@@ -1186,20 +1303,35 @@ impl MeanRevExpert {
         self.signal = boosted.tanh();
 
         // Diagnostics for tuning (enable with RUST_LOG=kubera_core::hydra=debug)
-        debug!("[MEANREV] vwap_z={:.2} bb_z={:.2} vwap_sig={:.2} bb_sig={:.2} vacuum={} combined={:.2} boosted={:.2} signal={:.2}",
-               vwap_zscore, bb_zscore, vwap_signal, bb_signal, liquidity_vacuum, combined, boosted, self.signal);
+        debug!(
+            "[MEANREV] vwap_z={:.2} bb_z={:.2} vwap_sig={:.2} bb_sig={:.2} vacuum={} combined={:.2} boosted={:.2} signal={:.2}",
+            vwap_zscore,
+            bb_zscore,
+            vwap_signal,
+            bb_signal,
+            liquidity_vacuum,
+            combined,
+            boosted,
+            self.signal
+        );
     }
 }
 
 impl Expert for MeanRevExpert {
-    fn name(&self) -> &str { "Expert-B-MeanRev" }
+    fn name(&self) -> &str {
+        "Expert-B-MeanRev"
+    }
 
-    fn signal_family(&self) -> &str { "mean-reversion" }
+    fn signal_family(&self) -> &str {
+        "mean-reversion"
+    }
 
     fn update_market(&mut self, event: &MarketEvent) {
         let (price, volume) = match &event.payload {
             MarketPayload::Tick { price, size, .. } => (*price, *size),
-            MarketPayload::Trade { price, quantity, .. } => (*price, *quantity),
+            MarketPayload::Trade {
+                price, quantity, ..
+            } => (*price, *quantity),
             MarketPayload::Bar { close, volume, .. } => (*close, *volume),
             _ => return,
         };
@@ -1242,7 +1374,9 @@ impl Expert for MeanRevExpert {
     }
 
     fn generate_intent(&self, regime: &RegimeState) -> Option<ExpertIntent> {
-        if self.signal.abs() < 0.25 { return None; } // MEDALLION: Higher conviction for mean rev
+        if self.signal.abs() < 0.25 {
+            return None;
+        } // MEDALLION: Higher conviction for mean rev
         // Skip regime check - mean reversion works in all regimes
 
         // Mean reversion uses tight stops
@@ -1260,7 +1394,7 @@ impl Expert for MeanRevExpert {
             intent_id: Uuid::new_v4(),
             expert_id: self.name().to_string(),
             signal: self.signal,
-            expected_edge_bps: 12.0 * self.signal.abs(),  // MEDALLION: Higher edge for mean rev
+            expected_edge_bps: 12.0 * self.signal.abs(), // MEDALLION: Higher edge for mean rev
             confidence: regime.confidence * self.signal.abs() * 0.9,
             timestamp: Utc::now(),
             regime: regime.regime,
@@ -1328,24 +1462,35 @@ impl VolatilityExpert {
     }
 
     fn calculate_realized_vol(&self, returns: &[f64]) -> f64 {
-        if returns.is_empty() { return 0.0; }
+        if returns.is_empty() {
+            return 0.0;
+        }
         let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
+        let variance =
+            returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
         variance.sqrt() * (252.0_f64).sqrt() // Annualized
     }
 
     /// Calculate IV percentile rank for options mean-reversion
     fn calculate_iv_percentile(&mut self) {
-        if self.iv_history.len() < 20 { return; }
+        if self.iv_history.len() < 20 {
+            return;
+        }
 
         let current_iv = self.implied_vol_proxy;
-        let below_count = self.iv_history.iter().filter(|&&iv| iv < current_iv).count();
+        let below_count = self
+            .iv_history
+            .iter()
+            .filter(|&&iv| iv < current_iv)
+            .count();
         self.iv_percentile = (below_count as f64 / self.iv_history.len() as f64) * 100.0;
     }
 
     /// Calculate gamma scalping signal for short-term mean reversion
     fn calculate_gamma_signal(&mut self) {
-        if self.prices.len() < 10 { return; }
+        if self.prices.len() < 10 {
+            return;
+        }
 
         // Calculate short-term price oscillation around recent mean
         let recent_prices: Vec<f64> = self.prices.iter().rev().take(10).cloned().collect();
@@ -1409,18 +1554,25 @@ impl VolatilityExpert {
 }
 
 impl Expert for VolatilityExpert {
-    fn name(&self) -> &str { "Expert-C-Volatility" }
+    fn name(&self) -> &str {
+        "Expert-C-Volatility"
+    }
 
-    fn signal_family(&self) -> &str { "volatility" }
+    fn signal_family(&self) -> &str {
+        "volatility"
+    }
 
     fn update_market(&mut self, event: &MarketEvent) {
         let price = match &event.payload {
             MarketPayload::Tick { price, .. } => *price,
             MarketPayload::Trade { price, .. } => *price,
-            MarketPayload::Bar { close, high, low, .. } => {
+            MarketPayload::Bar {
+                close, high, low, ..
+            } => {
                 // Use high-low for IV proxy
                 let range_vol = (high - low) / close;
-                self.implied_vol_proxy = self.implied_vol_proxy * 0.95 + range_vol * 0.05 * (252.0_f64).sqrt();
+                self.implied_vol_proxy =
+                    self.implied_vol_proxy * 0.95 + range_vol * 0.05 * (252.0_f64).sqrt();
                 *close
             }
             _ => return,
@@ -1448,13 +1600,16 @@ impl Expert for VolatilityExpert {
         // Calculate realized vols at multiple horizons
         let returns_vec: Vec<f64> = self.returns.iter().cloned().collect();
         if returns_vec.len() >= 5 {
-            self.realized_vol_5 = self.calculate_realized_vol(&returns_vec[returns_vec.len()-5..]);
+            self.realized_vol_5 =
+                self.calculate_realized_vol(&returns_vec[returns_vec.len() - 5..]);
         }
         if returns_vec.len() >= 20 {
-            self.realized_vol_20 = self.calculate_realized_vol(&returns_vec[returns_vec.len()-20..]);
+            self.realized_vol_20 =
+                self.calculate_realized_vol(&returns_vec[returns_vec.len() - 20..]);
         }
         if returns_vec.len() >= 60 {
-            self.realized_vol_60 = self.calculate_realized_vol(&returns_vec[returns_vec.len()-60..]);
+            self.realized_vol_60 =
+                self.calculate_realized_vol(&returns_vec[returns_vec.len() - 60..]);
         }
 
         // Update vol regime (EWMA of vol level)
@@ -1483,7 +1638,9 @@ impl Expert for VolatilityExpert {
 
     fn generate_intent(&self, regime: &RegimeState) -> Option<ExpertIntent> {
         // OPTIONS-OPTIMIZED: Lower threshold for options (theta decay risk)
-        if self.signal.abs() < 0.2 { return None; }
+        if self.signal.abs() < 0.2 {
+            return None;
+        }
         // Skip regime check for vol expert - volatility edge is regime-agnostic
 
         // OPTIONS-SPECIFIC: Higher edge for vol trades (IV-RV spread capture)
@@ -1503,7 +1660,7 @@ impl Expert for VolatilityExpert {
             regime: regime.regime,
             signal_family: self.signal_family().to_string(),
             order_style: OrderStyle::Maker, // Options prefer maker for tighter spreads
-            stop_loss: None, // Vol positions use delta hedging, not hard stops
+            stop_loss: None,                // Vol positions use delta hedging, not hard stops
             take_profit: None,
             time_exit_ticks: Some(500), // Medium horizon for options intraday
         })
@@ -1598,8 +1755,13 @@ impl MicrostructureExpert {
         // 3. Volume Acceleration (Masterpiece Pulse Detection)
         // Track rolling volume acceleration for momentum detection
         let avg_vol = total_vol / self.buy_volume.len().max(1) as f64;
-        let recent_vol = *self.buy_volume.back().unwrap_or(&0.0) + *self.sell_volume.back().unwrap_or(&0.0);
-        let vol_accel_ratio = if avg_vol > 0.0 { recent_vol / avg_vol } else { 1.0 };
+        let recent_vol =
+            *self.buy_volume.back().unwrap_or(&0.0) + *self.sell_volume.back().unwrap_or(&0.0);
+        let vol_accel_ratio = if avg_vol > 0.0 {
+            recent_vol / avg_vol
+        } else {
+            1.0
+        };
 
         // Store volume acceleration for momentum-micro fusion
         self.volume_accel.push_back(vol_accel_ratio);
@@ -1610,8 +1772,13 @@ impl MicrostructureExpert {
         // Calculate acceleration trend (is volume accelerating or decelerating?)
         let accel_trend = if self.volume_accel.len() >= 5 {
             let recent_accel: f64 = self.volume_accel.iter().rev().take(3).sum::<f64>() / 3.0;
-            let older_accel: f64 = self.volume_accel.iter().rev().skip(3).take(3).sum::<f64>() / 3.0;
-            if older_accel > 0.0 { recent_accel / older_accel } else { 1.0 }
+            let older_accel: f64 =
+                self.volume_accel.iter().rev().skip(3).take(3).sum::<f64>() / 3.0;
+            if older_accel > 0.0 {
+                recent_accel / older_accel
+            } else {
+                1.0
+            }
         } else {
             1.0
         };
@@ -1622,12 +1789,16 @@ impl MicrostructureExpert {
         // 4. Market Impact Estimation (Kyle's Lambda Model)
         // Estimate price impact per unit of order flow
         if self.last_prices.len() >= 10 {
-            let price_changes: Vec<f64> = self.last_prices.iter()
+            let price_changes: Vec<f64> = self
+                .last_prices
+                .iter()
                 .zip(self.last_prices.iter().skip(1))
                 .map(|(p1, p2)| (p2 - p1) / p1 * 10000.0) // bps
                 .collect();
 
-            let vol_flow: Vec<f64> = self.buy_volume.iter()
+            let vol_flow: Vec<f64> = self
+                .buy_volume
+                .iter()
                 .zip(self.sell_volume.iter())
                 .map(|(b, s)| b - s)
                 .collect();
@@ -1635,7 +1806,11 @@ impl MicrostructureExpert {
             // Simple linear regression: price_change = lambda * volume_imbalance
             if price_changes.len() >= 5 && vol_flow.len() >= 5 {
                 let n = price_changes.len().min(vol_flow.len()) as f64;
-                let sum_xy: f64 = price_changes.iter().zip(vol_flow.iter()).map(|(x, y)| x * y).sum();
+                let sum_xy: f64 = price_changes
+                    .iter()
+                    .zip(vol_flow.iter())
+                    .map(|(x, y)| x * y)
+                    .sum();
                 let sum_x: f64 = price_changes.iter().sum();
                 let sum_y: f64 = vol_flow.iter().sum();
                 let sum_x2: f64 = price_changes.iter().map(|x| x * x).sum();
@@ -1646,7 +1821,8 @@ impl MicrostructureExpert {
                     // Impact in bps = lambda * expected_order_size
                     // Smooth update using exponential moving average
                     let new_impact = lambda.abs() * avg_vol * 0.1; // Scale to reasonable bps
-                    self.estimated_impact_bps = self.estimated_impact_bps * 0.95 + new_impact * 0.05;
+                    self.estimated_impact_bps =
+                        self.estimated_impact_bps * 0.95 + new_impact * 0.05;
                 }
             }
         }
@@ -1714,8 +1890,16 @@ impl MicrostructureExpert {
             }
         }
 
-        let avg_buy_impact = if buy_count > 0 { buy_impact / buy_count as f64 } else { 0.0 };
-        let avg_sell_impact = if sell_count > 0 { sell_impact / sell_count as f64 } else { 0.0 };
+        let avg_buy_impact = if buy_count > 0 {
+            buy_impact / buy_count as f64
+        } else {
+            0.0
+        };
+        let avg_sell_impact = if sell_count > 0 {
+            sell_impact / sell_count as f64
+        } else {
+            0.0
+        };
 
         // If buys are pushing price up more than expected, momentum continues
         (avg_buy_impact - avg_sell_impact).clamp(-0.5, 0.5)
@@ -1723,17 +1907,30 @@ impl MicrostructureExpert {
 }
 
 impl Expert for MicrostructureExpert {
-    fn name(&self) -> &str { "Expert-D-Microstructure" }
+    fn name(&self) -> &str {
+        "Expert-D-Microstructure"
+    }
 
-    fn signal_family(&self) -> &str { "microstructure" }
+    fn signal_family(&self) -> &str {
+        "microstructure"
+    }
 
     fn update_market(&mut self, event: &MarketEvent) {
         match &event.payload {
-            MarketPayload::Trade { price, quantity, is_buyer_maker, .. } => {
+            MarketPayload::Trade {
+                price,
+                quantity,
+                is_buyer_maker,
+                ..
+            } => {
                 self.current_price = *price;
                 self.tick_count += 1;
 
-                let side = if *is_buyer_maker { Side::Sell } else { Side::Buy };
+                let side = if *is_buyer_maker {
+                    Side::Sell
+                } else {
+                    Side::Buy
+                };
 
                 match side {
                     Side::Buy => self.buy_volume.push_back(*quantity),
@@ -1752,10 +1949,18 @@ impl Expert for MicrostructureExpert {
                 self.last_trade_sides.push_back(side);
 
                 // Maintain window sizes
-                if self.buy_volume.len() > 100 { self.buy_volume.pop_front(); }
-                if self.sell_volume.len() > 100 { self.sell_volume.pop_front(); }
-                if self.last_prices.len() > 100 { self.last_prices.pop_front(); }
-                if self.last_trade_sides.len() > 100 { self.last_trade_sides.pop_front(); }
+                if self.buy_volume.len() > 100 {
+                    self.buy_volume.pop_front();
+                }
+                if self.sell_volume.len() > 100 {
+                    self.sell_volume.pop_front();
+                }
+                if self.last_prices.len() > 100 {
+                    self.last_prices.pop_front();
+                }
+                if self.last_trade_sides.len() > 100 {
+                    self.last_trade_sides.pop_front();
+                }
 
                 // MEDALLION FIX: Calculate signal on every trade!
                 self.calculate_signal();
@@ -1764,9 +1969,16 @@ impl Expert for MicrostructureExpert {
                 // Update multi-level LOB state for Microstructure-X
                 // We keep top 5 levels for depth analysis
                 for bid in &l2.bids {
-                    if let Some(pos) = self.bids.iter().position(|b| (b.0 - bid.price).abs() < f64::EPSILON) {
-                        if bid.size == 0.0 { self.bids.remove(pos); }
-                        else { self.bids[pos].1 = bid.size; }
+                    if let Some(pos) = self
+                        .bids
+                        .iter()
+                        .position(|b| (b.0 - bid.price).abs() < f64::EPSILON)
+                    {
+                        if bid.size == 0.0 {
+                            self.bids.remove(pos);
+                        } else {
+                            self.bids[pos].1 = bid.size;
+                        }
                     } else if bid.size > 0.0 {
                         self.bids.push((bid.price, bid.size));
                     }
@@ -1775,9 +1987,16 @@ impl Expert for MicrostructureExpert {
                 self.bids.truncate(5);
 
                 for ask in &l2.asks {
-                    if let Some(pos) = self.asks.iter().position(|a| (a.0 - ask.price).abs() < f64::EPSILON) {
-                        if ask.size == 0.0 { self.asks.remove(pos); }
-                        else { self.asks[pos].1 = ask.size; }
+                    if let Some(pos) = self
+                        .asks
+                        .iter()
+                        .position(|a| (a.0 - ask.price).abs() < f64::EPSILON)
+                    {
+                        if ask.size == 0.0 {
+                            self.asks.remove(pos);
+                        } else {
+                            self.asks[pos].1 = ask.size;
+                        }
                     } else if ask.size > 0.0 {
                         self.asks.push((ask.price, ask.size));
                     }
@@ -1792,12 +2011,22 @@ impl Expert for MicrostructureExpert {
                     self.estimated_spread_bps = self.estimated_spread_bps * 0.9 + spread_bps * 0.1;
                     self.current_price = mid;
                 }
-                
+
                 self.calculate_signal();
             }
             MarketPayload::L2Snapshot(snapshot) => {
-                self.bids = snapshot.bids.iter().take(5).map(|l| (l.price, l.size)).collect();
-                self.asks = snapshot.asks.iter().take(5).map(|l| (l.price, l.size)).collect();
+                self.bids = snapshot
+                    .bids
+                    .iter()
+                    .take(5)
+                    .map(|l| (l.price, l.size))
+                    .collect();
+                self.asks = snapshot
+                    .asks
+                    .iter()
+                    .take(5)
+                    .map(|l| (l.price, l.size))
+                    .collect();
                 self.calculate_signal();
             }
             MarketPayload::Tick { price, size, side } => {
@@ -1809,10 +2038,18 @@ impl Expert for MicrostructureExpert {
                 self.last_prices.push_back(*price);
                 self.last_trade_sides.push_back(*side);
 
-                if self.buy_volume.len() > 100 { self.buy_volume.pop_front(); }
-                if self.sell_volume.len() > 100 { self.sell_volume.pop_front(); }
-                if self.last_prices.len() > 100 { self.last_prices.pop_front(); }
-                if self.last_trade_sides.len() > 100 { self.last_trade_sides.pop_front(); }
+                if self.buy_volume.len() > 100 {
+                    self.buy_volume.pop_front();
+                }
+                if self.sell_volume.len() > 100 {
+                    self.sell_volume.pop_front();
+                }
+                if self.last_prices.len() > 100 {
+                    self.last_prices.pop_front();
+                }
+                if self.last_trade_sides.len() > 100 {
+                    self.last_trade_sides.pop_front();
+                }
             }
             _ => return,
         }
@@ -1836,8 +2073,12 @@ impl Expert for MicrostructureExpert {
     }
 
     fn generate_intent(&self, regime: &RegimeState) -> Option<ExpertIntent> {
-        if self.signal.abs() < 0.15 { return None; } // AEON Production: High conviction
-        if !self.allowed_in_regime(regime) { return None; }
+        if self.signal.abs() < 0.15 {
+            return None;
+        } // AEON Production: High conviction
+        if !self.allowed_in_regime(regime) {
+            return None;
+        }
 
         // Microstructure uses taker for immediacy
         Some(ExpertIntent {
@@ -1908,7 +2149,8 @@ impl RelativeValueExpert {
         // Calculate spread z-score
         let spreads: Vec<f64> = self.spread_history.iter().cloned().collect();
         let mean = spreads.iter().sum::<f64>() / spreads.len() as f64;
-        let std = (spreads.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / spreads.len() as f64).sqrt();
+        let std =
+            (spreads.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / spreads.len() as f64).sqrt();
 
         if std > 0.0 {
             self.spread_zscore = (*spreads.last().unwrap_or(&mean) - mean) / std;
@@ -1929,7 +2171,11 @@ impl RelativeValueExpert {
         let secondary: Vec<f64> = self.secondary_prices.iter().cloned().collect();
 
         let n = primary.len().min(secondary.len()) as f64;
-        let sum_xy: f64 = primary.iter().zip(secondary.iter()).map(|(x, y)| x * y).sum();
+        let sum_xy: f64 = primary
+            .iter()
+            .zip(secondary.iter())
+            .map(|(x, y)| x * y)
+            .sum();
         let sum_x: f64 = primary.iter().sum();
         let sum_y: f64 = secondary.iter().sum();
         let sum_x2: f64 = primary.iter().map(|x| x * x).sum();
@@ -1942,9 +2188,13 @@ impl RelativeValueExpert {
 }
 
 impl Expert for RelativeValueExpert {
-    fn name(&self) -> &str { "Expert-E-RelValue" }
+    fn name(&self) -> &str {
+        "Expert-E-RelValue"
+    }
 
-    fn signal_family(&self) -> &str { "relative-value" }
+    fn signal_family(&self) -> &str {
+        "relative-value"
+    }
 
     fn update_market(&mut self, event: &MarketEvent) {
         let price = match &event.payload {
@@ -1990,14 +2240,16 @@ impl Expert for RelativeValueExpert {
     }
 
     fn generate_intent(&self, regime: &RegimeState) -> Option<ExpertIntent> {
-        if self.signal.abs() < 0.25 { return None; } // MEDALLION: High conviction for rel value
+        if self.signal.abs() < 0.25 {
+            return None;
+        } // MEDALLION: High conviction for rel value
         // Skip regime check for rel value
 
         Some(ExpertIntent {
             intent_id: Uuid::new_v4(),
             expert_id: self.name().to_string(),
             signal: self.signal,
-            expected_edge_bps: 10.0 * self.signal.abs(),  // MEDALLION: Higher edge
+            expected_edge_bps: 10.0 * self.signal.abs(), // MEDALLION: Higher edge
             confidence: regime.confidence * self.signal.abs() * 0.85,
             timestamp: Utc::now(),
             regime: regime.regime,
@@ -2062,7 +2314,9 @@ impl Expert for RankSpaceMeanRevExpert {
         "Expert-F-RankSpaceMR"
     }
 
-    fn signal_family(&self) -> &str { "rank-mean-reversion" }
+    fn signal_family(&self) -> &str {
+        "rank-mean-reversion"
+    }
 
     fn update_market(&mut self, event: &MarketEvent) {
         // Get price from market event
@@ -2121,8 +2375,6 @@ impl Expert for RankSpaceMeanRevExpert {
         self.signal
     }
 }
-
-
 
 // ============================================================================
 // ATTRIBUTION LEDGER - THE TRUTH KEEPER
@@ -2195,7 +2447,8 @@ impl AttributionLedger {
 
     /// Register an intent before the order is placed
     pub fn register_intent(&mut self, intent: &ExpertIntent) {
-        self.pending_intents.insert(intent.intent_id, intent.clone());
+        self.pending_intents
+            .insert(intent.intent_id, intent.clone());
     }
 
     /// Record a fill and attribute it
@@ -2242,13 +2495,24 @@ impl AttributionLedger {
         };
 
         // Update aggregates
-        *self.expert_pnl.entry(intent.expert_id.clone()).or_insert(0.0) += realized_pnl;
-        *self.expert_fills.entry(intent.expert_id.clone()).or_insert(0) += 1;
+        *self
+            .expert_pnl
+            .entry(intent.expert_id.clone())
+            .or_insert(0.0) += realized_pnl;
+        *self
+            .expert_fills
+            .entry(intent.expert_id.clone())
+            .or_insert(0) += 1;
         if realized_pnl > 0.0 {
-            *self.expert_wins.entry(intent.expert_id.clone()).or_insert(0) += 1;
+            *self
+                .expert_wins
+                .entry(intent.expert_id.clone())
+                .or_insert(0) += 1;
         }
-        *self.expert_edge_realized.entry(intent.expert_id.clone()).or_insert(0.0) +=
-            realized_pnl / fill_quantity / fill_price * 10000.0; // bps
+        *self
+            .expert_edge_realized
+            .entry(intent.expert_id.clone())
+            .or_insert(0.0) += realized_pnl / fill_quantity / fill_price * 10000.0; // bps
         *self.regime_pnl.entry(intent.regime).or_insert(0.0) += realized_pnl;
         *self.family_pnl.entry(intent.signal_family).or_insert(0.0) += realized_pnl;
 
@@ -2353,11 +2617,13 @@ impl ExpertState {
 
     pub fn get_kelly_fraction(&self) -> f64 {
         let total = self.win_count + self.loss_count;
-        if total < 10 { return 1.0; } // Masterpiece: Full confidence during warmup
-        
+        if total < 10 {
+            return 1.0;
+        } // Masterpiece: Full confidence during warmup
+
         let win_rate = self.win_count as f64 / total as f64;
         let _edge = self.avg_edge; // expected edge in bps
-        
+
         // Simple fractional Kelly: (WinRate - LossRate) * (Edge / Spread)
         // Here we'll just use a Sharpe-based proxy if edge calculation is complex
         let k = (win_rate - (1.0 - win_rate)) * 0.5; // Half-Kelly on win rate
@@ -2418,22 +2684,26 @@ impl MetaAllocator {
 
             if state.quarantined {
                 state.quarantine_ticks += 100;
-                
+
                 // --- SHADOW REVALIDATION ---
-                // We track "virtual PnL" while in quarantine. 
+                // We track "virtual PnL" while in quarantine.
                 // If the expert would have made money, we allow it back.
                 state.virtual_pnl = pnl; // In this impl, pnl is cumulative realized
                 if state.virtual_pnl > state.virtual_peak {
                     state.virtual_peak = state.virtual_pnl;
                 }
-                
+
                 let recovery_from_peak = state.virtual_pnl - state.peak_pnl; // peak_pnl was at time of quarantine
-                
+
                 // If it recovers enough or stays in quarantine too long with flat/positive performance
-                let is_recovered = recovery_from_peak >= (state.peak_pnl * self.config.virtual_recovery_threshold / 100.0).max(1.0);
+                let is_recovered = recovery_from_peak
+                    >= (state.peak_pnl * self.config.virtual_recovery_threshold / 100.0).max(1.0);
 
                 if is_recovered || state.quarantine_ticks >= self.config.quarantine_cooldown_ticks {
-                    info!("[HYDRA] Expert {} RELEASED from quarantine (Recovered: {})", name, is_recovered);
+                    info!(
+                        "[HYDRA] Expert {} RELEASED from quarantine (Recovered: {})",
+                        name, is_recovered
+                    );
                     state.quarantined = false;
                     state.quarantine_ticks = 0;
                     state.weight = self.config.weight_floor;
@@ -2445,7 +2715,7 @@ impl MetaAllocator {
 
             // Update PnL tracking for active experts
             state.edge_net = pnl;
-            
+
             // --- MASTERPIECE: Update Win/Loss/Edge for Kelly ---
             let (wins, losses, avg_edge) = ledger.get_expert_stats(name);
             state.win_count = wins;
@@ -2462,8 +2732,10 @@ impl MetaAllocator {
 
             // Check for quarantine condition
             if state.current_drawdown > self.config.expert_quarantine_drawdown {
-                warn!("[HYDRA] Expert {} QUARANTINED: drawdown {:.2}% > {:.2}%",
-                    name, state.current_drawdown, self.config.expert_quarantine_drawdown);
+                warn!(
+                    "[HYDRA] Expert {} QUARANTINED: drawdown {:.2}% > {:.2}%",
+                    name, state.current_drawdown, self.config.expert_quarantine_drawdown
+                );
                 state.quarantined = true;
                 state.quarantine_ticks = 0;
                 state.virtual_pnl = pnl;
@@ -2483,7 +2755,9 @@ impl MetaAllocator {
             state.weight *= weight_update;
 
             // Apply floor/ceiling
-            state.weight = state.weight.clamp(self.config.weight_floor, self.config.weight_ceiling);
+            state.weight = state
+                .weight
+                .clamp(self.config.weight_floor, self.config.weight_ceiling);
 
             normalization_sum += state.weight;
         }
@@ -2497,7 +2771,6 @@ impl MetaAllocator {
             }
         }
 
-        
         // RMT correlation awareness (optional): if experts are highly correlated, shrink weights toward uniform.
         if self.config.rmt_enabled {
             // Build aligned return series for non-quarantined experts.
@@ -2566,7 +2839,7 @@ impl MetaAllocator {
             }
         }
 
-// Update portfolio-level drawdown
+        // Update portfolio-level drawdown
         let total_pnl: f64 = expert_pnls.values().sum();
         self.portfolio_pnl = total_pnl;
         if total_pnl > self.portfolio_peak {
@@ -2592,7 +2865,8 @@ impl MetaAllocator {
 
     /// Get weight for a specific expert
     pub fn get_weight(&self, expert_id: &str) -> f64 {
-        self.states.get(expert_id)
+        self.states
+            .get(expert_id)
             .map(|s| if s.quarantined { 0.0 } else { s.weight })
             .unwrap_or(0.0)
     }
@@ -2604,7 +2878,10 @@ impl MetaAllocator {
 
     /// Check if an expert is quarantined
     pub fn is_quarantined(&self, expert_id: &str) -> bool {
-        self.states.get(expert_id).map(|s| s.quarantined).unwrap_or(true)
+        self.states
+            .get(expert_id)
+            .map(|s| s.quarantined)
+            .unwrap_or(true)
     }
 
     /// Update execution quality for an expert
@@ -2676,8 +2953,8 @@ impl ExecutionQualityGate {
         // 3. Slippage explosion (>3x baseline)
         // 4. High adverse selection
 
-        let baseline_slippage = self.slippage_history.iter().sum::<f64>()
-            / self.slippage_history.len().max(1) as f64;
+        let baseline_slippage =
+            self.slippage_history.iter().sum::<f64>() / self.slippage_history.len().max(1) as f64;
 
         let slippage_ratio = if baseline_slippage > 0.0 {
             self.metrics.slippage_bps / baseline_slippage
@@ -2796,7 +3073,10 @@ impl KillSwitchPolicy {
         // 1. Latency check
         if latency_ms > self.max_latency_ms {
             should_trigger = true;
-            reason = format!("Latency spike: {:.0}ms > {:.0}ms", latency_ms, self.max_latency_ms);
+            reason = format!(
+                "Latency spike: {:.0}ms > {:.0}ms",
+                latency_ms, self.max_latency_ms
+            );
         }
 
         // 2. Disconnect check
@@ -2805,7 +3085,10 @@ impl KillSwitchPolicy {
         }
         if self.disconnect_count >= self.max_disconnects {
             should_trigger = true;
-            reason = format!("Too many disconnects: {} >= {}", self.disconnect_count, self.max_disconnects);
+            reason = format!(
+                "Too many disconnects: {} >= {}",
+                self.disconnect_count, self.max_disconnects
+            );
         }
 
         // 3. Slippage explosion
@@ -2823,7 +3106,10 @@ impl KillSwitchPolicy {
         };
         if drawdown >= self.max_drawdown_pct {
             should_trigger = true;
-            reason = format!("Drawdown breach: {:.1}% >= {:.1}%", drawdown, self.max_drawdown_pct);
+            reason = format!(
+                "Drawdown breach: {:.1}% >= {:.1}%",
+                drawdown, self.max_drawdown_pct
+            );
         }
 
         if should_trigger {
@@ -2877,9 +3163,9 @@ pub struct GreeksRiskConfig {
 impl Default for GreeksRiskConfig {
     fn default() -> Self {
         Self {
-            max_delta: 50.0,      // 50 lots equivalent
-            max_gamma: 5.0,       // Conservative gamma limit
-            max_vega: 50000.0,    // ₹50,000 per 1% IV move
+            max_delta: 50.0,          // 50 lots equivalent
+            max_gamma: 5.0,           // Conservative gamma limit
+            max_vega: 50000.0,        // ₹50,000 per 1% IV move
             max_theta_daily: 10000.0, // ₹10,000 daily decay limit
             delta_neutral_band: 5.0,  // ±5 delta is "neutral"
             auto_delta_hedge: true,
@@ -2892,9 +3178,9 @@ impl GreeksRiskConfig {
     /// Configuration optimized for NIFTY options
     pub fn nifty_optimized() -> Self {
         Self {
-            max_delta: 30.0,      // 30 lots = 1500 units
-            max_gamma: 3.0,       // Tighter for NIFTY
-            max_vega: 30000.0,    // ₹30,000 vega exposure
+            max_delta: 30.0,   // 30 lots = 1500 units
+            max_gamma: 3.0,    // Tighter for NIFTY
+            max_vega: 30000.0, // ₹30,000 vega exposure
             max_theta_daily: 5000.0,
             delta_neutral_band: 3.0,
             auto_delta_hedge: true,
@@ -2905,9 +3191,9 @@ impl GreeksRiskConfig {
     /// Configuration for BANKNIFTY (higher volatility)
     pub fn banknifty_optimized() -> Self {
         Self {
-            max_delta: 20.0,      // 20 lots = 300 units
-            max_gamma: 2.0,       // Very tight for BANKNIFTY
-            max_vega: 40000.0,    // Higher due to vol
+            max_delta: 20.0,   // 20 lots = 300 units
+            max_gamma: 2.0,    // Very tight for BANKNIFTY
+            max_vega: 40000.0, // Higher due to vol
             max_theta_daily: 8000.0,
             delta_neutral_band: 2.0,
             auto_delta_hedge: true,
@@ -3035,8 +3321,20 @@ impl GreeksRiskManager {
     ) {
         // Calculate real Greeks using Black-Scholes from kubera_options
         let single_option_greeks = match option_type {
-            OptionType::Call => OptionGreeks::for_call(spot_price, strike, time_to_expiry, risk_free_rate, implied_vol),
-            OptionType::Put => OptionGreeks::for_put(spot_price, strike, time_to_expiry, risk_free_rate, implied_vol),
+            OptionType::Call => OptionGreeks::for_call(
+                spot_price,
+                strike,
+                time_to_expiry,
+                risk_free_rate,
+                implied_vol,
+            ),
+            OptionType::Put => OptionGreeks::for_put(
+                spot_price,
+                strike,
+                time_to_expiry,
+                risk_free_rate,
+                implied_vol,
+            ),
         };
 
         // Scale by position size (lots * lot_size gives total contracts)
@@ -3045,8 +3343,13 @@ impl GreeksRiskManager {
 
         debug!(
             "[GREEKS] Real B-S calculation: spot={:.1}, K={:.0}, T={:.4}, IV={:.1}%, type={:?} -> delta={:.4}, gamma={:.6}",
-            spot_price, strike, time_to_expiry, implied_vol * 100.0, option_type,
-            portfolio_greeks.delta, portfolio_greeks.gamma
+            spot_price,
+            strike,
+            time_to_expiry,
+            implied_vol * 100.0,
+            option_type,
+            portfolio_greeks.delta,
+            portfolio_greeks.gamma
         );
 
         self.update_greeks(
@@ -3065,7 +3368,7 @@ impl GreeksRiskManager {
     pub fn update_from_position(&mut self, position: f64, spot_price: f64, implied_vol: f64) {
         // Estimate Greeks from position (simplified ATM approximation)
         // WARNING: These are rough estimates, not real Black-Scholes values!
-        let estimated_delta = position * 0.5;  // Assumes roughly ATM
+        let estimated_delta = position * 0.5; // Assumes roughly ATM
         let estimated_gamma = position.abs() * 0.02 / spot_price;
         let estimated_theta = -position.abs() * spot_price * implied_vol * 0.01;
         let estimated_vega = position.abs() * spot_price * 0.01;
@@ -3093,7 +3396,8 @@ impl GreeksRiskManager {
         if delta_ratio > 1.0 {
             violations.push(format!(
                 "Delta {:.1} exceeds limit {:.1}",
-                self.state.delta.abs(), self.config.max_delta
+                self.state.delta.abs(),
+                self.config.max_delta
             ));
         }
 
@@ -3102,7 +3406,8 @@ impl GreeksRiskManager {
         if gamma_ratio > 1.0 {
             violations.push(format!(
                 "Gamma {:.4} exceeds limit {:.4}",
-                self.state.gamma * 100.0, self.config.max_gamma
+                self.state.gamma * 100.0,
+                self.config.max_gamma
             ));
         }
 
@@ -3111,7 +3416,8 @@ impl GreeksRiskManager {
         if vega_ratio > 1.0 {
             violations.push(format!(
                 "Vega {:.0} exceeds limit {:.0}",
-                self.state.vega.abs(), self.config.max_vega
+                self.state.vega.abs(),
+                self.config.max_vega
             ));
         }
 
@@ -3120,7 +3426,8 @@ impl GreeksRiskManager {
         if theta_ratio > 1.0 {
             violations.push(format!(
                 "Theta {:.0} exceeds limit {:.0}",
-                self.state.theta.abs(), self.config.max_theta_daily
+                self.state.theta.abs(),
+                self.config.max_theta_daily
             ));
         }
 
@@ -3128,7 +3435,10 @@ impl GreeksRiskManager {
         if !violations.is_empty() {
             self.limit_breached = true;
             self.breach_reason = Some(violations.join("; "));
-            warn!("[GREEKS] Limit breach: {}", self.breach_reason.as_ref().unwrap());
+            warn!(
+                "[GREEKS] Limit breach: {}",
+                self.breach_reason.as_ref().unwrap()
+            );
         } else {
             self.limit_breached = false;
             self.breach_reason = None;
@@ -3136,7 +3446,10 @@ impl GreeksRiskManager {
 
         // Calculate risk scalar (reduce position sizing when approaching limits)
         // Use the maximum of all ratios to be conservative
-        let utilization = delta_ratio.max(gamma_ratio).max(vega_ratio).max(theta_ratio);
+        let utilization = delta_ratio
+            .max(gamma_ratio)
+            .max(vega_ratio)
+            .max(theta_ratio);
 
         self.risk_scalar = if utilization >= 1.0 {
             0.0 // Hard stop - no new positions
@@ -3150,7 +3463,8 @@ impl GreeksRiskManager {
 
         debug!(
             "[GREEKS] Utilization: {:.1}%, Risk scalar: {:.2}",
-            utilization * 100.0, self.risk_scalar
+            utilization * 100.0,
+            self.risk_scalar
         );
     }
 
@@ -3295,7 +3609,10 @@ impl HydraStrategy {
             Box::new(VolatilityExpert::new()),
             Box::new(MicrostructureExpert::new()),
             Box::new(RelativeValueExpert::new()),
-            Box::new(RankSpaceMeanRevExpert::new(config.rankspace_window, config.rankspace_edge_scale_bps)),
+            Box::new(RankSpaceMeanRevExpert::new(
+                config.rankspace_window,
+                config.rankspace_edge_scale_bps,
+            )),
         ];
 
         let names: Vec<String> = experts.iter().map(|e| e.name().to_string()).collect();
@@ -3466,7 +3783,10 @@ impl HydraStrategy {
             let intent_opt = expert.generate_intent(&regime_state);
             if let Some(intent) = intent_opt {
                 // V2: Regime checks enabled
-                info!("[HYDRA] Expert {} generated intent with signal {:.3}", intent.expert_id, intent.signal);
+                info!(
+                    "[HYDRA] Expert {} generated intent with signal {:.3}",
+                    intent.expert_id, intent.signal
+                );
                 intents.push(intent);
             } else {
                 debug!("[HYDRA] Expert {} returned None", expert.name());
@@ -3487,39 +3807,45 @@ impl HydraStrategy {
 
         for intent in &intents {
             let weight = self.allocator.get_weight(&intent.expert_id);
-            
+
             // --- V2: Z-SCORE NORMALIZATION ---
             // Track signal history for this expert
-            let history = self.signal_history
+            let history = self
+                .signal_history
                 .entry(intent.expert_id.clone())
                 .or_insert_with(|| VecDeque::with_capacity(self.config.signal_zscore_lookback));
             history.push_back(intent.signal);
             if history.len() > self.config.signal_zscore_lookback {
                 history.pop_front();
             }
-            
+
             // Calculate Z-score if we have enough history, otherwise use raw signal (warmup mode)
             let zscore = if history.len() >= 10 {
                 let mean = history.iter().sum::<f64>() / history.len() as f64;
-                let variance = history.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / history.len() as f64;
+                let variance =
+                    history.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / history.len() as f64;
                 let std_dev = variance.sqrt().max(0.001);
                 (intent.signal - mean) / std_dev
             } else {
                 // V2 WARMUP: Use amplified raw signal during warmup
-                intent.signal * 2.0 
+                intent.signal * 2.0
             };
-            
+
             // --- EXPERT POSITION LIMIT ENFORCEMENT ---
             let max_contribution = self.config.max_position_per_expert;
-            
+
             // --- MASTERPIECE: KELLY SCALING ---
             // Scale the signal by the expert's fractional Kelly logic
-            let kelly_fraction = self.allocator.states.get(&intent.expert_id)
+            let kelly_fraction = self
+                .allocator
+                .states
+                .get(&intent.expert_id)
                 .map(|s| s.get_kelly_fraction())
                 .unwrap_or(0.5);
-            
-            let weighted_signal = (zscore * weight * kelly_fraction).clamp(-max_contribution, max_contribution);
-            
+
+            let weighted_signal =
+                (zscore * weight * kelly_fraction).clamp(-max_contribution, max_contribution);
+
             // MASTERPIECE: Edge should be adjusted by Kelly for the hurdle check (Step 1962 logic)
             weighted_edge += intent.expected_edge_bps * weight * kelly_fraction;
 
@@ -3535,17 +3861,31 @@ impl HydraStrategy {
             portfolio_signal += final_weighted_signal;
             abs_contrib_sum += final_weighted_signal.abs();
 
-            debug!("[HYDRA] {} raw={:.3} zscore={:.2} (w={:.3}, weighted={:.3}, aeon={:.2})",
-                intent.expert_id, intent.signal, zscore, weight, final_weighted_signal, self.aeon_bif_score);
+            debug!(
+                "[HYDRA] {} raw={:.3} zscore={:.2} (w={:.3}, weighted={:.3}, aeon={:.2})",
+                intent.expert_id,
+                intent.signal,
+                zscore,
+                weight,
+                final_weighted_signal,
+                self.aeon_bif_score
+            );
         }
 
         // Apply global scaling to heuristic edge estimates (useful when calibrating offline)
         weighted_edge *= self.config.edge_scale_mult;
 
         // Coherence gate: require experts to be directionally aligned
-        let coherence = if abs_contrib_sum > 1e-9 { (portfolio_signal.abs() / abs_contrib_sum).clamp(0.0, 1.0) } else { 0.0 };
+        let coherence = if abs_contrib_sum > 1e-9 {
+            (portfolio_signal.abs() / abs_contrib_sum).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         if coherence < self.config.coherence_min {
-            debug!("[HYDRA] Coherence {:.2} < min {:.2}, skipping", coherence, self.config.coherence_min);
+            debug!(
+                "[HYDRA] Coherence {:.2} < min {:.2}, skipping",
+                coherence, self.config.coherence_min
+            );
             self.is_processing = false;
             return;
         }
@@ -3560,12 +3900,24 @@ impl HydraStrategy {
         // --- MASTERPIECE: STRUCTURAL CIRCUIT BREAKERS ---
         // If portfolio drawdown is significant, scale back aggressively to preserve alpha
         let dd = self.allocator.portfolio_drawdown;
-        let circuit_breaker_mult = if dd > 0.07 { 0.0 } // Hard Stop at 7% budget
-            else if dd > 0.03 { 0.5 } // Defend the 3% line
-            else { 1.0 };
+        let circuit_breaker_mult = if dd > 0.07 {
+            0.0
+        }
+        // Hard Stop at 7% budget
+        else if dd > 0.03 {
+            0.5
+        }
+        // Defend the 3% line
+        else {
+            1.0
+        };
 
         // Final target position
-        let mut target_pos = portfolio_signal * self.config.max_position_abs * regime_mult * global_risk_mult * circuit_breaker_mult;
+        let mut target_pos = portfolio_signal
+            * self.config.max_position_abs
+            * regime_mult
+            * global_risk_mult
+            * circuit_breaker_mult;
 
         // --- V2: V-MAP VOLATILITY-TARGETING ---
         // Scale position inversely with realized volatility to maintain constant risk
@@ -3580,9 +3932,11 @@ impl HydraStrategy {
         // If Greeks manager is active, update Greeks and apply risk scalar
         if let Some(ref mut greeks_mgr) = self.greeks_manager {
             // Update Greeks using REAL Black-Scholes if option params available
-            if let (Some(strike), Some(tte), Some(opt_type)) =
-                (self.option_strike, self.option_time_to_expiry, self.option_type)
-            {
+            if let (Some(strike), Some(tte), Some(opt_type)) = (
+                self.option_strike,
+                self.option_time_to_expiry,
+                self.option_type,
+            ) {
                 // PRODUCTION: Real Greeks from kubera_options Black-Scholes
                 greeks_mgr.update_from_option(
                     current_pos,
@@ -3615,7 +3969,11 @@ impl HydraStrategy {
 
             if hedge_qty.abs() > hedge_threshold {
                 // PRODUCTION: Execute delta hedge via underlying (futures)
-                let hedge_side = if hedge_qty > 0.0 { Side::Buy } else { Side::Sell };
+                let hedge_side = if hedge_qty > 0.0 {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                };
                 let hedge_lots = hedge_qty.abs();
 
                 info!(
@@ -3695,15 +4053,23 @@ impl HydraStrategy {
 
         // Log high-edge candidates (rate-limited to every 200 candidates)
         if weighted_edge > 5.0 && self.candidate_count % 200 == 0 {
-            info!("[HYDRA-CANDIDATE] edge={:.2}bps cost={:.2}bps required={:.2}bps margin={:.2}bps pass={}",
-                  weighted_edge, total_cost, required_edge, margin, weighted_edge >= required_edge);
+            info!(
+                "[HYDRA-CANDIDATE] edge={:.2}bps cost={:.2}bps required={:.2}bps margin={:.2}bps pass={}",
+                weighted_edge,
+                total_cost,
+                required_edge,
+                margin,
+                weighted_edge >= required_edge
+            );
         }
 
         // Periodic stats summary every 5000 candidates
         if self.candidate_count % 5000 == 0 {
             let pass_rate = if self.candidate_count > 0 {
                 self.passed_count as f64 / self.candidate_count as f64 * 100.0
-            } else { 0.0 };
+            } else {
+                0.0
+            };
 
             // Compute p95 and p99 from edge samples
             let (p95, p99) = if !self.edge_samples.is_empty() {
@@ -3713,17 +4079,29 @@ impl HydraStrategy {
                 let p95_idx = ((n as f64 * 0.95) as usize).min(n - 1);
                 let p99_idx = ((n as f64 * 0.99) as usize).min(n - 1);
                 (sorted[p95_idx], sorted[p99_idx])
-            } else { (0.0, 0.0) };
+            } else {
+                (0.0, 0.0)
+            };
 
-            info!("[HYDRA-STATS] candidates={} passed={} rejected={} pass_rate={:.2}% max_edge={:.2}bps p95_edge={:.2}bps p99_edge={:.2}bps max_margin={:.2}bps",
-                  self.candidate_count, self.passed_count, self.rejected_count, pass_rate,
-                  self.max_edge_observed, p95, p99, self.max_margin_observed);
+            info!(
+                "[HYDRA-STATS] candidates={} passed={} rejected={} pass_rate={:.2}% max_edge={:.2}bps p95_edge={:.2}bps p99_edge={:.2}bps max_margin={:.2}bps",
+                self.candidate_count,
+                self.passed_count,
+                self.rejected_count,
+                pass_rate,
+                self.max_edge_observed,
+                p95,
+                p99,
+                self.max_margin_observed
+            );
         }
 
         if weighted_edge < required_edge {
             self.rejected_count += 1;
-            debug!("[HYDRA] Edge {:.1}bps < required {:.1}bps (cost={:.1}bps, hurdle={:.1}), skipping",
-                   weighted_edge, required_edge, total_cost, hurdle);
+            debug!(
+                "[HYDRA] Edge {:.1}bps < required {:.1}bps (cost={:.1}bps, hurdle={:.1}), skipping",
+                weighted_edge, required_edge, total_cost, hurdle
+            );
             self.is_processing = false;
             return;
         }
@@ -3731,7 +4109,8 @@ impl HydraStrategy {
 
         // --- MASTERPIECE: TRAILING ALPHA-STOP ---
         // If we are long but signal is strongly reversed, close position immediately
-        let is_reversal = (current_pos > 0.0 && portfolio_signal < -0.4) || (current_pos < 0.0 && portfolio_signal > 0.4);
+        let is_reversal = (current_pos > 0.0 && portfolio_signal < -0.4)
+            || (current_pos < 0.0 && portfolio_signal > 0.4);
 
         // Position change with hysteresis
         let position_change = target_pos - current_pos;
@@ -3741,19 +4120,30 @@ impl HydraStrategy {
         const MIN_TICKS_BETWEEN_TRADES: u64 = 50;
         let last_trade_tick = *self.last_trade_tick_by_symbol.get(symbol).unwrap_or(&0);
         if self.tick_count - last_trade_tick < MIN_TICKS_BETWEEN_TRADES && last_trade_tick > 0 {
-            debug!("[HYDRA] Trade cooldown active for {} ({} ticks since last trade)", symbol, self.tick_count - last_trade_tick);
+            debug!(
+                "[HYDRA] Trade cooldown active for {} ({} ticks since last trade)",
+                symbol,
+                self.tick_count - last_trade_tick
+            );
             self.is_processing = false;
             return;
         }
 
         if is_reversal && !should_trade {
-            info!("[HYDRA] Trailing Alpha-Stop triggered (Reversal detected) - Closing {} position", symbol);
+            info!(
+                "[HYDRA] Trailing Alpha-Stop triggered (Reversal detected) - Closing {} position",
+                symbol
+            );
             target_pos = 0.0;
             should_trade = true;
         }
 
         if should_trade {
-            let side = if target_pos > current_pos { Side::Buy } else { Side::Sell };
+            let side = if target_pos > current_pos {
+                Side::Buy
+            } else {
+                Side::Sell
+            };
             let raw_qty = (target_pos - current_pos).abs();
 
             // Get lot size for this symbol (per-symbol or default)
@@ -3798,7 +4188,8 @@ impl HydraStrategy {
                     decision_mid: price,
                     spread_bps: 0.0,
                     book_ts_ns: 0,
-                    expected_edge_bps: self.config.edge_hurdle_multiplier * (self.config.slippage_bps + self.config.commission_bps),
+                    expected_edge_bps: self.config.edge_hurdle_multiplier
+                        * (self.config.slippage_bps + self.config.commission_bps),
                 };
 
                 if let Err(e) = bus.publish_signal_sync(signal) {
@@ -3810,10 +4201,14 @@ impl HydraStrategy {
             }
 
             self.positions.insert(symbol.to_string(), target_pos);
-            self.last_trade_tick_by_symbol.insert(symbol.to_string(), self.tick_count);
-            info!("[HYDRA] {} position updated: {:.3} -> {:.3}", symbol, current_pos, target_pos);
+            self.last_trade_tick_by_symbol
+                .insert(symbol.to_string(), self.tick_count);
+            info!(
+                "[HYDRA] {} position updated: {:.3} -> {:.3}",
+                symbol, current_pos, target_pos
+            );
         }
-        
+
         // Reset processing guard
         self.is_processing = false;
     }
@@ -3822,14 +4217,25 @@ impl HydraStrategy {
 impl crate::Strategy for HydraStrategy {
     fn on_start(&mut self, bus: Arc<EventBus>) {
         info!("[HYDRA] ═══════════════════════════════════════════════════════");
-        info!("[HYDRA]  HYDRA AWAKENS - {} HEADS ACTIVE", self.experts.len());
+        info!(
+            "[HYDRA]  HYDRA AWAKENS - {} HEADS ACTIVE",
+            self.experts.len()
+        );
         info!("[HYDRA] ═══════════════════════════════════════════════════════");
         info!("[HYDRA] Experts:");
         for expert in &self.experts {
-            info!("[HYDRA]   • {} (family: {})", expert.name(), expert.signal_family());
+            info!(
+                "[HYDRA]   • {} (family: {})",
+                expert.name(),
+                expert.signal_family()
+            );
         }
-        info!("[HYDRA] Config: vol_target={:.1}%, max_dd={:.1}%, learning_rate={:.3}",
-            self.config.vol_target * 100.0, self.config.max_drawdown_pct, self.config.learning_rate);
+        info!(
+            "[HYDRA] Config: vol_target={:.1}%, max_dd={:.1}%, learning_rate={:.3}",
+            self.config.vol_target * 100.0,
+            self.config.max_drawdown_pct,
+            self.config.learning_rate
+        );
         info!("[HYDRA] ═══════════════════════════════════════════════════════");
         self.bus = Some(bus);
     }
@@ -3854,12 +4260,17 @@ impl crate::Strategy for HydraStrategy {
                 }
             }
         }
-        
+
         // V2 DEBUG: Verify tick reception
         if self.tick_count % 100 == 0 {
-            info!("[HYDRA] on_tick #{} for {} - {} experts active", self.tick_count, event.symbol, self.experts.len());
+            info!(
+                "[HYDRA] on_tick #{} for {} - {} experts active",
+                self.tick_count,
+                event.symbol,
+                self.experts.len()
+            );
         }
-        
+
         // Update regime engine
         self.regime_engine.update(event);
 
@@ -3870,10 +4281,18 @@ impl crate::Strategy for HydraStrategy {
 
         // Execute trading logic
         if let MarketPayload::Tick { price, .. } = &event.payload {
-            self.execute_logic(event.exchange_time.timestamp_millis(), &event.symbol, *price);
+            self.execute_logic(
+                event.exchange_time.timestamp_millis(),
+                &event.symbol,
+                *price,
+            );
         }
         if let MarketPayload::Trade { price, .. } = &event.payload {
-            self.execute_logic(event.exchange_time.timestamp_millis(), &event.symbol, *price);
+            self.execute_logic(
+                event.exchange_time.timestamp_millis(),
+                &event.symbol,
+                *price,
+            );
         }
 
         // Periodic meta-allocator update
@@ -3893,13 +4312,25 @@ impl crate::Strategy for HydraStrategy {
 
         // Execute on bar close
         if let MarketPayload::Bar { close, .. } = &event.payload {
-            self.execute_logic(event.exchange_time.timestamp_millis(), &event.symbol, *close);
+            self.execute_logic(
+                event.exchange_time.timestamp_millis(),
+                &event.symbol,
+                *close,
+            );
         }
     }
 
     fn on_fill(&mut self, fill: &OrderEvent) {
-        if let OrderPayload::Update { filled_quantity, avg_price, commission, status } = &fill.payload {
-            if *status == kubera_models::OrderStatus::Filled || *status == kubera_models::OrderStatus::PartiallyFilled {
+        if let OrderPayload::Update {
+            filled_quantity,
+            avg_price,
+            commission,
+            status,
+        } = &fill.payload
+        {
+            if *status == kubera_models::OrderStatus::Filled
+                || *status == kubera_models::OrderStatus::PartiallyFilled
+            {
                 let symbol = &fill.symbol;
 
                 // Find matching intent and record attribution
@@ -3922,8 +4353,10 @@ impl crate::Strategy for HydraStrategy {
                 // In a proper architecture, Portfolio/Exchange tracks actual positions, not strategy.
                 let pos = *self.positions.get(symbol).unwrap_or(&0.0);
 
-                info!("[HYDRA] {} fill processed: {:.4} @ {:.2} (commission: {:.4}) | Position: {:.4}",
-                    symbol, filled_quantity, avg_price, commission, pos);
+                info!(
+                    "[HYDRA] {} fill processed: {:.4} @ {:.2} (commission: {:.4}) | Position: {:.4}",
+                    symbol, filled_quantity, avg_price, commission, pos
+                );
             }
         }
     }
@@ -3973,10 +4406,7 @@ mod tests {
 
     #[test]
     fn test_meta_allocator_weight_normalization() {
-        let names = vec![
-            "Expert-A".to_string(),
-            "Expert-B".to_string(),
-        ];
+        let names = vec!["Expert-A".to_string(), "Expert-B".to_string()];
         let allocator = MetaAllocator::new(names, HydraConfig::default());
 
         let weight_a = allocator.get_weight("Expert-A");

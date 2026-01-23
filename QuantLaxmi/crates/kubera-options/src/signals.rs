@@ -1,6 +1,6 @@
 use crate::chain::IVSurface;
 use crate::strategy::StrategyType;
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Signal types for options trading
@@ -24,7 +24,7 @@ pub struct OptionsSignal {
     pub timestamp: DateTime<Utc>,
     pub underlying: String,
     pub signal_type: SignalType,
-    pub strength: f64,  // 0.0 to 1.0
+    pub strength: f64, // 0.0 to 1.0
     pub suggested_strategy: StrategyType,
     pub expiry: NaiveDate,
     pub details: String,
@@ -64,22 +64,24 @@ impl OptionsSignalGenerator {
         if self.iv_history.is_empty() {
             return 50.0;
         }
-        
-        let count_below = self.iv_history.iter()
+
+        let count_below = self
+            .iv_history
+            .iter()
             .filter(|(_, iv)| *iv < current_iv)
             .count();
-        
+
         (count_below as f64 / self.iv_history.len() as f64) * 100.0
     }
 
     /// Generate signals from IV surface
     pub fn generate_signals(&self, surface: &IVSurface, expiry: NaiveDate) -> Vec<OptionsSignal> {
         let mut signals = Vec::new();
-        
+
         // Get ATM IV
         if let Some(atm_iv) = surface.atm_iv(expiry) {
             let percentile = self.iv_percentile(atm_iv);
-            
+
             // Low IV signal - buy straddles
             if percentile < self.iv_low_percentile {
                 signals.push(OptionsSignal {
@@ -89,26 +91,33 @@ impl OptionsSignalGenerator {
                     strength: (self.iv_low_percentile - percentile) / self.iv_low_percentile,
                     suggested_strategy: StrategyType::Straddle,
                     expiry,
-                    details: format!("IV at {:.1}% percentile ({:.1}% IV). Consider buying straddle.", 
-                                   percentile, atm_iv * 100.0),
+                    details: format!(
+                        "IV at {:.1}% percentile ({:.1}% IV). Consider buying straddle.",
+                        percentile,
+                        atm_iv * 100.0
+                    ),
                 });
             }
-            
+
             // High IV signal - sell straddles/iron condors
             if percentile > self.iv_high_percentile {
                 signals.push(OptionsSignal {
                     timestamp: Utc::now(),
                     underlying: surface.underlying.clone(),
                     signal_type: SignalType::IVHigh,
-                    strength: (percentile - self.iv_high_percentile) / (100.0 - self.iv_high_percentile),
+                    strength: (percentile - self.iv_high_percentile)
+                        / (100.0 - self.iv_high_percentile),
                     suggested_strategy: StrategyType::IronCondor,
                     expiry,
-                    details: format!("IV at {:.1}% percentile ({:.1}% IV). Consider selling premium.", 
-                                   percentile, atm_iv * 100.0),
+                    details: format!(
+                        "IV at {:.1}% percentile ({:.1}% IV). Consider selling premium.",
+                        percentile,
+                        atm_iv * 100.0
+                    ),
                 });
             }
         }
-        
+
         // Check IV skew
         if let Some(skew) = surface.iv_skew(expiry, 200.0) {
             if skew.abs() > self.skew_threshold {
@@ -117,18 +126,21 @@ impl OptionsSignalGenerator {
                     underlying: surface.underlying.clone(),
                     signal_type: SignalType::SkewExtreme,
                     strength: (skew.abs() - self.skew_threshold) / self.skew_threshold,
-                    suggested_strategy: if skew > 0.0 { 
-                        StrategyType::BullCallSpread 
-                    } else { 
-                        StrategyType::BearPutSpread 
+                    suggested_strategy: if skew > 0.0 {
+                        StrategyType::BullCallSpread
+                    } else {
+                        StrategyType::BearPutSpread
                     },
                     expiry,
-                    details: format!("IV skew at {:.1}%. {} puts more expensive.", 
-                                   skew * 100.0, if skew > 0.0 { "OTM" } else { "OTM" }),
+                    details: format!(
+                        "IV skew at {:.1}%. {} puts more expensive.",
+                        skew * 100.0,
+                        if skew > 0.0 { "OTM" } else { "OTM" }
+                    ),
                 });
             }
         }
-        
+
         signals
     }
 }
@@ -142,33 +154,37 @@ impl Default for OptionsSignalGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chain::IVPoint;
     use crate::chain::IVSurface;
     use crate::contract::OptionType;
-    use crate::chain::IVPoint;
 
     #[test]
     fn test_iv_percentile() {
         let mut generator = OptionsSignalGenerator::new();
-        
+
         // Add some historical IV data
         for i in 0..100 {
             generator.add_iv_observation(Utc::now(), 0.10 + (i as f64 * 0.001));
         }
-        
+
         // Current IV at 15% should be around 50th percentile
         let percentile = generator.iv_percentile(0.15);
-        assert!(percentile > 40.0 && percentile < 60.0, "Percentile should be near 50: {}", percentile);
+        assert!(
+            percentile > 40.0 && percentile < 60.0,
+            "Percentile should be near 50: {}",
+            percentile
+        );
     }
 
     #[test]
     fn test_low_iv_signal() {
         let mut generator = OptionsSignalGenerator::new();
-        
+
         // Add high IV history
         for i in 0..100 {
             generator.add_iv_observation(Utc::now(), 0.20 + (i as f64 * 0.001));
         }
-        
+
         // Create surface with low IV
         let expiry = NaiveDate::from_ymd_opt(2024, 12, 26).unwrap();
         let mut surface = IVSurface::new("NIFTY".to_string(), 25800.0);
@@ -180,7 +196,7 @@ mod tests {
             delta: 0.5,
             last_price: 150.0,
         });
-        
+
         let signals = generator.generate_signals(&surface, expiry);
         assert!(!signals.is_empty(), "Should generate low IV signal");
         assert!(matches!(signals[0].signal_type, SignalType::IVLow));

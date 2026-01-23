@@ -25,10 +25,10 @@
 //! - FIX Protocol risk management best practices
 
 use kubera_models::{OrderEvent, OrderPayload, Side};
-use tracing::{info, warn, error};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tracing::{error, info, warn};
 
 /// Pre-trade risk management engine.
 ///
@@ -105,14 +105,26 @@ impl RiskEngine {
             return Err(RiskViolation::KillSwitchActive);
         }
 
-        if let OrderPayload::New { symbol, quantity, side, .. } = &event.payload {
+        if let OrderPayload::New {
+            symbol,
+            quantity,
+            side,
+            ..
+        } = &event.payload
+        {
             let order_value = quantity * current_price;
 
             // 2. Check Max Order Value
             if order_value > self.config.max_order_value_usd {
-                warn!("Risk Check Failed: Order value ${} > limit ${}", order_value, self.config.max_order_value_usd);
+                warn!(
+                    "Risk Check Failed: Order value ${} > limit ${}",
+                    order_value, self.config.max_order_value_usd
+                );
                 metrics::counter!("kubera_risk_checks_total", "result" => "failed", "reason" => "order_value").increment(1);
-                return Err(RiskViolation::OrderValueTooHigh(order_value, self.config.max_order_value_usd));
+                return Err(RiskViolation::OrderValueTooHigh(
+                    order_value,
+                    self.config.max_order_value_usd,
+                ));
             }
 
             // 3. Check Max Notional Per Symbol
@@ -122,9 +134,15 @@ impl RiskEngine {
             let new_notional = new_pos.abs() * current_price;
 
             if new_notional > self.config.max_notional_per_symbol_usd {
-                warn!("Risk Check Failed: New notional for {} (${}) > limit ${}", symbol, new_notional, self.config.max_notional_per_symbol_usd);
+                warn!(
+                    "Risk Check Failed: New notional for {} (${}) > limit ${}",
+                    symbol, new_notional, self.config.max_notional_per_symbol_usd
+                );
                 metrics::counter!("kubera_risk_checks_total", "result" => "failed", "reason" => "max_notional").increment(1);
-                return Err(RiskViolation::MaxNotionalExceeded(symbol.clone(), self.config.max_notional_per_symbol_usd));
+                return Err(RiskViolation::MaxNotionalExceeded(
+                    symbol.clone(),
+                    self.config.max_notional_per_symbol_usd,
+                ));
             }
         }
 
@@ -171,7 +189,12 @@ pub struct StrategyCircuitBreaker {
 
 impl StrategyCircuitBreaker {
     /// Constructs a new circuit breaker instance.
-    pub fn new(strategy_id: String, loss_threshold: u32, cooldown_secs: u64, daily_loss_limit: f64) -> Self {
+    pub fn new(
+        strategy_id: String,
+        loss_threshold: u32,
+        cooldown_secs: u64,
+        daily_loss_limit: f64,
+    ) -> Self {
         Self {
             strategy_id,
             is_open: false,
@@ -190,21 +213,23 @@ impl StrategyCircuitBreaker {
     /// `true` if this trade caused the breaker to trip.
     pub fn record_trade(&mut self, pnl: f64) -> bool {
         self.daily_pnl += pnl;
-        
+
         if pnl < 0.0 {
             self.consecutive_losses += 1;
         } else {
             self.consecutive_losses = 0;
         }
 
-        let should_trip = self.consecutive_losses >= self.loss_threshold 
+        let should_trip = self.consecutive_losses >= self.loss_threshold
             || self.daily_pnl <= -self.daily_loss_limit;
 
         if should_trip && !self.is_open {
             self.is_open = true;
             self.opened_at = Some(Instant::now());
-            warn!("Circuit breaker TRIPPED for strategy {}: losses={}, daily_pnl={}", 
-                self.strategy_id, self.consecutive_losses, self.daily_pnl);
+            warn!(
+                "Circuit breaker TRIPPED for strategy {}: losses={}, daily_pnl={}",
+                self.strategy_id, self.consecutive_losses, self.daily_pnl
+            );
             return true;
         }
         false
@@ -263,7 +288,10 @@ impl OrderRateLimiter {
         }
 
         if self.order_times.len() >= self.max_per_minute as usize {
-            warn!("Order rate limit exceeded: {} orders in last minute", self.order_times.len());
+            warn!(
+                "Order rate limit exceeded: {} orders in last minute",
+                self.order_times.len()
+            );
             return false;
         }
 
@@ -312,15 +340,19 @@ impl PostTradeRiskChecker {
         let drawdown_pct = (self.peak_equity - self.current_equity) / self.peak_equity * 100.0;
 
         if drawdown_pct >= self.max_drawdown_pct {
-            error!("DRAWDOWN LIMIT BREACHED: {:.2}% >= {:.2}% - TRIGGERING KILL SWITCH",
-                drawdown_pct, self.max_drawdown_pct);
+            error!(
+                "DRAWDOWN LIMIT BREACHED: {:.2}% >= {:.2}% - TRIGGERING KILL SWITCH",
+                drawdown_pct, self.max_drawdown_pct
+            );
             self.kill_switch.store(true, Ordering::SeqCst);
             return true;
         }
 
         if drawdown_pct >= self.max_drawdown_pct * 0.8 {
-            warn!("Drawdown warning: {:.2}% approaching limit of {:.2}%", 
-                drawdown_pct, self.max_drawdown_pct);
+            warn!(
+                "Drawdown warning: {:.2}% approaching limit of {:.2}%",
+                drawdown_pct, self.max_drawdown_pct
+            );
         }
 
         false
@@ -335,9 +367,9 @@ impl PostTradeRiskChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use kubera_models::OrderType;
     use uuid::Uuid;
-    use chrono::Utc;
 
     fn create_test_order(symbol: &str, side: Side, quantity: f64) -> OrderEvent {
         OrderEvent {
@@ -364,7 +396,7 @@ mod tests {
             max_notional_per_symbol_usd: 50000.0,
         };
         let engine = RiskEngine::new(config, kill_switch);
-        
+
         let order = create_test_order("BTC-USDT", Side::Buy, 0.1);
         let result = engine.check_order(&order, 50000.0); // $5000 order
         assert!(result.is_ok());
@@ -378,10 +410,13 @@ mod tests {
             max_notional_per_symbol_usd: 50000.0,
         };
         let engine = RiskEngine::new(config, kill_switch);
-        
+
         let order = create_test_order("BTC-USDT", Side::Buy, 1.0);
         let result = engine.check_order(&order, 50000.0); // $50000 order
-        assert!(matches!(result, Err(RiskViolation::OrderValueTooHigh(_, _))));
+        assert!(matches!(
+            result,
+            Err(RiskViolation::OrderValueTooHigh(_, _))
+        ));
     }
 
     #[test]
@@ -392,7 +427,7 @@ mod tests {
             max_notional_per_symbol_usd: 500000.0,
         };
         let engine = RiskEngine::new(config, kill_switch);
-        
+
         let order = create_test_order("BTC-USDT", Side::Buy, 0.001);
         let result = engine.check_order(&order, 50000.0);
         assert!(matches!(result, Err(RiskViolation::KillSwitchActive)));
@@ -407,10 +442,12 @@ mod tests {
         };
         let mut engine = RiskEngine::new(config, kill_switch);
         engine.update_position("BTC-USDT".to_string(), 0.09);
-        
+
         let order = create_test_order("BTC-USDT", Side::Buy, 0.02);
         let result = engine.check_order(&order, 50000.0); // 0.11 * 50000 = $5500 > $5000
-        assert!(matches!(result, Err(RiskViolation::MaxNotionalExceeded(_, _))));
+        assert!(matches!(
+            result,
+            Err(RiskViolation::MaxNotionalExceeded(_, _))
+        ));
     }
 }
-

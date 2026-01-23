@@ -8,12 +8,6 @@ members = [
     "crates/kubera-data",
     "crates/kubera-options",
     "crates/kubera-sbe",
-    "crates/kubera-mlflow",
-    "crates/kubera-ffi",
-    "crates/kubera-strategy-host",
-
-    # Legacy backtest (kept for now)
-    "crates/kubera-backtest",
 
     # New isolated connectors
     "crates/quantlaxmi-connectors-zerodha",

@@ -12,10 +12,10 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 //! - Black-Scholes-Merton (1973) model extensions
 
-use crate::greeks::OptionGreeks;
 use crate::chain::IVSurface;
 use crate::contract::OptionType;
-use chrono::{NaiveDate, DateTime, Utc, Duration};
+use crate::greeks::OptionGreeks;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -53,7 +53,11 @@ pub struct GreeksProjection {
 impl GreeksDecayProjector {
     /// Constructs a new projector with market environment parameters.
     pub fn new(spot_price: f64, rate: f64, volatility: f64) -> Self {
-        Self { spot_price, rate, volatility }
+        Self {
+            spot_price,
+            rate,
+            volatility,
+        }
     }
 
     /// Projects decay for a single option contract.
@@ -77,29 +81,41 @@ impl GreeksDecayProjector {
     ) -> Vec<GreeksProjection> {
         let mut projections = Vec::new();
         let is_call = matches!(option_type, OptionType::Call);
-        
+
         for day in 0..=days_forward {
             let current_date = start_date + Duration::days(day as i64);
             let days_to_expiry = (expiry - current_date).num_days() as f64;
-            
+
             if days_to_expiry <= 0.0 {
                 break;
             }
-            
+
             let time = days_to_expiry / 365.0;
-            
+
             let greeks = if is_call {
                 OptionGreeks::for_call(self.spot_price, strike, time, self.rate, self.volatility)
             } else {
                 OptionGreeks::for_put(self.spot_price, strike, time, self.rate, self.volatility)
             };
-            
+
             let option_value = if is_call {
-                crate::pricing::black_scholes_call(self.spot_price, strike, time, self.rate, self.volatility)
+                crate::pricing::black_scholes_call(
+                    self.spot_price,
+                    strike,
+                    time,
+                    self.rate,
+                    self.volatility,
+                )
             } else {
-                crate::pricing::black_scholes_put(self.spot_price, strike, time, self.rate, self.volatility)
+                crate::pricing::black_scholes_put(
+                    self.spot_price,
+                    strike,
+                    time,
+                    self.rate,
+                    self.volatility,
+                )
             };
-            
+
             projections.push(GreeksProjection {
                 days_forward: day,
                 date: current_date,
@@ -110,7 +126,7 @@ impl GreeksDecayProjector {
                 option_value,
             });
         }
-        
+
         projections
     }
 
@@ -122,10 +138,13 @@ impl GreeksDecayProjector {
         start_date: NaiveDate,
         days_forward: i32,
     ) -> Vec<GreeksProjection> {
-        let call_decay = self.project_decay(strike, expiry, OptionType::Call, start_date, days_forward);
-        let put_decay = self.project_decay(strike, expiry, OptionType::Put, start_date, days_forward);
-        
-        call_decay.iter()
+        let call_decay =
+            self.project_decay(strike, expiry, OptionType::Call, start_date, days_forward);
+        let put_decay =
+            self.project_decay(strike, expiry, OptionType::Put, start_date, days_forward);
+
+        call_decay
+            .iter()
             .zip(put_decay.iter())
             .map(|(c, p)| GreeksProjection {
                 days_forward: c.days_forward,
@@ -162,7 +181,7 @@ pub struct MeanReversionSignal {
     pub z_score: f64,
     pub signal: MeanReversionDirection,
     /// Normalized signal confidence (0.0 to 1.0).
-    pub strength: f64, 
+    pub strength: f64,
 }
 
 /// Directional intent for volatility trading.
@@ -204,28 +223,34 @@ impl IVMeanReversionSignal {
     /// `Some(MeanReversionSignal)` if calculation is possible, `None` if data is insufficient.
     pub fn generate_signal(&self, current_iv: f64) -> Option<MeanReversionSignal> {
         if self.iv_history.len() < 20 {
-            return None; 
+            return None;
         }
 
         let ivs: Vec<f64> = self.iv_history.iter().map(|(_, iv)| *iv).collect();
         let mean = ivs.iter().sum::<f64>() / ivs.len() as f64;
         let variance = ivs.iter().map(|iv| (iv - mean).powi(2)).sum::<f64>() / ivs.len() as f64;
         let std = variance.sqrt();
-        
+
         if std < 0.001 {
-            return None; 
+            return None;
         }
-        
+
         let z_score = (current_iv - mean) / std;
-        
+
         let (signal, strength) = if z_score < -self.z_score_threshold {
-            (MeanReversionDirection::BuyVolatility, (z_score.abs() - self.z_score_threshold) / self.z_score_threshold)
+            (
+                MeanReversionDirection::BuyVolatility,
+                (z_score.abs() - self.z_score_threshold) / self.z_score_threshold,
+            )
         } else if z_score > self.z_score_threshold {
-            (MeanReversionDirection::SellVolatility, (z_score.abs() - self.z_score_threshold) / self.z_score_threshold)
+            (
+                MeanReversionDirection::SellVolatility,
+                (z_score.abs() - self.z_score_threshold) / self.z_score_threshold,
+            )
         } else {
             (MeanReversionDirection::Neutral, 0.0)
         };
-        
+
         Some(MeanReversionSignal {
             timestamp: Utc::now(),
             current_iv,
@@ -268,31 +293,38 @@ impl GreeksHeatmap {
     /// Generates a heatmap derived from an IV surface snapshot.
     pub fn from_iv_surface(surface: &IVSurface, expiry: NaiveDate, rate: f64) -> Self {
         let time = (expiry - Utc::now().date_naive()).num_days() as f64 / 365.0;
-        
-        let mut strikes: Vec<f64> = surface.points.iter()
+
+        let mut strikes: Vec<f64> = surface
+            .points
+            .iter()
             .filter(|p| p.expiry == expiry)
             .map(|p| p.strike)
             .collect();
         strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
         strikes.dedup();
-        
+
         let mut data = Vec::new();
-        
+
         for strike in &strikes {
-            let call_point = surface.points.iter()
-                .find(|p| p.expiry == expiry && (p.strike - strike).abs() < 0.01 
-                      && p.option_type == OptionType::Call);
-            
-            let put_point = surface.points.iter()
-                .find(|p| p.expiry == expiry && (p.strike - strike).abs() < 0.01 
-                      && p.option_type == OptionType::Put);
-            
+            let call_point = surface.points.iter().find(|p| {
+                p.expiry == expiry
+                    && (p.strike - strike).abs() < 0.01
+                    && p.option_type == OptionType::Call
+            });
+
+            let put_point = surface.points.iter().find(|p| {
+                p.expiry == expiry
+                    && (p.strike - strike).abs() < 0.01
+                    && p.option_type == OptionType::Put
+            });
+
             let call_iv = call_point.map(|p| p.iv).unwrap_or(0.15);
             let put_iv = put_point.map(|p| p.iv).unwrap_or(0.15);
-            
-            let call_greeks = OptionGreeks::for_call(surface.spot_price, *strike, time, rate, call_iv);
+
+            let call_greeks =
+                OptionGreeks::for_call(surface.spot_price, *strike, time, rate, call_iv);
             let put_greeks = OptionGreeks::for_put(surface.spot_price, *strike, time, rate, put_iv);
-            
+
             data.push(GreeksHeatmapRow {
                 strike: *strike,
                 call_delta: call_greeks.delta,
@@ -307,7 +339,7 @@ impl GreeksHeatmap {
                 put_iv: put_point.map(|p| p.iv),
             });
         }
-        
+
         Self {
             underlying: surface.underlying.clone(),
             expiry,
@@ -344,7 +376,7 @@ pub struct IVSurface3D {
     /// Z-axis matrix [Expiry index][Strike index] of IV values.
     pub iv_matrix: Vec<Vec<f64>>,
     /// Z-axis matrix of Delta values for skew analysis.
-    pub delta_matrix: Vec<Vec<f64>>, 
+    pub delta_matrix: Vec<Vec<f64>>,
 }
 
 impl IVSurface3D {
@@ -359,25 +391,25 @@ impl IVSurface3D {
     ) -> Self {
         let mut iv_matrix = Vec::new();
         let mut delta_matrix = Vec::new();
-        
+
         for expiry in expiries {
             let mut iv_row = Vec::new();
             let mut delta_row = Vec::new();
             let time = (*expiry - Utc::now().date_naive()).num_days() as f64 / 365.0;
-            
+
             for strike in strikes {
                 let strike_key = (*strike * 100.0) as i64;
                 let iv = iv_data.get(&(*expiry, strike_key)).copied().unwrap_or(0.15);
                 iv_row.push(iv);
-                
+
                 let greeks = OptionGreeks::for_call(spot_price, *strike, time.max(0.01), rate, iv);
                 delta_row.push(greeks.delta);
             }
-            
+
             iv_matrix.push(iv_row);
             delta_matrix.push(delta_row);
         }
-        
+
         Self {
             underlying: underlying.to_string(),
             spot_price,
@@ -390,9 +422,12 @@ impl IVSurface3D {
 
     /// Interpolates IV at a specific point on the surface.
     pub fn get_iv(&self, strike: f64, expiry: NaiveDate) -> Option<f64> {
-        let strike_idx = self.strikes.iter().position(|&s| (s - strike).abs() < 25.0)?;
+        let strike_idx = self
+            .strikes
+            .iter()
+            .position(|&s| (s - strike).abs() < 25.0)?;
         let expiry_idx = self.expiries.iter().position(|&e| e == expiry)?;
-        
+
         self.iv_matrix.get(expiry_idx)?.get(strike_idx).copied()
     }
 
@@ -423,12 +458,11 @@ impl IVSurface3D {
             Some(i) => i,
             None => return Vec::new(),
         };
-        
-        self.expiries.iter()
+
+        self.expiries
+            .iter()
             .zip(self.iv_matrix.iter())
-            .filter_map(|(expiry, row)| {
-                row.get(strike_idx).map(|iv| (*expiry, *iv))
-            })
+            .filter_map(|(expiry, row)| row.get(strike_idx).map(|iv| (*expiry, *iv)))
             .collect()
     }
 }
@@ -442,9 +476,9 @@ mod tests {
         let projector = GreeksDecayProjector::new(25800.0, 0.065, 0.15);
         let expiry = NaiveDate::from_ymd_opt(2024, 12, 26).unwrap();
         let start = NaiveDate::from_ymd_opt(2024, 12, 18).unwrap();
-        
+
         let projections = projector.project_decay(25800.0, expiry, OptionType::Call, start, 7);
-        
+
         assert_eq!(projections.len(), 8);
         // Theta should increase as we approach expiry (more negative)
         assert!(projections.last().unwrap().theta < projections.first().unwrap().theta);
@@ -453,21 +487,27 @@ mod tests {
     #[test]
     fn test_mean_reversion_signal() {
         let mut signal_gen = IVMeanReversionSignal::new(30, 1.5);
-        
+
         // Add historical IV data around 15%
         for i in 0..30 {
             signal_gen.add_observation(Utc::now(), 0.15 + (i as f64 * 0.001));
         }
-        
+
         // Test low IV signal
         let signal = signal_gen.generate_signal(0.10);
         assert!(signal.is_some());
-        assert_eq!(signal.unwrap().signal, MeanReversionDirection::BuyVolatility);
-        
+        assert_eq!(
+            signal.unwrap().signal,
+            MeanReversionDirection::BuyVolatility
+        );
+
         // Test high IV signal
         let signal = signal_gen.generate_signal(0.25);
         assert!(signal.is_some());
-        assert_eq!(signal.unwrap().signal, MeanReversionDirection::SellVolatility);
+        assert_eq!(
+            signal.unwrap().signal,
+            MeanReversionDirection::SellVolatility
+        );
     }
 
     #[test]
@@ -477,7 +517,7 @@ mod tests {
             NaiveDate::from_ymd_opt(2024, 12, 26).unwrap(),
             NaiveDate::from_ymd_opt(2025, 1, 2).unwrap(),
         ];
-        
+
         let mut iv_data = HashMap::new();
         for expiry in &expiries {
             for strike in &strikes {
@@ -485,9 +525,10 @@ mod tests {
                 iv_data.insert((*expiry, strike_key), 0.15);
             }
         }
-        
-        let surface = IVSurface3D::from_multi_expiry("NIFTY", 25800.0, &strikes, &expiries, &iv_data, 0.065);
-        
+
+        let surface =
+            IVSurface3D::from_multi_expiry("NIFTY", 25800.0, &strikes, &expiries, &iv_data, 0.065);
+
         assert_eq!(surface.strikes.len(), 5);
         assert_eq!(surface.expiries.len(), 2);
         assert_eq!(surface.iv_matrix.len(), 2);

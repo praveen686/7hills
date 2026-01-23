@@ -21,17 +21,17 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 //! - Kite Connect API: <https://kite.trade/docs/connect/v3/>
 
-use kubera_models::{MarketEvent, MarketPayload, OrderEvent, OrderPayload, OrderStatus, Side};
-use kubera_core::EventBus;
-use serde::{Serialize, Deserialize};
-use std::sync::Arc;
-use tracing::{info, warn, error};
+use async_trait::async_trait;
 use chrono::Utc;
-use uuid::Uuid;
-use std::collections::HashMap;
+use kubera_core::EventBus;
+use kubera_models::{MarketEvent, MarketPayload, OrderEvent, OrderPayload, OrderStatus, Side};
 use rand::{Rng, SeedableRng};
 use rand_pcg::Pcg64;
-use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::{error, info, warn};
+use uuid::Uuid;
 
 // ============================================================================
 // UNIFIED EXCHANGE TRAIT
@@ -61,57 +61,6 @@ pub enum ExecutionMode {
     Paper,
     /// Live order placement via broker API
     Live,
-}
-
-// =============================================================================
-// Phase 0: C++ execution simulator (L2 market-order costing)
-// Enabled via: --features cpp_exec
-// =============================================================================
-
-#[cfg(feature = "cpp_exec")]
-pub mod cpp_exec {
-    use kubera_ffi::{KuberaL2Book, MarketOrder, ExecConfig, Side, Fill, DEPTH_MAX, simulate_market_fill};
-
-    /// Convenience helper to create a book snapshot with `depth` levels.
-    /// Prices and sizes are **integer** ticks/qty.
-    pub fn make_l2_book(
-        depth: i32,
-        bid_px: &[i64],
-        bid_sz: &[i64],
-        ask_px: &[i64],
-        ask_sz: &[i64],
-    ) -> KuberaL2Book {
-        let mut book = KuberaL2Book {
-            depth,
-            bid_px: [0; DEPTH_MAX],
-            bid_sz: [0; DEPTH_MAX],
-            ask_px: [0; DEPTH_MAX],
-            ask_sz: [0; DEPTH_MAX],
-        };
-        for i in 0..(DEPTH_MAX.min(bid_px.len())) { book.bid_px[i] = bid_px[i]; }
-        for i in 0..(DEPTH_MAX.min(bid_sz.len())) { book.bid_sz[i] = bid_sz[i]; }
-        for i in 0..(DEPTH_MAX.min(ask_px.len())) { book.ask_px[i] = ask_px[i]; }
-        for i in 0..(DEPTH_MAX.min(ask_sz.len())) { book.ask_sz[i] = ask_sz[i]; }
-        book
-    }
-
-    /// Simulate a market order fill using the C++ engine.
-    ///
-    /// This is **causal**: it consumes only the current L2 snapshot.
-    pub fn simulate_l2_market_order(
-        book: &KuberaL2Book,
-        ts_ns: i64,
-        symbol_id: i32,
-        side: Side,
-        qty: i64,
-        taker_fee_bps: i64,
-        latency_ns: i64,
-        allow_partial: bool,
-    ) -> Fill {
-        let ord = MarketOrder { ts_ns, symbol_id, side, qty, max_slippage_bps: None };
-        let cfg = ExecConfig { taker_fee_bps, latency_ns, allow_partial };
-        simulate_market_fill(book, &ord, &cfg)
-    }
 }
 
 /// Internal position state for a specific asset.
@@ -255,7 +204,7 @@ pub struct RiskEvent {
     pub gross_notional_before: f64,
     pub gross_notional_after: f64,
     pub rule_triggered: String, // "MAX_ORDER", "MAX_SYMBOL", "MAX_GROSS", "NONE"
-    pub action: String,          // "CLIP", "REJECT", "PASS"
+    pub action: String,         // "CLIP", "REJECT", "PASS"
 }
 
 /// High-fidelity simulated execution venue.
@@ -296,7 +245,12 @@ impl SimulatedExchange {
     /// * `slippage_bps` - Expected price impact/cost in basis points.
     /// * `commission_model` - Fees model to apply.
     /// * `seed` - Optional seed for the PRNG to enable reproducible runs.
-    pub fn new(bus: Arc<EventBus>, slippage_bps: f64, commission_model: CommissionModel, seed: Option<u64>) -> Self {
+    pub fn new(
+        bus: Arc<EventBus>,
+        slippage_bps: f64,
+        commission_model: CommissionModel,
+        seed: Option<u64>,
+    ) -> Self {
         let rng = match seed {
             Some(s) => Pcg64::seed_from_u64(s),
             None => Pcg64::from_entropy(),
@@ -357,15 +311,22 @@ impl SimulatedExchange {
 
     /// Calculate current gross notional across all positions.
     fn gross_notional(&self) -> f64 {
-        self.positions.iter().map(|(sym, pos)| {
-            let price = self.last_prices.get(sym).copied().unwrap_or(0.0);
-            pos.quantity.abs() * price
-        }).sum()
+        self.positions
+            .iter()
+            .map(|(sym, pos)| {
+                let price = self.last_prices.get(sym).copied().unwrap_or(0.0);
+                pos.quantity.abs() * price
+            })
+            .sum()
     }
 
     /// Calculate current notional for a specific symbol.
     fn symbol_notional(&self, symbol: &str) -> f64 {
-        let pos = self.positions.get(symbol).map(|p| p.quantity.abs()).unwrap_or(0.0);
+        let pos = self
+            .positions
+            .get(symbol)
+            .map(|p| p.quantity.abs())
+            .unwrap_or(0.0);
         let price = self.last_prices.get(symbol).copied().unwrap_or(0.0);
         pos * price
     }
@@ -373,7 +334,13 @@ impl SimulatedExchange {
     /// Enforce risk envelope on an order, returning the accepted quantity.
     ///
     /// Returns (accepted_qty, rule_triggered, action).
-    fn enforce_risk(&mut self, symbol: &str, side: Side, requested_qty: f64, price: f64) -> (f64, String, String) {
+    fn enforce_risk(
+        &mut self,
+        symbol: &str,
+        side: Side,
+        requested_qty: f64,
+        price: f64,
+    ) -> (f64, String, String) {
         if !self.risk_envelope.enabled {
             return (requested_qty, "NONE".to_string(), "PASS".to_string());
         }
@@ -383,13 +350,22 @@ impl SimulatedExchange {
         let current_gross_notional = self.gross_notional();
 
         // Get current position for the symbol
-        let current_pos = self.positions.get(symbol).map(|p| p.quantity).unwrap_or(0.0);
-        let delta = if side == Side::Buy { requested_qty } else { -requested_qty };
+        let current_pos = self
+            .positions
+            .get(symbol)
+            .map(|p| p.quantity)
+            .unwrap_or(0.0);
+        let delta = if side == Side::Buy {
+            requested_qty
+        } else {
+            -requested_qty
+        };
         let new_pos = current_pos + delta;
         let new_symbol_notional = new_pos.abs() * price;
 
         // Calculate new gross notional (sum of all |position * price|)
-        let new_gross_notional = current_gross_notional - current_symbol_notional + new_symbol_notional;
+        let new_gross_notional =
+            current_gross_notional - current_symbol_notional + new_symbol_notional;
 
         // Check limits in order: ORDER -> SYMBOL -> GROSS
         // 1. Max order notional
@@ -443,7 +419,8 @@ impl SimulatedExchange {
 
         // 3. Max gross notional
         if new_gross_notional > self.risk_envelope.max_gross_notional_usd {
-            let available = self.risk_envelope.max_gross_notional_usd - current_gross_notional + current_symbol_notional;
+            let available = self.risk_envelope.max_gross_notional_usd - current_gross_notional
+                + current_symbol_notional;
             let max_qty = (available / price).max(0.0);
 
             match self.risk_envelope.mode {
@@ -475,23 +452,31 @@ impl SimulatedExchange {
             CommissionModel::Linear(bps) => turnover * (bps / 10000.0),
             CommissionModel::ZerodhaFnO => {
                 // Brokerage: Lower of 0.03% or ₹20 per executed order
-                let brokerage = ( turnover * 0.0003).min(20.0);
-                
+                let brokerage = (turnover * 0.0003).min(20.0);
+
                 // STT (Sell side only for Futures): 0.02%
-                let stt = if side == Side::Sell { turnover * 0.0002 } else { 0.0 };
-                
+                let stt = if side == Side::Sell {
+                    turnover * 0.0002
+                } else {
+                    0.0
+                };
+
                 // Transaction Charge: 0.00173% (NSE)
                 let trans_charge = turnover * 0.0000173;
-                
+
                 // SEBI: 0.00005%
                 let sebi = turnover * 0.0000005;
-                
+
                 // Stamp Duty (Buy side only): 0.002%
-                let stamp = if side == Side::Buy { turnover * 0.00002 } else { 0.0 };
-                
+                let stamp = if side == Side::Buy {
+                    turnover * 0.00002
+                } else {
+                    0.0
+                };
+
                 // GST: 18% on (Brokerage + Trans + SEBI)
                 let gst = (brokerage + trans_charge + sebi) * 0.18;
-                
+
                 brokerage + stt + trans_charge + sebi + stamp + gst
             }
         }
@@ -514,26 +499,44 @@ impl SimulatedExchange {
     /// * `event` - The order event containing the intent (New, Cancel, Modify).
     pub async fn handle_order(&mut self, event: OrderEvent) -> anyhow::Result<()> {
         match event.payload {
-            OrderPayload::New { symbol, side, price, quantity, .. } => {
+            OrderPayload::New {
+                symbol,
+                side,
+                price,
+                quantity,
+                ..
+            } => {
                 // Get price for risk enforcement (use limit price or last known price)
-                let risk_price = price.or_else(|| self.last_prices.get(&symbol).copied()).unwrap_or(0.0);
+                let risk_price = price
+                    .or_else(|| self.last_prices.get(&symbol).copied())
+                    .unwrap_or(0.0);
 
                 // Enforce risk envelope
                 let symbol_notional_before = self.symbol_notional(&symbol);
                 let gross_notional_before = self.gross_notional();
 
-                let (accepted_qty, rule_triggered, action) = self.enforce_risk(&symbol, side, quantity, risk_price);
+                let (accepted_qty, rule_triggered, action) =
+                    self.enforce_risk(&symbol, side, quantity, risk_price);
 
                 // Log risk event if envelope is enabled
                 if self.risk_envelope.enabled {
                     let order_notional = accepted_qty * risk_price;
 
                     // Calculate projected notional after fill
-                    let current_pos = self.positions.get(&symbol).map(|p| p.quantity).unwrap_or(0.0);
-                    let delta = if side == Side::Buy { accepted_qty } else { -accepted_qty };
+                    let current_pos = self
+                        .positions
+                        .get(&symbol)
+                        .map(|p| p.quantity)
+                        .unwrap_or(0.0);
+                    let delta = if side == Side::Buy {
+                        accepted_qty
+                    } else {
+                        -accepted_qty
+                    };
                     let new_pos = current_pos + delta;
                     let symbol_notional_after = new_pos.abs() * risk_price;
-                    let gross_notional_after = gross_notional_before - symbol_notional_before + symbol_notional_after;
+                    let gross_notional_after =
+                        gross_notional_before - symbol_notional_before + symbol_notional_after;
 
                     let risk_event = RiskEvent {
                         timestamp: self.current_time,
@@ -555,7 +558,10 @@ impl SimulatedExchange {
 
                 // Reject order entirely if accepted_qty is 0
                 if accepted_qty <= 0.0 {
-                    warn!("Order REJECTED by risk envelope: {} {} @ {:?}", side, symbol, price);
+                    warn!(
+                        "Order REJECTED by risk envelope: {} {} @ {:?}",
+                        side, symbol, price
+                    );
                     self.bus.publish_order_update(OrderEvent {
                         order_id: event.order_id,
                         intent_id: event.intent_id,
@@ -572,7 +578,10 @@ impl SimulatedExchange {
                     return Ok(());
                 }
 
-                info!("Accepted New Order: {} {} @ {:?} (qty: {:.4} of {:.4})", side, symbol, price, accepted_qty, quantity);
+                info!(
+                    "Accepted New Order: {} {} @ {:?} (qty: {:.4} of {:.4})",
+                    side, symbol, price, accepted_qty, quantity
+                );
                 let order = OrderState {
                     id: event.order_id,
                     intent_id: event.intent_id,
@@ -596,7 +605,7 @@ impl SimulatedExchange {
                         commission: 0.0,
                     },
                 })?;
-            },
+            }
             OrderPayload::Cancel => {
                 let mut cancelled = false;
                 for orders in self.pending_orders.values_mut() {
@@ -606,7 +615,7 @@ impl SimulatedExchange {
                         break;
                     }
                 }
-                
+
                 if cancelled {
                     info!("Cancelled Order: {}", event.order_id);
                     self.bus.publish_order_update(OrderEvent {
@@ -625,8 +634,11 @@ impl SimulatedExchange {
                 } else {
                     warn!("Cancel failed - order {} not found", event.order_id);
                 }
-            },
-            OrderPayload::Modify { new_price, new_quantity } => {
+            }
+            OrderPayload::Modify {
+                new_price,
+                new_quantity,
+            } => {
                 let mut modified = false;
                 for orders in self.pending_orders.values_mut() {
                     if let Some(order) = orders.iter_mut().find(|o| o.id == event.order_id) {
@@ -640,7 +652,7 @@ impl SimulatedExchange {
                         break;
                     }
                 }
-                
+
                 if modified {
                     info!("Modified Order: {}", event.order_id);
                     self.bus.publish_order_update(OrderEvent {
@@ -659,7 +671,7 @@ impl SimulatedExchange {
                 } else {
                     warn!("Modify failed - order {} not found", event.order_id);
                 }
-            },
+            }
             _ => {}
         }
         Ok(())
@@ -685,7 +697,7 @@ impl SimulatedExchange {
 
             // 1. Collect potential matches to avoid borrow checker conflicts
             let mut fills = Vec::new();
-            
+
             if let Some(orders) = self.pending_orders.get_mut(&symbol) {
                 let mut remaining_orders = Vec::new();
                 for order in orders.drain(..) {
@@ -700,13 +712,13 @@ impl SimulatedExchange {
                     if can_fill {
                         let random_factor = self.rng.gen_range(0.9..1.1);
                         let effective_slippage = self.slippage_bps * random_factor;
-                        
+
                         let slip = price * (effective_slippage / 10000.0);
                         let fill_price = match order.side {
                             Side::Buy => price + slip,
                             Side::Sell => price - slip,
                         };
-                        
+
                         fills.push((order, fill_price));
                     } else {
                         remaining_orders.push(order);
@@ -714,22 +726,38 @@ impl SimulatedExchange {
                 }
                 *orders = remaining_orders;
             }
-            
+
             // 2. Process fills outside the borrow
             for (order, fill_price) in fills {
-                info!("Simulated Fill: {} {} @ {}", order.side, order.symbol, fill_price);
-                
-                let pos = self.positions.entry(order.symbol.clone()).or_insert(PositionState { quantity: 0.0, avg_price: 0.0 });
+                info!(
+                    "Simulated Fill: {} {} @ {}",
+                    order.side, order.symbol, fill_price
+                );
+
+                let pos = self
+                    .positions
+                    .entry(order.symbol.clone())
+                    .or_insert(PositionState {
+                        quantity: 0.0,
+                        avg_price: 0.0,
+                    });
                 let side_mult = if order.side == Side::Buy { 1.0 } else { -1.0 };
-                
-                if (pos.quantity > 0.0 && order.side == Side::Buy) || (pos.quantity < 0.0 && order.side == Side::Sell) {
-                    pos.avg_price = ((pos.quantity * pos.avg_price) + (order.quantity * fill_price)) / (pos.quantity + order.quantity);
+
+                if (pos.quantity > 0.0 && order.side == Side::Buy)
+                    || (pos.quantity < 0.0 && order.side == Side::Sell)
+                {
+                    pos.avg_price = ((pos.quantity * pos.avg_price)
+                        + (order.quantity * fill_price))
+                        / (pos.quantity + order.quantity);
                 } else if pos.quantity == 0.0 {
                     pos.avg_price = fill_price;
                 }
-                
+
                 pos.quantity += side_mult * order.quantity;
-                info!("Position Update: {} quantity: {}", order.symbol, pos.quantity);
+                info!(
+                    "Position Update: {} quantity: {}",
+                    order.symbol, pos.quantity
+                );
 
                 let commission = self.calculate_commission(order.side, order.quantity, fill_price);
 
@@ -747,20 +775,22 @@ impl SimulatedExchange {
                     },
                 })?;
 
-                self.bus.publish_fill(kubera_models::FillEvent {
-                    timestamp: self.current_time,
-                    order_id: order.id,
-                    intent_id: order.intent_id,
-                    fill_id: Uuid::new_v4().to_string(),
-                    symbol: order.symbol.clone(),
-                    side: order.side,
-                    price: fill_price,
-                    quantity: order.quantity,
-                    commission,
-                    commission_asset: "INR".to_string(),
-                    venue: "SimulatedExchange".to_string(),
-                    is_final: true,
-                }).await?;
+                self.bus
+                    .publish_fill(kubera_models::FillEvent {
+                        timestamp: self.current_time,
+                        order_id: order.id,
+                        intent_id: order.intent_id,
+                        fill_id: Uuid::new_v4().to_string(),
+                        symbol: order.symbol.clone(),
+                        side: order.side,
+                        price: fill_price,
+                        quantity: order.quantity,
+                        commission,
+                        commission_asset: "INR".to_string(),
+                        venue: "SimulatedExchange".to_string(),
+                        is_final: true,
+                    })
+                    .await?;
             }
         }
         Ok(())
@@ -905,7 +935,7 @@ impl ZerodhaLiveExchange {
             ("transaction_type", transaction_type.to_string()),
             ("order_type", order_type.to_string()),
             ("quantity", (quantity as u32).to_string()),
-            ("product", "NRML".to_string()),  // F&O normal
+            ("product", "NRML".to_string()), // F&O normal
             ("validity", "DAY".to_string()),
         ];
 
@@ -913,9 +943,14 @@ impl ZerodhaLiveExchange {
             form.push(("price", format!("{:.2}", p)));
         }
 
-        let response = self.client.post(&url)
+        let response = self
+            .client
+            .post(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .form(&form)
             .send()
             .await?;
@@ -929,11 +964,15 @@ impl ZerodhaLiveExchange {
             return Err(anyhow::anyhow!("Order failed: {}", msg));
         }
 
-        let order_id = resp.data
+        let order_id = resp
+            .data
             .ok_or_else(|| anyhow::anyhow!("No order ID in response"))?
             .order_id;
 
-        info!("[ZERODHA LIVE] Order placed successfully: {} (HTTP {})", order_id, status);
+        info!(
+            "[ZERODHA LIVE] Order placed successfully: {} (HTTP {})",
+            order_id, status
+        );
         Ok(order_id)
     }
 
@@ -943,9 +982,14 @@ impl ZerodhaLiveExchange {
 
         info!("[ZERODHA LIVE] Cancelling order: {}", zerodha_order_id);
 
-        let response = self.client.delete(&url)
+        let response = self
+            .client
+            .delete(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?;
 
@@ -966,10 +1010,18 @@ impl ZerodhaLiveExchange {
         match self.commission_model {
             CommissionModel::ZerodhaFnO => {
                 let brokerage = (turnover * 0.0003).min(20.0);
-                let stt = if side == Side::Sell { turnover * 0.0002 } else { 0.0 };
+                let stt = if side == Side::Sell {
+                    turnover * 0.0002
+                } else {
+                    0.0
+                };
                 let trans_charge = turnover * 0.0000173;
                 let sebi = turnover * 0.0000005;
-                let stamp = if side == Side::Buy { turnover * 0.00002 } else { 0.0 };
+                let stamp = if side == Side::Buy {
+                    turnover * 0.00002
+                } else {
+                    0.0
+                };
                 let gst = (brokerage + trans_charge + sebi) * 0.18;
                 brokerage + stt + trans_charge + sebi + stamp + gst
             }
@@ -983,19 +1035,28 @@ impl ZerodhaLiveExchange {
 impl Exchange for ZerodhaLiveExchange {
     async fn handle_order(&mut self, event: OrderEvent) -> anyhow::Result<()> {
         match event.payload {
-            OrderPayload::New { symbol, side, price, quantity, .. } => {
+            OrderPayload::New {
+                symbol,
+                side,
+                price,
+                quantity,
+                ..
+            } => {
                 // Place REAL order
                 match self.place_order(&symbol, side, quantity, price).await {
                     Ok(zerodha_order_id) => {
                         // Track pending order
-                        self.pending_orders.insert(zerodha_order_id.clone(), PendingOrder {
-                            order_id: event.order_id,
-                            intent_id: event.intent_id,
-                            zerodha_order_id: zerodha_order_id.clone(),
-                            symbol: symbol.clone(),
-                            side,
-                            quantity,
-                        });
+                        self.pending_orders.insert(
+                            zerodha_order_id.clone(),
+                            PendingOrder {
+                                order_id: event.order_id,
+                                intent_id: event.intent_id,
+                                zerodha_order_id: zerodha_order_id.clone(),
+                                symbol: symbol.clone(),
+                                side,
+                                quantity,
+                            },
+                        );
 
                         // Publish accepted status
                         self.bus.publish_order_update(OrderEvent {
@@ -1017,7 +1078,10 @@ impl Exchange for ZerodhaLiveExchange {
                         if price.is_none() {
                             // Market order - assume filled at last price
                             // NOTE: In real production, poll /orders/{order_id} for actual fill price
-                            info!("[ZERODHA LIVE] Market order {} assumed filled (poll for actual price)", zerodha_order_id);
+                            info!(
+                                "[ZERODHA LIVE] Market order {} assumed filled (poll for actual price)",
+                                zerodha_order_id
+                            );
 
                             // The actual fill will be confirmed via order status polling
                             // For now, mark as working and let market data update position
@@ -1043,7 +1107,9 @@ impl Exchange for ZerodhaLiveExchange {
             }
             OrderPayload::Cancel => {
                 // Find and cancel the order
-                let zerodha_id = self.pending_orders.iter()
+                let zerodha_id = self
+                    .pending_orders
+                    .iter()
                     .find(|(_, po)| po.order_id == event.order_id)
                     .map(|(id, _)| id.clone());
 
@@ -1067,11 +1133,17 @@ impl Exchange for ZerodhaLiveExchange {
                         })?;
                     }
                 } else {
-                    warn!("[ZERODHA LIVE] Order {} not found for cancel", event.order_id);
+                    warn!(
+                        "[ZERODHA LIVE] Order {} not found for cancel",
+                        event.order_id
+                    );
                 }
             }
             _ => {
-                warn!("[ZERODHA LIVE] Unsupported order payload: {:?}", event.payload);
+                warn!(
+                    "[ZERODHA LIVE] Unsupported order payload: {:?}",
+                    event.payload
+                );
             }
         }
         Ok(())
@@ -1090,7 +1162,9 @@ impl Exchange for ZerodhaLiveExchange {
             // Check if any pending market orders should be marked as filled
             // This is a simplified approach - production should poll order status
             let symbol = &event.symbol;
-            let fills_to_process: Vec<_> = self.pending_orders.iter()
+            let fills_to_process: Vec<_> = self
+                .pending_orders
+                .iter()
                 .filter(|(_, po)| &po.symbol == symbol)
                 .map(|(id, po)| (id.clone(), po.order_id, po.intent_id, po.side, po.quantity))
                 .collect();
@@ -1118,20 +1192,22 @@ impl Exchange for ZerodhaLiveExchange {
                     },
                 })?;
 
-                self.bus.publish_fill(kubera_models::FillEvent {
-                    timestamp: Utc::now(),
-                    order_id,
-                    intent_id,
-                    fill_id: zerodha_id.clone(),
-                    symbol: symbol.clone(),
-                    side,
-                    price,
-                    quantity,
-                    commission,
-                    commission_asset: "INR".to_string(),
-                    venue: "Zerodha".to_string(),
-                    is_final: true,
-                }).await?;
+                self.bus
+                    .publish_fill(kubera_models::FillEvent {
+                        timestamp: Utc::now(),
+                        order_id,
+                        intent_id,
+                        fill_id: zerodha_id.clone(),
+                        symbol: symbol.clone(),
+                        side,
+                        price,
+                        quantity,
+                        commission,
+                        commission_asset: "INR".to_string(),
+                        venue: "Zerodha".to_string(),
+                        is_final: true,
+                    })
+                    .await?;
 
                 self.pending_orders.remove(&zerodha_id);
             }

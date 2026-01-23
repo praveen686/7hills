@@ -64,12 +64,12 @@ fn norm_pdf(x: f64) -> f64 {
 /// # References
 /// - Abramowitz & Stegun, Formula 7.1.26
 fn erf(x: f64) -> f64 {
-    let a1 =  0.254829592;
+    let a1 = 0.254829592;
     let a2 = -0.284496736;
-    let a3 =  1.421413741;
+    let a3 = 1.421413741;
     let a4 = -1.453152027;
-    let a5 =  1.061405429;
-    let p  =  0.3275911;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
 
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
     let x = x.abs();
@@ -97,8 +97,8 @@ fn erf(x: f64) -> f64 {
 /// # Returns
 /// Tuple (d₁, d₂) for use in Black-Scholes pricing
 fn d1_d2(spot: f64, strike: f64, time: f64, rate: f64, volatility: f64) -> (f64, f64) {
-    let d1 = ((spot / strike).ln() + (rate + volatility * volatility / 2.0) * time) 
-             / (volatility * time.sqrt());
+    let d1 = ((spot / strike).ln() + (rate + volatility * volatility / 2.0) * time)
+        / (volatility * time.sqrt());
     let d2 = d1 - volatility * time.sqrt();
     (d1, d2)
 }
@@ -122,7 +122,7 @@ fn d1_d2(spot: f64, strike: f64, time: f64, rate: f64, volatility: f64) -> (f64,
 /// # Examples
 /// ```
 /// use kubera_options::pricing::black_scholes_call;
-/// 
+///
 /// // NIFTY ATM call, 7 days to expiry, 15% IV
 /// let premium = black_scholes_call(25800.0, 25800.0, 7.0/365.0, 0.065, 0.15);
 /// assert!(premium > 100.0 && premium < 300.0);
@@ -134,7 +134,7 @@ pub fn black_scholes_call(spot: f64, strike: f64, time: f64, rate: f64, volatili
     if time <= 0.0 {
         return (spot - strike).max(0.0); // Intrinsic value at expiry
     }
-    
+
     let (d1, d2) = d1_d2(spot, strike, time, rate, volatility);
     spot * norm_cdf(d1) - strike * (-rate * time).exp() * norm_cdf(d2)
 }
@@ -161,7 +161,7 @@ pub fn black_scholes_put(spot: f64, strike: f64, time: f64, rate: f64, volatilit
     if time <= 0.0 {
         return (strike - spot).max(0.0); // Intrinsic value at expiry
     }
-    
+
     let (d1, d2) = d1_d2(spot, strike, time, rate, volatility);
     strike * (-rate * time).exp() * norm_cdf(-d2) - spot * norm_cdf(-d1)
 }
@@ -212,32 +212,32 @@ pub fn implied_volatility(
 ) -> Option<f64> {
     const MAX_ITERATIONS: u32 = 100;
     const TOLERANCE: f64 = 1e-6;
-    
+
     let mut vol = 0.20; // Initial guess: 20%
-    
+
     for _ in 0..MAX_ITERATIONS {
         let price = if is_call {
             black_scholes_call(spot, strike, time, rate, vol)
         } else {
             black_scholes_put(spot, strike, time, rate, vol)
         };
-        
+
         let diff = price - market_price;
-        
+
         if diff.abs() < TOLERANCE {
             return Some(vol);
         }
-        
+
         // Vega (sensitivity to volatility)
         let (d1, _) = d1_d2(spot, strike, time, rate, vol);
         let vega = spot * time.sqrt() * norm_pdf(d1);
-        
+
         if vega.abs() < 1e-10 {
             return None; // Avoid division by zero
         }
-        
+
         vol = vol - diff / vega;
-        
+
         // Keep vol in reasonable bounds
         if vol <= 0.001 {
             vol = 0.001;
@@ -245,7 +245,7 @@ pub fn implied_volatility(
             vol = 5.0;
         }
     }
-    
+
     None // Failed to converge
 }
 
@@ -256,8 +256,12 @@ mod tests {
     #[test]
     fn test_black_scholes_call() {
         // NIFTY at 25800, strike 25800, 7 days, 5% rate, 15% vol
-        let price = black_scholes_call(25800.0, 25800.0, 7.0/365.0, 0.05, 0.15);
-        assert!(price > 100.0 && price < 300.0, "ATM call should be around 200-250: {}", price);
+        let price = black_scholes_call(25800.0, 25800.0, 7.0 / 365.0, 0.05, 0.15);
+        assert!(
+            price > 100.0 && price < 300.0,
+            "ATM call should be around 200-250: {}",
+            price
+        );
     }
 
     #[test]
@@ -268,13 +272,18 @@ mod tests {
         let time = 30.0 / 365.0;
         let rate = 0.05;
         let vol = 0.18;
-        
+
         let call = black_scholes_call(spot, strike, time, rate, vol);
         let put = black_scholes_put(spot, strike, time, rate, vol);
         let parity = call - put;
         let expected = spot - strike * (-rate * time).exp();
-        
-        assert!((parity - expected).abs() < 1.0, "Put-call parity violated: {} vs {}", parity, expected);
+
+        assert!(
+            (parity - expected).abs() < 1.0,
+            "Put-call parity violated: {} vs {}",
+            parity,
+            expected
+        );
     }
 
     #[test]
@@ -284,10 +293,15 @@ mod tests {
         let time = 7.0 / 365.0;
         let rate = 0.05;
         let vol = 0.15;
-        
+
         let price = black_scholes_call(spot, strike, time, rate, vol);
         let iv = implied_volatility(price, spot, strike, time, rate, true).unwrap();
-        
-        assert!((iv - vol).abs() < 0.001, "IV should match original vol: {} vs {}", iv, vol);
+
+        assert!(
+            (iv - vol).abs() < 0.001,
+            "IV should match original vol: {} vs {}",
+            iv,
+            vol
+        );
     }
 }

@@ -92,28 +92,32 @@ impl MultiLegOrder {
     /// * `strategy` - The strategy model to execute.
     /// * `lot_size` - Units per contract.
     /// * `exchange` - Destination venue.
-    pub fn from_strategy(
-        strategy: &OptionsStrategy,
-        lot_size: u32,
-        exchange: &str,
-    ) -> Self {
-        let legs = strategy.legs.iter().map(|leg| {
-            let side = if leg.quantity > 0 { LegSide::Buy } else { LegSide::Sell };
-            
-            LegOrder {
-                tradingsymbol: leg.contract.tradingsymbol.clone(),
-                exchange: exchange.to_string(),
-                side,
-                quantity: (leg.quantity.abs() as u32) * lot_size,
-                order_type: LegOrderType::Market,
-                price: None,
-            }
-        }).collect();
+    pub fn from_strategy(strategy: &OptionsStrategy, lot_size: u32, exchange: &str) -> Self {
+        let legs = strategy
+            .legs
+            .iter()
+            .map(|leg| {
+                let side = if leg.quantity > 0 {
+                    LegSide::Buy
+                } else {
+                    LegSide::Sell
+                };
+
+                LegOrder {
+                    tradingsymbol: leg.contract.tradingsymbol.clone(),
+                    exchange: exchange.to_string(),
+                    side,
+                    quantity: (leg.quantity.abs() as u32) * lot_size,
+                    order_type: LegOrderType::Market,
+                    price: None,
+                }
+            })
+            .collect();
 
         Self {
             strategy_name: strategy.name.clone(),
             legs,
-            total_margin_required: 0.0, 
+            total_margin_required: 0.0,
         }
     }
 
@@ -177,7 +181,11 @@ impl MultiLegExecutor {
         let body = response.text().await?;
 
         if !status.is_success() {
-            anyhow::bail!("[LIVE FILL] Kite order history failed: status={} body={}", status, body);
+            anyhow::bail!(
+                "[LIVE FILL] Kite order history failed: status={} body={}",
+                status,
+                body
+            );
         }
 
         Ok(serde_json::from_str::<serde_json::Value>(&body)?)
@@ -192,11 +200,14 @@ impl MultiLegExecutor {
         timeout_ms: u64,
         interval_ms: u64,
     ) -> anyhow::Result<(LegStatus, Option<f64>, u32)> {
-        use tokio::time::{sleep, Duration, Instant};
+        use tokio::time::{Duration, Instant, sleep};
         use tracing::debug;
 
         let deadline = Instant::now() + Duration::from_millis(timeout_ms.max(1));
-        debug!("[LIVE FILL CONFIRMATION] Polling order {} (timeout={}ms)", order_id, timeout_ms);
+        debug!(
+            "[LIVE FILL CONFIRMATION] Polling order {} (timeout={}ms)",
+            order_id, timeout_ms
+        );
 
         loop {
             let v = self.fetch_order_history(order_id).await?;
@@ -243,13 +254,18 @@ impl MultiLegExecutor {
                     LegStatus::Cancelled
                 };
 
-                debug!("[LIVE FILL CONFIRMATION] Order {} terminal: {:?} avg_price={:?} filled={}",
-                       order_id, st, avg_price, filled_qty);
+                debug!(
+                    "[LIVE FILL CONFIRMATION] Order {} terminal: {:?} avg_price={:?} filled={}",
+                    order_id, st, avg_price, filled_qty
+                );
                 return Ok((st, avg_price, filled_qty));
             }
 
             if Instant::now() >= deadline {
-                debug!("[LIVE FILL CONFIRMATION] Order {} timeout (not terminal)", order_id);
+                debug!(
+                    "[LIVE FILL CONFIRMATION] Order {} timeout (not terminal)",
+                    order_id
+                );
                 // Not terminal: fail-safe; caller decides whether to cancel or abort.
                 return Ok((LegStatus::Placed, avg_price, filled_qty));
             }
@@ -261,13 +277,13 @@ impl MultiLegExecutor {
     /// Synchronizes the execution of all strategy components.
     ///
     /// # Rollback Logic
-    /// If any leg fails to place, previously placed legs are immediately 
+    /// If any leg fails to place, previously placed legs are immediately
     /// targeted for cancellation to minimize "leg risk".
     pub async fn execute(&self, order: &MultiLegOrder) -> MultiLegResult {
-        use tracing::{info, error, warn};
-        
+        use tracing::{error, info, warn};
+
         info!(strategy = %order.strategy_name, legs = order.legs.len(), "Executing multi-leg order");
-        
+
         let mut leg_results = Vec::new();
         let mut all_success = true;
         #[allow(unused_variables)]
@@ -275,8 +291,8 @@ impl MultiLegExecutor {
 
         for (i, leg) in order.legs.iter().enumerate() {
             info!(
-                leg = i + 1, 
-                symbol = %leg.tradingsymbol, 
+                leg = i + 1,
+                symbol = %leg.tradingsymbol,
                 side = ?leg.side,
                 quantity = leg.quantity,
                 "Placing leg"
@@ -300,12 +316,15 @@ impl MultiLegExecutor {
 
                     // ======= LIVE FILL CONFIRMATION =======
                     // Do not assume fill. Poll broker until terminal status.
-                    let (final_status, final_fill_price, filled_qty) = match self.poll_fill_confirmation(
-                        &order_id,
-                        leg.quantity,
-                        Self::DEFAULT_POLL_TIMEOUT_MS,
-                        Self::DEFAULT_POLL_INTERVAL_MS,
-                    ).await {
+                    let (final_status, final_fill_price, filled_qty) = match self
+                        .poll_fill_confirmation(
+                            &order_id,
+                            leg.quantity,
+                            Self::DEFAULT_POLL_TIMEOUT_MS,
+                            Self::DEFAULT_POLL_INTERVAL_MS,
+                        )
+                        .await
+                    {
                         Ok((st, avg_price, qty)) => (st, avg_price, qty),
                         Err(e) => {
                             warn!(order_id = %order_id, error = %e, "Fill confirmation failed");
@@ -314,8 +333,10 @@ impl MultiLegExecutor {
                     };
 
                     let final_error = if !matches!(final_status, LegStatus::Filled) {
-                        Some(format!("Order not fully filled: status={:?} filled_qty={} expected_qty={}",
-                                     final_status, filled_qty, leg.quantity))
+                        Some(format!(
+                            "Order not fully filled: status={:?} filled_qty={} expected_qty={}",
+                            final_status, filled_qty, leg.quantity
+                        ))
                     } else {
                         None
                     };
@@ -357,7 +378,7 @@ impl MultiLegExecutor {
                         fill_price: None,
                         error: Some(e.to_string()),
                     });
-                    
+
                     warn!("Initiating rollback of {} placed legs", i);
                     for prev_result in leg_results.iter().take(i) {
                         if let Some(ref order_id) = prev_result.order_id {
@@ -381,17 +402,17 @@ impl MultiLegExecutor {
 
     async fn place_leg(&self, leg: &LegOrder) -> anyhow::Result<String> {
         let url = "https://api.kite.trade/orders/regular";
-        
+
         let transaction_type = match leg.side {
             LegSide::Buy => "BUY",
             LegSide::Sell => "SELL",
         };
-        
+
         let order_type = match leg.order_type {
             LegOrderType::Market => "MARKET",
             LegOrderType::Limit => "LIMIT",
         };
- 
+
         let mut form = vec![
             ("tradingsymbol", leg.tradingsymbol.clone()),
             ("exchange", leg.exchange.clone()),
@@ -406,17 +427,25 @@ impl MultiLegExecutor {
             form.push(("price", price.to_string()));
         }
 
-        let response = self.client.post(url)
+        let response = self
+            .client
+            .post(url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .form(&form)
             .send()
             .await?;
 
         let resp: serde_json::Value = response.json().await?;
-        
+
         if resp["status"] == "success" {
-            Ok(resp["data"]["order_id"].as_str().unwrap_or("unknown").to_string())
+            Ok(resp["data"]["order_id"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string())
         } else {
             let msg = resp["message"].as_str().unwrap_or("Unknown error");
             Err(anyhow::anyhow!("Order failed: {}", msg))
@@ -425,15 +454,20 @@ impl MultiLegExecutor {
 
     async fn cancel_order(&self, order_id: &str) -> anyhow::Result<()> {
         let url = format!("https://api.kite.trade/orders/regular/{}", order_id);
-        
-        let response = self.client.delete(&url)
+
+        let response = self
+            .client
+            .delete(&url)
             .header("X-Kite-Version", "3")
-            .header("Authorization", format!("token {}:{}", self.api_key, self.access_token))
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
             .send()
             .await?;
 
         let resp: serde_json::Value = response.json().await?;
-        
+
         if resp["status"] == "success" {
             Ok(())
         } else {
@@ -472,14 +506,17 @@ impl PositionManager {
     /// # Average Price Logic
     /// Uses volume-weighted average price (VWAP) for accumulating positions.
     pub fn on_fill(&mut self, tradingsymbol: &str, quantity: i32, price: f64, product: &str) {
-        let pos = self.positions.entry(tradingsymbol.to_string()).or_insert(Position {
-            tradingsymbol: tradingsymbol.to_string(),
-            quantity: 0,
-            average_price: 0.0,
-            last_price: price,
-            pnl: 0.0,
-            product: product.to_string(),
-        });
+        let pos = self
+            .positions
+            .entry(tradingsymbol.to_string())
+            .or_insert(Position {
+                tradingsymbol: tradingsymbol.to_string(),
+                quantity: 0,
+                average_price: 0.0,
+                last_price: price,
+                pnl: 0.0,
+                product: product.to_string(),
+            });
 
         if pos.quantity == 0 {
             pos.average_price = price;
@@ -488,10 +525,10 @@ impl PositionManager {
             let total_qty = pos.quantity + quantity;
             pos.average_price = total_value / total_qty as f64;
         }
-        
+
         pos.quantity += quantity;
         pos.last_price = price;
-        
+
         if pos.quantity == 0 {
             self.positions.remove(tradingsymbol);
         }
@@ -530,15 +567,15 @@ mod tests {
     #[test]
     fn test_position_manager_on_fill() {
         let mut pm = PositionManager::new();
-        
+
         // Buy 50 @ 100
         pm.on_fill("NIFTY25D2525800CE", 50, 100.0, "NRML");
         assert_eq!(pm.net_quantity(), 50);
-        
+
         // Buy 50 more @ 120
         pm.on_fill("NIFTY25D2525800CE", 50, 120.0, "NRML");
         assert_eq!(pm.net_quantity(), 100);
-        
+
         // Average should be 110
         let pos = pm.positions.get("NIFTY25D2525800CE").unwrap();
         assert!((pos.average_price - 110.0).abs() < 0.01);
@@ -547,19 +584,19 @@ mod tests {
     #[test]
     fn test_position_manager_flatten() {
         let mut pm = PositionManager::new();
-        
+
         pm.on_fill("NIFTY25D2525800CE", 50, 100.0, "NRML");
         pm.on_fill("NIFTY25D2525800CE", -50, 110.0, "NRML");
-        
+
         assert_eq!(pm.net_quantity(), 0);
         assert!(pm.positions.is_empty());
     }
 
     #[tokio::test]
     async fn test_multi_leg_dry_run() {
-        let executor = MultiLegExecutor::new("test".to_string(), "test".to_string())
-            .with_dry_run(true);
-        
+        let executor =
+            MultiLegExecutor::new("test".to_string(), "test".to_string()).with_dry_run(true);
+
         let order = MultiLegOrder {
             strategy_name: "Test Straddle".to_string(),
             legs: vec![
@@ -582,7 +619,7 @@ mod tests {
             ],
             total_margin_required: 50000.0,
         };
-        
+
         let result = executor.execute(&order).await;
         assert!(result.all_filled);
         assert_eq!(result.leg_results.len(), 2);

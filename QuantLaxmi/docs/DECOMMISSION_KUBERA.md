@@ -18,6 +18,10 @@ The QuantKubera project and legacy kubera-* crates are being systematically reti
 | `kubera-runner` | Workspace crate | **DELETED** | 2026-01-23 |
 | `kubera-connectors` | Workspace crate | **DELETED** | 2026-01-23 |
 | `kubera-executor-cpp` | Orphaned directory | **DELETED** | 2026-01-23 |
+| `kubera-backtest` | Workspace crate | **DELETED** | 2026-01-23 |
+| `kubera-mlflow` | Workspace crate | **DELETED** | 2026-01-23 |
+| `kubera-ffi` | Workspace crate | **DELETED** | 2026-01-23 |
+| `kubera-strategy-host` | Workspace crate | **DELETED** | 2026-01-23 |
 
 ---
 
@@ -34,10 +38,6 @@ The following crates remain as foundational infrastructure. They are used throug
 | `kubera-risk` | India runner | Foundational, keep for now |
 | `kubera-options` | India/Crypto runners | Core options logic (SANOS, KiteSim, pricing) |
 | `kubera-sbe` | Crypto runner | Binance SBE codec |
-| `kubera-backtest` | Backtest tools | Backtest infrastructure |
-| `kubera-mlflow` | Experiment tracking | MLflow integration |
-| `kubera-ffi` | FFI bindings | Foreign function interface |
-| `kubera-strategy-host` | Strategy hosting | Strategy runtime |
 
 ---
 
@@ -48,6 +48,10 @@ The following crates remain as foundational infrastructure. They are used throug
 The following crates are **permanently banned**:
 - `kubera-runner`
 - `kubera-connectors`
+- `kubera-backtest`
+- `kubera-mlflow`
+- `kubera-ffi`
+- `kubera-strategy-host`
 
 CI will fail if these crates reappear in the workspace.
 

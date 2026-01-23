@@ -17,14 +17,14 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 //! - Apache Parquet Columnar Format Spec
 
-use kubera_models::{MarketEvent, MarketPayload};
 use arrow::array::{Float64Array, StringArray, TimestampNanosecondArray};
-use arrow::record_batch::RecordBatch;
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::record_batch::RecordBatch;
+use kubera_models::{MarketEvent, MarketPayload};
 use parquet::arrow::arrow_writer::ArrowWriter;
 use std::fs::File;
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 
 /// High-throughput Parquet storage engine.
 ///
@@ -80,8 +80,16 @@ impl ParquetExporter {
         }
 
         let schema = Arc::new(Schema::new(vec![
-            Field::new("exchange_time", DataType::Timestamp(TimeUnit::Nanosecond, None), false),
-            Field::new("local_time", DataType::Timestamp(TimeUnit::Nanosecond, None), false),
+            Field::new(
+                "exchange_time",
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+            Field::new(
+                "local_time",
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
             Field::new("symbol", DataType::Utf8, false),
             Field::new("price", DataType::Float64, false),
             Field::new("size", DataType::Float64, false),
@@ -136,7 +144,11 @@ impl ParquetExporter {
         }
 
         let schema = Arc::new(Schema::new(vec![
-            Field::new("timestamp", DataType::Timestamp(TimeUnit::Nanosecond, None), false),
+            Field::new(
+                "timestamp",
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
             Field::new("symbol", DataType::Utf8, false),
             Field::new("open", DataType::Float64, false),
             Field::new("high", DataType::Float64, false),
@@ -156,7 +168,15 @@ impl ParquetExporter {
         let mut intervals = Vec::new();
 
         for event in &self.bars_buffer {
-            if let MarketPayload::Bar { open, high, low, close, volume, interval_ms } = &event.payload {
+            if let MarketPayload::Bar {
+                open,
+                high,
+                low,
+                close,
+                volume,
+                interval_ms,
+            } = &event.payload
+            {
                 timestamps.push(event.exchange_time.timestamp_nanos_opt().unwrap_or(0));
                 symbols.push(event.symbol.as_str());
                 opens.push(*open);

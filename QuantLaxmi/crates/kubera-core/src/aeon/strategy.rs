@@ -21,15 +21,17 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
-use std::sync::Arc;
+use kubera_models::{
+    MarketEvent, MarketPayload, OrderEvent, OrderPayload, OrderStatus, Side, SignalEvent,
+};
 use std::collections::VecDeque;
-use tracing::{info, debug, warn};
-use kubera_models::{MarketEvent, MarketPayload, Side, SignalEvent, OrderEvent, OrderPayload, OrderStatus};
+use std::sync::Arc;
+use tracing::{debug, info, warn};
 
-use crate::{Strategy, EventBus};
-use crate::aeon::{AeonConfig, BifIndicator};
 use crate::aeon::fti::FtiEngine;
-use crate::hydra::{HydraStrategy, HydraConfig};
+use crate::aeon::{AeonConfig, BifIndicator};
+use crate::hydra::{HydraConfig, HydraStrategy};
+use crate::{EventBus, Strategy};
 
 /// AEON: The flagship meta-strategy combining information theory and structural analysis.
 pub struct AeonStrategy {
@@ -121,8 +123,14 @@ impl AeonStrategy {
 
             debug!(
                 "[AEON] Emitting signal: {} {} @ {:.2}, qty={:.4}, target_pos={:.4}",
-                match side { Side::Buy => "BUY", Side::Sell => "SELL" },
-                symbol, price, quantity, self.target_position
+                match side {
+                    Side::Buy => "BUY",
+                    Side::Sell => "SELL",
+                },
+                symbol,
+                price,
+                quantity,
+                self.target_position
             );
 
             if let Err(e) = bus.publish_signal_sync(signal) {
@@ -148,12 +156,20 @@ impl AeonStrategy {
             // AEON gates closed - flatten any open position
             if self.position.abs() > 0.01 {
                 let flatten_qty = self.position.abs();
-                let side = if self.position > 0.0 { Side::Sell } else { Side::Buy };
+                let side = if self.position > 0.0 {
+                    Side::Sell
+                } else {
+                    Side::Buy
+                };
 
                 info!(
                     "[AEON] Gating closed - flattening position: {} {:.4} @ {:.2}",
-                    match side { Side::Buy => "BUY", Side::Sell => "SELL" },
-                    flatten_qty, price
+                    match side {
+                        Side::Buy => "BUY",
+                        Side::Sell => "SELL",
+                    },
+                    flatten_qty,
+                    price
                 );
 
                 self.emit_signal(symbol, side, price, flatten_qty);
@@ -163,11 +179,11 @@ impl AeonStrategy {
 
         // AEON gates open - determine position sizing based on regime
         let regime_multiplier = if is_trend {
-            1.2  // Boost in trending regimes
+            1.2 // Boost in trending regimes
         } else if is_mean_rev {
-            1.0  // Normal in mean-reverting
+            1.0 // Normal in mean-reverting
         } else {
-            0.5  // Reduce in unclear regimes
+            0.5 // Reduce in unclear regimes
         };
 
         // Let HYDRA handle the actual signal generation with regime context
@@ -191,7 +207,10 @@ impl AeonStrategy {
 
 impl Strategy for AeonStrategy {
     fn on_start(&mut self, bus: Arc<EventBus>) {
-        info!("[AEON] Sentry Online. Gating threshold: {}", self.config.bif_predictability_threshold);
+        info!(
+            "[AEON] Sentry Online. Gating threshold: {}",
+            self.config.bif_predictability_threshold
+        );
         self.bus = Some(bus.clone());
         self.hydra.on_start(bus);
     }
@@ -225,7 +244,10 @@ impl Strategy for AeonStrategy {
         let should_trade = predictability >= self.config.bif_predictability_threshold;
 
         if !should_trade {
-            debug!("[AEON] Market High Entropy ({:.3}). Sentry active - idling.", predictability);
+            debug!(
+                "[AEON] Market High Entropy ({:.3}). Sentry active - idling.",
+                predictability
+            );
             // Manage position when gates close (may flatten)
             self.manage_position(false, 0.0, price, &event.symbol.clone());
             return;
@@ -248,8 +270,10 @@ impl Strategy for AeonStrategy {
         let is_trend = fti_score > self.config.fti_trend_threshold;
         let is_mean_rev = fti_score < self.config.fti_mean_rev_threshold;
 
-        debug!("[AEON] Predictability: {:.3} | FTI: {:.2} | Trend: {} | MeanRev: {} | Pos: {:.4}",
-            predictability, fti_score, is_trend, is_mean_rev, self.position);
+        debug!(
+            "[AEON] Predictability: {:.3} | FTI: {:.2} | Trend: {} | MeanRev: {} | Pos: {:.4}",
+            predictability, fti_score, is_trend, is_mean_rev, self.position
+        );
 
         // Track peak equity for drawdown monitoring
         let current_equity = self.realized_pnl + (self.position * price);
@@ -273,7 +297,13 @@ impl Strategy for AeonStrategy {
 
     fn on_fill(&mut self, fill: &OrderEvent) {
         // Update AEON's position tracking from fills
-        if let OrderPayload::Update { status, filled_quantity, avg_price, .. } = &fill.payload {
+        if let OrderPayload::Update {
+            status,
+            filled_quantity,
+            avg_price,
+            ..
+        } = &fill.payload
+        {
             if *status == OrderStatus::Filled {
                 let signed_qty = match fill.side {
                     Side::Buy => *filled_quantity,
@@ -302,7 +332,9 @@ impl Strategy for AeonStrategy {
                 debug!(
                     "[AEON] Fill received: {} {:.4} @ {:.2}, New Position: {:.4}",
                     if signed_qty > 0.0 { "BUY" } else { "SELL" },
-                    filled_quantity, avg_price, self.position
+                    filled_quantity,
+                    avg_price,
+                    self.position
                 );
             }
         }

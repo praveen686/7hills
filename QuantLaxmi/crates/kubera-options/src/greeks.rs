@@ -27,14 +27,21 @@ mod tests {
         let put_greeks = OptionGreeks::for_put(spot, strike, time, rate, vol);
         let straddle = call_greeks.add(&put_greeks);
 
-        assert!(straddle.delta.abs() < 0.1, "ATM straddle delta should be near zero: {}", straddle.delta);
+        assert!(
+            straddle.delta.abs() < 0.1,
+            "ATM straddle delta should be near zero: {}",
+            straddle.delta
+        );
         assert!(straddle.gamma > 0.0, "Straddle should have positive gamma");
         assert!(straddle.vega > 0.0, "Straddle should have positive vega");
     }
 
     #[test]
     fn test_call_delta_range() {
-        let greeks = OptionGreeks::for_call(25800.0, 25800.0, 30.0/365.0, 0.05, 0.18);
-        assert!(greeks.delta > 0.0 && greeks.delta < 1.0, "Call delta should be between 0 and 1");
+        let greeks = OptionGreeks::for_call(25800.0, 25800.0, 30.0 / 365.0, 0.05, 0.18);
+        assert!(
+            greeks.delta > 0.0 && greeks.delta < 1.0,
+            "Call delta should be between 0 and 1"
+        );
     }
 }

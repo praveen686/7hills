@@ -210,7 +210,10 @@ pub fn shrink_weights_toward_uniform(
     let alpha = gap.clamp(0.0, 1.0).min(max_alpha.clamp(0.0, 1.0));
     let uni = 1.0 / (n as f64);
 
-    let mut out: Vec<f64> = weights.iter().map(|w| (1.0 - alpha) * *w + alpha * uni).collect();
+    let mut out: Vec<f64> = weights
+        .iter()
+        .map(|w| (1.0 - alpha) * *w + alpha * uni)
+        .collect();
     // re-normalize
     let s: f64 = out.iter().sum();
     if s > 0.0 {

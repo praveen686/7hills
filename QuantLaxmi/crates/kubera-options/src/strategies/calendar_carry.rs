@@ -77,7 +77,7 @@ pub struct FrozenParams {
 pub const FROZEN_PARAMS: FrozenParams = FrozenParams {
     decision_interval_secs: 60,
     lambda: 1.5,
-    edge_abs_rupees: 8.0,  // Phase 9: absolute edge floor (Lead approved)
+    edge_abs_rupees: 8.0, // Phase 9: absolute edge floor (Lead approved)
     risk_bps: 7.5,
     max_lots: 2,
     h_min: 0.5,
@@ -95,12 +95,12 @@ pub const FROZEN_PARAMS: FrozenParams = FrozenParams {
     exit_minutes_before_close: 15,
     quote_staleness_secs: 120,
     // Phase 9 Completion: Economic hardeners (Lead approved 2026-01-23)
-    gap_abs_nifty: 12.0,      // E1: minimum premium gap NIFTY (₹)
-    gap_abs_banknifty: 25.0,  // E1: minimum premium gap BANKNIFTY (₹)
-    mu_friction: 6.0,         // E2: gap_premium >= μ × friction_round
+    gap_abs_nifty: 12.0,     // E1: minimum premium gap NIFTY (₹)
+    gap_abs_banknifty: 25.0, // E1: minimum premium gap BANKNIFTY (₹)
+    mu_friction: 6.0,        // E2: gap_premium >= μ × friction_round
     // Phase 9.2: Friction floor (conservative safety bound)
-    floor_friction_round_nifty: 10.0,      // E3: minimum realistic friction NIFTY (₹)
-    floor_friction_round_banknifty: 25.0,  // E3: minimum realistic friction BANKNIFTY (₹)
+    floor_friction_round_nifty: 10.0, // E3: minimum realistic friction NIFTY (₹)
+    floor_friction_round_banknifty: 25.0, // E3: minimum realistic friction BANKNIFTY (₹)
 };
 
 // ============================================================================
@@ -235,19 +235,43 @@ pub struct GateResult {
 
 impl GateResult {
     pub fn pass(name: &str) -> Self {
-        Self { name: name.to_string(), passed: true, value: None, threshold: None, reason: None }
+        Self {
+            name: name.to_string(),
+            passed: true,
+            value: None,
+            threshold: None,
+            reason: None,
+        }
     }
 
     pub fn pass_with_value(name: &str, value: f64) -> Self {
-        Self { name: name.to_string(), passed: true, value: Some(value), threshold: None, reason: None }
+        Self {
+            name: name.to_string(),
+            passed: true,
+            value: Some(value),
+            threshold: None,
+            reason: None,
+        }
     }
 
     pub fn fail(name: &str, reason: &str) -> Self {
-        Self { name: name.to_string(), passed: false, value: None, threshold: None, reason: Some(reason.to_string()) }
+        Self {
+            name: name.to_string(),
+            passed: false,
+            value: None,
+            threshold: None,
+            reason: Some(reason.to_string()),
+        }
     }
 
     pub fn fail_with_values(name: &str, reason: &str, value: f64, threshold: f64) -> Self {
-        Self { name: name.to_string(), passed: false, value: Some(value), threshold: Some(threshold), reason: Some(reason.to_string()) }
+        Self {
+            name: name.to_string(),
+            passed: false,
+            value: Some(value),
+            threshold: Some(threshold),
+            reason: Some(reason.to_string()),
+        }
     }
 }
 
@@ -287,18 +311,42 @@ impl GateCheckResult {
     }
 
     pub fn first_failure_reason(&self) -> Option<String> {
-        if !self.h1_surface.passed { return self.h1_surface.reason.clone(); }
-        if !self.h2_calendar.passed { return self.h2_calendar.reason.clone(); }
-        if !self.h3_quote_front.passed { return self.h3_quote_front.reason.clone(); }
-        if !self.h3_quote_back.passed { return self.h3_quote_back.reason.clone(); }
-        if !self.h4_liquidity_front.passed { return self.h4_liquidity_front.reason.clone(); }
-        if !self.h4_liquidity_back.passed { return self.h4_liquidity_back.reason.clone(); }
-        if !self.carry.passed { return self.carry.reason.clone(); }
-        if !self.r1_inversion.passed { return self.r1_inversion.reason.clone(); }
-        if !self.r2_skew.passed { return self.r2_skew.reason.clone(); }
-        if !self.e1_premium_gap.passed { return self.e1_premium_gap.reason.clone(); }
-        if !self.e2_friction_dominance.passed { return self.e2_friction_dominance.reason.clone(); }
-        if !self.e3_friction_floor.passed { return self.e3_friction_floor.reason.clone(); }
+        if !self.h1_surface.passed {
+            return self.h1_surface.reason.clone();
+        }
+        if !self.h2_calendar.passed {
+            return self.h2_calendar.reason.clone();
+        }
+        if !self.h3_quote_front.passed {
+            return self.h3_quote_front.reason.clone();
+        }
+        if !self.h3_quote_back.passed {
+            return self.h3_quote_back.reason.clone();
+        }
+        if !self.h4_liquidity_front.passed {
+            return self.h4_liquidity_front.reason.clone();
+        }
+        if !self.h4_liquidity_back.passed {
+            return self.h4_liquidity_back.reason.clone();
+        }
+        if !self.carry.passed {
+            return self.carry.reason.clone();
+        }
+        if !self.r1_inversion.passed {
+            return self.r1_inversion.reason.clone();
+        }
+        if !self.r2_skew.passed {
+            return self.r2_skew.reason.clone();
+        }
+        if !self.e1_premium_gap.passed {
+            return self.e1_premium_gap.reason.clone();
+        }
+        if !self.e2_friction_dominance.passed {
+            return self.e2_friction_dominance.reason.clone();
+        }
+        if !self.e3_friction_floor.passed {
+            return self.e3_friction_floor.reason.clone();
+        }
         None
     }
 }
@@ -315,8 +363,8 @@ pub struct EnterIntent {
     pub back_expiry: String,
     pub front_strike: f64,
     pub back_strike: f64,
-    pub front_lots: i32,  // negative = short
-    pub back_lots: i32,   // positive = long
+    pub front_lots: i32, // negative = short
+    pub back_lots: i32,  // positive = long
     pub hedge_ratio: f64,
     pub h_clamped: bool,
     pub cal_value: f64,
@@ -391,7 +439,9 @@ impl Default for CalendarCarryStrategy {
 
 impl CalendarCarryStrategy {
     pub fn new() -> Self {
-        Self { params: &FROZEN_PARAMS }
+        Self {
+            params: &FROZEN_PARAMS,
+        }
     }
 
     /// Main evaluation function — deterministic decision per tick
@@ -400,14 +450,13 @@ impl CalendarCarryStrategy {
         let audit_base = self.build_audit_base(ctx, &gates);
 
         if !gates.all_passed() {
-            let reason = gates.first_failure_reason().unwrap_or_else(|| "UNKNOWN_GATE_FAILURE".to_string());
+            let reason = gates
+                .first_failure_reason()
+                .unwrap_or_else(|| "UNKNOWN_GATE_FAILURE".to_string());
             let mut audit = audit_base;
             audit.decision = "NO_TRADE".to_string();
             audit.reason_code = Some(reason.clone());
-            return (
-                StrategyDecision::NoTrade { reason, gates },
-                audit,
-            );
+            return (StrategyDecision::NoTrade { reason, gates }, audit);
         }
 
         // All gates passed — construct trade
@@ -500,21 +549,29 @@ impl CalendarCarryStrategy {
         };
 
         match cal {
-            Some(c) if c >= -self.params.tol_cal => {
-                GateResult::pass_with_value("H2_CALENDAR", c)
-            }
-            Some(c) => {
-                GateResult::fail_with_values("H2_CALENDAR", "CALENDAR_VIOLATION", c, -self.params.tol_cal)
-            }
-            None => {
-                GateResult::fail("H2_CALENDAR", "CALENDAR_DATA_MISSING")
-            }
+            Some(c) if c >= -self.params.tol_cal => GateResult::pass_with_value("H2_CALENDAR", c),
+            Some(c) => GateResult::fail_with_values(
+                "H2_CALENDAR",
+                "CALENDAR_VIOLATION",
+                c,
+                -self.params.tol_cal,
+            ),
+            None => GateResult::fail("H2_CALENDAR", "CALENDAR_DATA_MISSING"),
         }
     }
 
     /// H3: Quote sanity
-    fn check_h3_quote(&self, straddle: &StraddleQuotes, now: DateTime<Utc>, leg: &'static str) -> GateResult {
-        let name = if leg == "FRONT" { "H3_QUOTE_FRONT" } else { "H3_QUOTE_BACK" };
+    fn check_h3_quote(
+        &self,
+        straddle: &StraddleQuotes,
+        now: DateTime<Utc>,
+        leg: &'static str,
+    ) -> GateResult {
+        let name = if leg == "FRONT" {
+            "H3_QUOTE_FRONT"
+        } else {
+            "H3_QUOTE_BACK"
+        };
 
         if !straddle.is_valid() {
             return GateResult::fail(name, "QUOTE_INVALID");
@@ -526,7 +583,7 @@ impl CalendarCarryStrategy {
                 name,
                 "QUOTE_STALE",
                 staleness as f64,
-                self.params.quote_staleness_secs as f64
+                self.params.quote_staleness_secs as f64,
             );
         }
 
@@ -534,16 +591,31 @@ impl CalendarCarryStrategy {
     }
 
     /// H4: Liquidity ceiling
-    fn check_h4_liquidity(&self, straddle: &StraddleQuotes, is_nifty: bool, is_front: bool) -> GateResult {
-        let name = if is_front { "H4_LIQUIDITY_FRONT" } else { "H4_LIQUIDITY_BACK" };
+    fn check_h4_liquidity(
+        &self,
+        straddle: &StraddleQuotes,
+        is_nifty: bool,
+        is_front: bool,
+    ) -> GateResult {
+        let name = if is_front {
+            "H4_LIQUIDITY_FRONT"
+        } else {
+            "H4_LIQUIDITY_BACK"
+        };
         let spread_bps = straddle.spread_bps();
 
         let ceiling = if is_nifty {
-            if is_front { self.params.nifty_spread_ceiling_front_bps }
-            else { self.params.nifty_spread_ceiling_back_bps }
+            if is_front {
+                self.params.nifty_spread_ceiling_front_bps
+            } else {
+                self.params.nifty_spread_ceiling_back_bps
+            }
         } else {
-            if is_front { self.params.banknifty_spread_ceiling_front_bps }
-            else { self.params.banknifty_spread_ceiling_back_bps }
+            if is_front {
+                self.params.banknifty_spread_ceiling_front_bps
+            } else {
+                self.params.banknifty_spread_ceiling_back_bps
+            }
         };
 
         if spread_bps <= ceiling {
@@ -593,14 +665,24 @@ impl CalendarCarryStrategy {
         let edge_price = cal_price - cal_required;
 
         // Determine which threshold is binding
-        let binding = if cal_min_abs > cal_min_rel { "ABS" } else { "REL" };
+        let binding = if cal_min_abs > cal_min_rel {
+            "ABS"
+        } else {
+            "REL"
+        };
 
         // Log unit sanity (this will be captured in audit)
         // Format: cal|cal_min_rel|cal_min_abs|cal_req|sprd_f|sprd_b|edge|binding
         let sanity_str = format!(
             "cal={:.2}|rel={:.2}|abs={:.2}|req={:.2}|sprd_f={:.2}|sprd_b={:.2}|edge={:.2}|{}",
-            cal_price, cal_min_rel, cal_min_abs, cal_required,
-            spread_front_price, spread_back_price, edge_price, binding
+            cal_price,
+            cal_min_rel,
+            cal_min_abs,
+            cal_required,
+            spread_front_price,
+            spread_back_price,
+            edge_price,
+            binding
         );
 
         if cal_price >= cal_required {
@@ -624,7 +706,12 @@ impl CalendarCarryStrategy {
 
     /// R1: Term structure inversion limit
     /// Uses iv1-iv3 if available, falls back to iv1-iv2 for T1/T2 trades
-    fn check_r1_inversion(&self, ctx: &StrategyContext, is_nifty: bool, using_t2: bool) -> GateResult {
+    fn check_r1_inversion(
+        &self,
+        ctx: &StrategyContext,
+        is_nifty: bool,
+        using_t2: bool,
+    ) -> GateResult {
         // Determine which IV to use for inversion check
         // If trading T1/T2, use iv2 if iv3 not available
         let (inversion, used_pair) = if let Some(iv3) = ctx.features.iv3 {
@@ -681,7 +768,12 @@ impl CalendarCarryStrategy {
         if min_skew >= self.params.skew_stress_min {
             GateResult::pass_with_value("R2_SKEW", min_skew)
         } else {
-            GateResult::fail_with_values("R2_SKEW", "SKEW_STRESS", min_skew, self.params.skew_stress_min)
+            GateResult::fail_with_values(
+                "R2_SKEW",
+                "SKEW_STRESS",
+                min_skew,
+                self.params.skew_stress_min,
+            )
         }
     }
 
@@ -701,10 +793,19 @@ impl CalendarCarryStrategy {
             )
         };
 
-        let vega_front = self.bs_vega(ctx.features.f1, ctx.front_straddle.strike, ctx.features.tty1, ctx.features.iv1);
+        let vega_front = self.bs_vega(
+            ctx.features.f1,
+            ctx.front_straddle.strike,
+            ctx.features.tty1,
+            ctx.features.iv1,
+        );
         let vega_back = self.bs_vega(f_back, ctx.back_straddle.strike, tty_back, iv_back);
 
-        let h = if vega_back > 1e-9 { vega_front / vega_back } else { 1.0 };
+        let h = if vega_back > 1e-9 {
+            vega_front / vega_back
+        } else {
+            1.0
+        };
         h.clamp(self.params.h_min, self.params.h_max)
     }
 
@@ -714,7 +815,7 @@ impl CalendarCarryStrategy {
     /// Gate: gap_premium >= GAP_ABS (underlying-specific)
     fn check_e1_premium_gap(&self, ctx: &StrategyContext, h: f64, is_nifty: bool) -> GateResult {
         // Actual straddle premiums from quotes (in rupees)
-        let p_front = ctx.front_straddle.mid();  // CE mid + PE mid
+        let p_front = ctx.front_straddle.mid(); // CE mid + PE mid
         let p_back = ctx.back_straddle.mid();
 
         // Premium gap accounting for hedge ratio
@@ -730,7 +831,12 @@ impl CalendarCarryStrategy {
         // Detailed logging
         let sanity_str = format!(
             "p_front={:.2}|p_back={:.2}|h={:.3}|h×p_back={:.2}|gap={:.2}|req={:.2}",
-            p_front, p_back, h, h * p_back, gap_premium, gap_abs
+            p_front,
+            p_back,
+            h,
+            h * p_back,
+            gap_premium,
+            gap_abs
         );
 
         if gap_premium >= gap_abs {
@@ -776,12 +882,23 @@ impl CalendarCarryStrategy {
         let required_gap = self.params.mu_friction * friction_round;
 
         // Friction dominance ratio
-        let dominance_ratio = if friction_round > 1e-9 { gap_premium / friction_round } else { f64::MAX };
+        let dominance_ratio = if friction_round > 1e-9 {
+            gap_premium / friction_round
+        } else {
+            f64::MAX
+        };
 
         // Detailed logging
         let sanity_str = format!(
             "sprd_f={:.2}|sprd_b={:.2}|h={:.3}|fric_entry={:.2}|fric_round={:.2}|gap={:.2}|req={:.2}|ratio={:.2}",
-            spread_front, spread_back, h, friction_entry, friction_round, gap_premium, required_gap, dominance_ratio
+            spread_front,
+            spread_back,
+            h,
+            friction_entry,
+            friction_round,
+            gap_premium,
+            required_gap,
+            dominance_ratio
         );
 
         if gap_premium >= required_gap {
@@ -838,14 +955,26 @@ impl CalendarCarryStrategy {
         let required_gap = self.params.mu_friction * friction_round_eff;
 
         // Effective dominance ratio
-        let dominance_ratio_eff = if friction_round_eff > 1e-9 { gap_premium / friction_round_eff } else { f64::MAX };
+        let dominance_ratio_eff = if friction_round_eff > 1e-9 {
+            gap_premium / friction_round_eff
+        } else {
+            f64::MAX
+        };
 
         // Detailed logging
         let sanity_str = format!(
             "fric_obs={:.2}|fric_floor={:.2}|fric_eff={:.2}|gap={:.2}|req={:.2}|ratio={:.2}|{}",
-            friction_round_obs, friction_floor, friction_round_eff,
-            gap_premium, required_gap, dominance_ratio_eff,
-            if floor_binding { "FLOOR_BINDING" } else { "OBSERVED" }
+            friction_round_obs,
+            friction_floor,
+            friction_round_eff,
+            gap_premium,
+            required_gap,
+            dominance_ratio_eff,
+            if floor_binding {
+                "FLOOR_BINDING"
+            } else {
+                "OBSERVED"
+            }
         );
 
         if gap_premium >= required_gap {
@@ -889,10 +1018,19 @@ impl CalendarCarryStrategy {
         };
 
         // Compute vega hedge ratio
-        let vega_front = self.bs_vega(ctx.features.f1, ctx.front_straddle.strike, ctx.features.tty1, ctx.features.iv1);
+        let vega_front = self.bs_vega(
+            ctx.features.f1,
+            ctx.front_straddle.strike,
+            ctx.features.tty1,
+            ctx.features.iv1,
+        );
         let vega_back = self.bs_vega(f_back, ctx.back_straddle.strike, tty_back, iv_back);
 
-        let mut h = if vega_back > 1e-9 { vega_front / vega_back } else { 1.0 };
+        let mut h = if vega_back > 1e-9 {
+            vega_front / vega_back
+        } else {
+            1.0
+        };
         let h_clamped = h < self.params.h_min || h > self.params.h_max;
         h = h.clamp(self.params.h_min, self.params.h_max);
 
@@ -929,8 +1067,8 @@ impl CalendarCarryStrategy {
             back_expiry,
             front_strike: ctx.front_straddle.strike,
             back_strike: ctx.back_straddle.strike,
-            front_lots: -lots,  // short front
-            back_lots: (h * lots as f64).round() as i32,  // long back
+            front_lots: -lots,                           // short front
+            back_lots: (h * lots as f64).round() as i32, // long back
             hedge_ratio: h,
             h_clamped,
             cal_value,
@@ -973,19 +1111,33 @@ impl CalendarCarryStrategy {
             reason_code: None,
             gates: Some(gates.clone()),
             front_expiry: Some(ctx.meta.t1_expiry.clone()),
-            back_expiry: if using_t2 { ctx.meta.t2_expiry.clone() } else { ctx.meta.t3_expiry.clone() },
+            back_expiry: if using_t2 {
+                ctx.meta.t2_expiry.clone()
+            } else {
+                ctx.meta.t3_expiry.clone()
+            },
             front_spread_bps: Some(ctx.front_straddle.spread_bps()),
             back_spread_bps: Some(ctx.back_straddle.spread_bps()),
             iv1: ctx.features.iv1,
-            iv_back: if using_t2 { ctx.features.iv2 } else { ctx.features.iv3 },
-            cal_value: if using_t2 { ctx.features.cal12 } else {
+            iv_back: if using_t2 {
+                ctx.features.iv2
+            } else {
+                ctx.features.iv3
+            },
+            cal_value: if using_t2 {
+                ctx.features.cal12
+            } else {
                 match (ctx.features.cal12, ctx.features.cal23) {
                     (Some(c12), Some(c23)) => Some(c12 + c23),
                     _ => ctx.features.cal23,
                 }
             },
             cal_min: None,
-            sk_min: if sk_min.is_finite() { Some(sk_min) } else { None },
+            sk_min: if sk_min.is_finite() {
+                Some(sk_min)
+            } else {
+                None
+            },
             hedge_ratio: None,
             lots: None,
             h_clamped: None,
@@ -1065,8 +1217,16 @@ mod tests {
         let straddle = StraddleQuotes {
             expiry: "26JAN".to_string(),
             strike: 25300.0,
-            ce: QuoteSnapshot { bid: 100.0, ask: 102.0, last_ts: now },
-            pe: QuoteSnapshot { bid: 95.0, ask: 97.0, last_ts: now },
+            ce: QuoteSnapshot {
+                bid: 100.0,
+                ask: 102.0,
+                last_ts: now,
+            },
+            pe: QuoteSnapshot {
+                bid: 95.0,
+                ask: 97.0,
+                last_ts: now,
+            },
         };
 
         // mid = (100+102)/2 + (95+97)/2 = 101 + 96 = 197

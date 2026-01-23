@@ -11,7 +11,7 @@
 //! ## References
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use chrono::{NaiveDate, Datelike, Weekday};
+use chrono::{Datelike, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 
 // Re-export OptionType from kubera_models (canonical location)
@@ -29,12 +29,12 @@ pub use kubera_models::OptionType;
 /// * `lot_size` - Minimum trading unit quantity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OptionContract {
-    pub underlying: String,      
+    pub underlying: String,
     pub expiry: NaiveDate,
     pub strike: f64,
     pub option_type: OptionType,
     pub instrument_token: u32,
-    pub tradingsymbol: String,   
+    pub tradingsymbol: String,
     pub lot_size: u32,
 }
 
@@ -46,15 +46,38 @@ impl OptionContract {
     /// * `expiry` - Target date.
     /// * `strike` - Numeric strike level.
     /// * `opt_type` - Call/Put variant.
-    pub fn build_symbol(underlying: &str, expiry: NaiveDate, strike: f64, opt_type: OptionType) -> String {
+    pub fn build_symbol(
+        underlying: &str,
+        expiry: NaiveDate,
+        strike: f64,
+        opt_type: OptionType,
+    ) -> String {
         let year = expiry.year() % 100;
         let month_char = match expiry.month() {
-            1 => '1', 2 => '2', 3 => '3', 4 => '4', 5 => '5', 6 => '6',
-            7 => '7', 8 => '8', 9 => '9', 10 => 'O', 11 => 'N', 12 => 'D',
+            1 => '1',
+            2 => '2',
+            3 => '3',
+            4 => '4',
+            5 => '5',
+            6 => '6',
+            7 => '7',
+            8 => '8',
+            9 => '9',
+            10 => 'O',
+            11 => 'N',
+            12 => 'D',
             _ => 'X',
         };
         let day = expiry.day();
-        format!("{}{}{}{}{}{}", underlying, year, month_char, day, strike as u32, opt_type.symbol_suffix())
+        format!(
+            "{}{}{}{}{}{}",
+            underlying,
+            year,
+            month_char,
+            day,
+            strike as u32,
+            opt_type.symbol_suffix()
+        )
     }
 }
 
@@ -94,7 +117,7 @@ impl OptionChain {
     /// # Returns
     /// `Some((Call, Put))` if both variants exist at the ATM strike, else `None`.
     pub fn atm_straddle(&self) -> Option<(OptionContract, OptionContract)> {
-        let atm = self.atm_strike(50.0); 
+        let atm = self.atm_strike(50.0);
         let call = self.calls.iter().find(|c| (c.strike - atm).abs() < 0.01)?;
         let put = self.puts.iter().find(|p| (p.strike - atm).abs() < 0.01)?;
         Some((call.clone(), put.clone()))
@@ -106,10 +129,12 @@ impl OptionChain {
 /// # Parameters
 /// * `from` - Reference date to begin search.
 pub fn next_weekly_expiry(from: NaiveDate) -> NaiveDate {
-    let days_until_thursday = (Weekday::Thu.num_days_from_monday() as i64 
-        - from.weekday().num_days_from_monday() as i64 + 7) % 7;
+    let days_until_thursday = (Weekday::Thu.num_days_from_monday() as i64
+        - from.weekday().num_days_from_monday() as i64
+        + 7)
+        % 7;
     if days_until_thursday == 0 {
-        from 
+        from
     } else {
         from + chrono::Duration::days(days_until_thursday)
     }
@@ -127,9 +152,11 @@ pub fn monthly_expiry(year: i32, month: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(year, month + 1, 1).unwrap()
     };
     let last_day = first_of_next.pred_opt().unwrap();
-    
-    let days_since_thursday = (last_day.weekday().num_days_from_monday() as i64 
-        - Weekday::Thu.num_days_from_monday() as i64 + 7) % 7;
+
+    let days_since_thursday = (last_day.weekday().num_days_from_monday() as i64
+        - Weekday::Thu.num_days_from_monday() as i64
+        + 7)
+        % 7;
     last_day - chrono::Duration::days(days_since_thursday)
 }
 
@@ -139,7 +166,11 @@ mod tests {
 
     #[test]
     fn test_atm_strike() {
-        let chain = OptionChain::new("NIFTY".to_string(), NaiveDate::from_ymd_opt(2024, 12, 26).unwrap(), 25815.55);
+        let chain = OptionChain::new(
+            "NIFTY".to_string(),
+            NaiveDate::from_ymd_opt(2024, 12, 26).unwrap(),
+            25815.55,
+        );
         assert_eq!(chain.atm_strike(50.0), 25800.0);
     }
 

@@ -14,7 +14,7 @@ pub struct FtiEngine {
     lookback: usize,
     beta: f64,      // Quantile for width (e.g. 0.9)
     noise_cut: f64, // Noise threshold (e.g. 0.2)
-    
+
     // Predetermined Otnes filter coefficients
     // Map: period -> coefficients
     coef_table: Vec<Vec<f64>>,
@@ -49,7 +49,7 @@ impl FtiEngine {
     fn compute_otnes_coefs(period: usize, half_length: usize) -> Vec<f64> {
         let mut c = vec![0.0; half_length + 1];
         let d = [0.35577019, 0.2436983, 0.07211497, 0.00630165];
-        
+
         let fact = 2.0 / period as f64;
         c[0] = fact;
 
@@ -111,7 +111,7 @@ impl FtiEngine {
             xy += x_diff * y_diff;
         }
         let slope = xy / (xsq + 1e-12);
-        
+
         // Extend y by half_length further with projected values
         for i in 0..self.half_length {
             let projected = (i as f64 + 1.0 - x_mean) * slope + y_mean;
@@ -140,7 +140,11 @@ impl FtiEngine {
             // Calculate Channel Width (Quantile)
             diff_work.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let q_idx = (self.beta * (diff_work.len() as f64)).round() as usize;
-            let width = if q_idx < diff_work.len() { diff_work[q_idx] } else { *diff_work.last().unwrap_or(&0.0) };
+            let width = if q_idx < diff_work.len() {
+                diff_work[q_idx]
+            } else {
+                *diff_work.last().unwrap_or(&0.0)
+            };
 
             // Calculate Legs in Filtered Price
             let mut legs = Vec::new();
@@ -151,23 +155,32 @@ impl FtiEngine {
 
             for &val in filtered_block.iter().skip(1) {
                 if extreme_type == 0 {
-                    if val > extreme_val { extreme_type = -1; }
-                    else if val < extreme_val { extreme_type = 1; }
+                    if val > extreme_val {
+                        extreme_type = -1;
+                    } else if val < extreme_val {
+                        extreme_type = 1;
+                    }
                 } else if val == *filtered_block.last().unwrap() {
                     let leg = (extreme_val - val).abs();
                     legs.push(leg);
-                    if leg > longest_leg { longest_leg = leg; }
+                    if leg > longest_leg {
+                        longest_leg = leg;
+                    }
                 } else {
                     if extreme_type == 1 && val > prior {
                         let leg = (extreme_val - prior).abs();
                         legs.push(leg);
-                        if leg > longest_leg { longest_leg = leg; }
+                        if leg > longest_leg {
+                            longest_leg = leg;
+                        }
                         extreme_type = -1;
                         extreme_val = prior;
                     } else if extreme_type == -1 && val < prior {
                         let leg = (prior - extreme_val).abs();
                         legs.push(leg);
-                        if leg > longest_leg { longest_leg = leg; }
+                        if leg > longest_leg {
+                            longest_leg = leg;
+                        }
                         extreme_type = 1;
                         extreme_val = prior;
                     }

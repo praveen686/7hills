@@ -1,9 +1,9 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use kubera_executor::{SimulatedExchange, CommissionModel};
+use chrono::Utc;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use kubera_core::EventBus;
+use kubera_executor::{CommissionModel, SimulatedExchange};
 use kubera_models::{MarketEvent, MarketPayload, OrderEvent, OrderPayload, OrderType, Side};
 use tokio::runtime::Runtime;
-use chrono::Utc;
 use uuid::Uuid;
 
 fn bench_simulated_exchange_order_matching(c: &mut Criterion) {

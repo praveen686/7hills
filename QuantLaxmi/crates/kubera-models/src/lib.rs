@@ -25,8 +25,8 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 //! - FIX Protocol 5.0 SP2 for field naming conventions
 
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Deterministic depth types for L2 replay (scaled integers, gap detection)

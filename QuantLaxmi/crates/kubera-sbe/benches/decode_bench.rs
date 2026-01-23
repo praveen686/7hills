@@ -1,13 +1,13 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use kubera_sbe::{SbeHeader, BinanceSbeDecoder};
 use byteorder::{ByteOrder, LittleEndian};
 use chrono::Utc;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use kubera_sbe::{BinanceSbeDecoder, SbeHeader};
 
 fn bench_sbe_decode(c: &mut Criterion) {
     // Mock SBE TradesStreamEvent binary (Header + Body)
     // Header (8 bytes): block_length(18), template_id(10000), schema_id(1), version(0)
     let header_bytes = [0x12, 0x00, 0x10, 0x27, 0x01, 0x00, 0x00, 0x00];
-    
+
     // Body (49 bytes for 1 trade)
     let mut body_bytes = [0u8; 49];
     // eventTime (0..8)
@@ -18,11 +18,11 @@ fn bench_sbe_decode(c: &mut Criterion) {
     body_bytes[16] = -2i8 as u8;
     // qtyExponent (-4)
     body_bytes[17] = -4i8 as u8;
-    
+
     // Group Header: blockLength (25), numInGroup (1)
     LittleEndian::write_u16(&mut body_bytes[18..20], 25);
     LittleEndian::write_u32(&mut body_bytes[20..24], 1);
-    
+
     // Trade: id (8), price (8), qty (8), isBuyerMaker (1)
     LittleEndian::write_i64(&mut body_bytes[24..32], 12345);
     // Price 5000000 (with -2 expo = 50000.0)
@@ -31,14 +31,15 @@ fn bench_sbe_decode(c: &mut Criterion) {
     LittleEndian::write_i64(&mut body_bytes[40..48], 15000);
     // isBuyerMaker (true)
     body_bytes[48] = 1;
-    
+
     let mut full_msg = Vec::from(header_bytes);
     full_msg.extend_from_slice(&body_bytes);
 
     c.bench_function("sbe_decode_trade", |b| {
         b.iter(|| {
             let header = SbeHeader::decode(black_box(&full_msg[0..8])).unwrap();
-            let _trade = BinanceSbeDecoder::decode_trade(&header, black_box(&full_msg[8..])).unwrap();
+            let _trade =
+                BinanceSbeDecoder::decode_trade(&header, black_box(&full_msg[8..])).unwrap();
         })
     });
 }
