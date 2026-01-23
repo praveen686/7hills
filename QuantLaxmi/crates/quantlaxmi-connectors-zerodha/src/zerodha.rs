@@ -31,7 +31,7 @@ use kubera_core::EventBus;
 use kubera_core::connector::MarketConnector;
 use kubera_models::{L2Level, L2Update, MarketEvent, MarketPayload, Side};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -191,7 +191,7 @@ impl ZerodhaConnector {
     fn authenticate(&self) -> anyhow::Result<(String, String)> {
         info!("Running Zerodha authentication sidecar...");
         let output = Command::new("python3")
-            .arg("crates/kubera-connectors/scripts/zerodha_auth.py")
+            .arg("scripts/zerodha_auth.py")
             .output()?;
 
         if !output.status.success() {
@@ -857,7 +857,7 @@ impl ZerodhaExecutionClient {
     /// Authenticate and create client
     pub fn from_sidecar() -> anyhow::Result<Self> {
         let output = Command::new("python3")
-            .arg("crates/kubera-connectors/scripts/zerodha_auth.py")
+            .arg("scripts/zerodha_auth.py")
             .output()?;
 
         if !output.status.success() {
@@ -1141,7 +1141,7 @@ impl ZerodhaAutoDiscovery {
     /// Create from sidecar authentication
     pub fn from_sidecar() -> anyhow::Result<Self> {
         let output = Command::new("python3")
-            .arg("crates/kubera-connectors/scripts/zerodha_auth.py")
+            .arg("scripts/zerodha_auth.py")
             .output()?;
 
         if !output.status.success() {
@@ -1461,4 +1461,430 @@ impl ZerodhaAutoDiscovery {
 
         Ok(result)
     }
+
+    // =========================================================================
+    // MULTI-EXPIRY DISCOVERY (Phase 7)
+    // T1 = nearest weekly, T2 = next weekly, T3 = front monthly
+    // =========================================================================
+
+    /// Primary API for multi-expiry universe discovery
+    /// Returns a UniverseManifest suitable for deterministic replay
+    pub async fn discover_universe(
+        &self,
+        config: &MultiExpiryDiscoveryConfig,
+    ) -> anyhow::Result<UniverseManifest> {
+        let instruments = self.fetch_nfo_instruments().await?;
+        let spot = self.get_spot_price(&config.underlying).await?;
+
+        info!(
+            "[MULTI-EXPIRY] {} spot price: {:.2}",
+            config.underlying, spot
+        );
+
+        // Select expiries from dump (source of truth)
+        let eligible = collect_eligible_expiries(&instruments, &config.underlying, config.today);
+        anyhow::ensure!(
+            !eligible.is_empty(),
+            "No eligible expiries found for {}",
+            config.underlying
+        );
+
+        info!(
+            "[MULTI-EXPIRY] Found {} eligible expiries: {:?}",
+            eligible.len(),
+            eligible
+        );
+
+        let expiry_selection = select_t1_t2_t3(&eligible, &config.expiry_policy)?;
+
+        info!(
+            "[MULTI-EXPIRY] Selected T1={}, T2={:?}, T3={:?}",
+            expiry_selection.t1, expiry_selection.t2, expiry_selection.t3
+        );
+
+        // Strike step (mode of diffs) derived from T1 slice unless overridden
+        let strike_step = match config.override_strike_step {
+            Some(s) => s,
+            None => compute_strike_step(&instruments, &config.underlying, expiry_selection.t1)?,
+        };
+
+        info!("[MULTI-EXPIRY] Strike step: {:.0}", strike_step);
+
+        let atm = ZerodhaAutoDiscovery::atm_strike(spot, strike_step);
+
+        info!("[MULTI-EXPIRY] ATM strike: {:.0}", atm);
+
+        let target_strikes = build_target_strikes(atm, strike_step, config.strike_band);
+
+        info!(
+            "[MULTI-EXPIRY] Target strikes: {} ({:.0} to {:.0})",
+            target_strikes.len(),
+            target_strikes.first().unwrap_or(&0.0),
+            target_strikes.last().unwrap_or(&0.0)
+        );
+
+        // Resolve tokens for (expiry, strike, CE/PE)
+        let (resolved, missing) = resolve_universe_instruments(
+            &instruments,
+            &config.underlying,
+            &expiry_selection.selected,
+            &target_strikes,
+        );
+
+        // Log missing per expiry
+        for (exp, miss) in &missing {
+            if !miss.is_empty() {
+                info!(
+                    "[MULTI-EXPIRY] {} missing {} instruments for expiry {}",
+                    config.underlying,
+                    miss.len(),
+                    exp
+                );
+            }
+        }
+
+        info!(
+            "[MULTI-EXPIRY] Resolved {} instruments for {} across {} expiries",
+            resolved.len(),
+            config.underlying,
+            expiry_selection.selected.len()
+        );
+
+        Ok(UniverseManifest {
+            underlying: config.underlying.clone(),
+            today: config.today,
+            spot,
+            atm,
+            strike_step,
+            strike_band: config.strike_band,
+            expiry_selection,
+            target_strikes,
+            instruments: resolved,
+            missing,
+        })
+    }
+}
+
+// =============================================================================
+// MULTI-EXPIRY TYPES (Phase 7)
+// =============================================================================
+
+/// Expiry selection policy for multi-expiry discovery
+#[derive(Clone, Debug)]
+pub enum ExpiryPolicy {
+    /// Select T1 (nearest), T2 (next), T3 (front monthly)
+    T1T2T3,
+    /// Select first N expiries and optionally a "front monthly"
+    Count {
+        expiry_count: usize,
+        include_front_monthly: bool,
+    },
+}
+
+impl Default for ExpiryPolicy {
+    fn default() -> Self {
+        ExpiryPolicy::T1T2T3
+    }
+}
+
+/// Configuration for multi-expiry universe discovery
+#[derive(Clone, Debug)]
+pub struct MultiExpiryDiscoveryConfig {
+    /// Underlying to discover (NIFTY, BANKNIFTY, FINNIFTY)
+    pub underlying: String,
+    /// Number of strikes around ATM (e.g., 20 = ATM ± 20 strikes = 41 total)
+    pub strike_band: u32,
+    /// Expiry selection policy
+    pub expiry_policy: ExpiryPolicy,
+    /// Session date in IST (for eligible expiry filtering)
+    pub today: NaiveDate,
+    /// Optional: prefer futures for ATM calculation (future extension)
+    pub prefer_futures_for_atm: bool,
+    /// Optional: override strike step instead of computing from dump
+    pub override_strike_step: Option<f64>,
+}
+
+impl MultiExpiryDiscoveryConfig {
+    pub fn nifty(today: NaiveDate) -> Self {
+        Self {
+            underlying: "NIFTY".to_string(),
+            strike_band: 20,
+            expiry_policy: ExpiryPolicy::T1T2T3,
+            today,
+            prefer_futures_for_atm: false,
+            override_strike_step: None,
+        }
+    }
+
+    pub fn banknifty(today: NaiveDate) -> Self {
+        Self {
+            underlying: "BANKNIFTY".to_string(),
+            strike_band: 20,
+            expiry_policy: ExpiryPolicy::T1T2T3,
+            today,
+            prefer_futures_for_atm: false,
+            override_strike_step: None,
+        }
+    }
+}
+
+/// Resolved instrument for the universe manifest
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UniverseInstrument {
+    pub instrument_token: u32,
+    pub tradingsymbol: String,
+    pub underlying: String,
+    pub expiry: NaiveDate,
+    pub strike: f64,
+    pub instrument_type: String, // "CE" / "PE"
+    pub lot_size: u32,
+}
+
+/// Selected expiries (T1, T2, T3)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ExpirySelection {
+    /// Nearest weekly expiry
+    pub t1: NaiveDate,
+    /// Next weekly expiry (if available)
+    pub t2: Option<NaiveDate>,
+    /// Front monthly expiry (latest in T1's month, or next month)
+    pub t3: Option<NaiveDate>,
+    /// All selected expiries (unique, sorted)
+    pub selected: Vec<NaiveDate>,
+}
+
+/// Universe manifest for deterministic capture and replay
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UniverseManifest {
+    pub underlying: String,
+    pub today: NaiveDate,
+    pub spot: f64,
+    pub atm: f64,
+    pub strike_step: f64,
+    pub strike_band: u32,
+    pub expiry_selection: ExpirySelection,
+    /// Requested strike ladder (deterministic band)
+    pub target_strikes: Vec<f64>,
+    /// Resolved instruments with tokens
+    pub instruments: Vec<UniverseInstrument>,
+    /// Missing instruments per expiry: (strike, "CE"/"PE")
+    #[serde(default)]
+    pub missing: BTreeMap<NaiveDate, Vec<(f64, String)>>,
+}
+
+// =============================================================================
+// MULTI-EXPIRY HELPER FUNCTIONS
+// =============================================================================
+
+/// Collect eligible expiries from instruments dump (source of truth)
+/// Only includes expiries >= today
+fn collect_eligible_expiries(
+    instruments: &[NfoInstrument],
+    underlying: &str,
+    today: NaiveDate,
+) -> Vec<NaiveDate> {
+    let mut set: BTreeSet<NaiveDate> = BTreeSet::new();
+    for ins in instruments.iter() {
+        if ins.name == underlying && ins.expiry >= today {
+            set.insert(ins.expiry);
+        }
+    }
+    set.into_iter().collect()
+}
+
+/// Select T1/T2/T3 expiries based on policy
+/// T3 = max(expiries in T1's month) if ≥2 expiries, else max(next month)
+fn select_t1_t2_t3(
+    eligible: &[NaiveDate],
+    policy: &ExpiryPolicy,
+) -> anyhow::Result<ExpirySelection> {
+    anyhow::ensure!(!eligible.is_empty(), "No eligible expiries provided");
+
+    match policy {
+        ExpiryPolicy::T1T2T3 => {
+            let t1 = eligible[0];
+            let t2 = eligible.get(1).copied();
+
+            // Build expiries grouped by (year, month)
+            let mut by_month: BTreeMap<(i32, u32), Vec<NaiveDate>> = BTreeMap::new();
+            for &e in eligible.iter() {
+                by_month
+                    .entry((e.year(), e.month()))
+                    .or_default()
+                    .push(e);
+            }
+            for v in by_month.values_mut() {
+                v.sort();
+            }
+
+            let (y1, m1) = (t1.year(), t1.month());
+            let mut t3: Option<NaiveDate> = None;
+
+            // T3 = max expiry in T1's month if that month has ≥2 expiries
+            if let Some(v) = by_month.get(&(y1, m1)) {
+                if v.len() >= 2 {
+                    t3 = v.iter().copied().max();
+                }
+            }
+
+            // Otherwise, pick max expiry from next month
+            if t3.is_none() {
+                for ((yy, mm), v) in by_month.iter() {
+                    if (*yy, *mm) != (y1, m1) && !v.is_empty() {
+                        t3 = v.iter().copied().max();
+                        break;
+                    }
+                }
+            }
+
+            // Build selected list: unique, sorted
+            let mut selected = vec![t1];
+            if let Some(x) = t2 {
+                selected.push(x);
+            }
+            if let Some(x) = t3 {
+                selected.push(x);
+            }
+            selected.sort();
+            selected.dedup();
+
+            Ok(ExpirySelection {
+                t1,
+                t2,
+                t3,
+                selected,
+            })
+        }
+
+        ExpiryPolicy::Count {
+            expiry_count,
+            include_front_monthly,
+        } => {
+            let t1 = eligible[0];
+            let mut selected: Vec<NaiveDate> =
+                eligible.iter().take(*expiry_count).copied().collect();
+
+            let t2 = if selected.len() >= 2 {
+                Some(selected[1])
+            } else {
+                None
+            };
+
+            let mut t3 = None;
+            if *include_front_monthly {
+                // Reuse T1T2T3 logic for front monthly
+                let tmp = select_t1_t2_t3(eligible, &ExpiryPolicy::T1T2T3)?;
+                t3 = tmp.t3;
+                if let Some(x) = t3 {
+                    selected.push(x);
+                }
+            }
+
+            selected.sort();
+            selected.dedup();
+
+            Ok(ExpirySelection {
+                t1,
+                t2,
+                t3,
+                selected,
+            })
+        }
+    }
+}
+
+/// Compute strike step from instruments dump (mode of differences)
+/// Avoids hardcoding 50/100 and automatically adapts
+fn compute_strike_step(
+    instruments: &[NfoInstrument],
+    underlying: &str,
+    expiry: NaiveDate,
+) -> anyhow::Result<f64> {
+    let mut strikes: Vec<f64> = instruments
+        .iter()
+        .filter(|i| i.name == underlying && i.expiry == expiry)
+        .map(|i| i.strike)
+        .collect();
+
+    strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    strikes.dedup();
+
+    anyhow::ensure!(
+        strikes.len() >= 3,
+        "Insufficient strikes to infer step for {}",
+        underlying
+    );
+
+    // Count diffs with integer bucketing to avoid float noise
+    let mut counts: HashMap<i64, usize> = HashMap::new();
+    for w in strikes.windows(2) {
+        let d = w[1] - w[0];
+        if d <= 0.0 {
+            continue;
+        }
+        let key = (d * 100.0).round() as i64; // 0.01 resolution
+        *counts.entry(key).or_insert(0) += 1;
+    }
+
+    let (&best_key, _) = counts
+        .iter()
+        .max_by_key(|(_, c)| *c)
+        .ok_or_else(|| anyhow::anyhow!("Failed to infer strike step"))?;
+
+    Ok(best_key as f64 / 100.0)
+}
+
+/// Build target strike ladder (±band around ATM)
+fn build_target_strikes(atm: f64, step: f64, band: u32) -> Vec<f64> {
+    let mut out = Vec::with_capacity((2 * band + 1) as usize);
+    for i in -(band as i32)..=(band as i32) {
+        out.push(atm + (i as f64) * step);
+    }
+    out
+}
+
+/// Resolve instruments from dump, tracking missing per expiry
+fn resolve_universe_instruments(
+    instruments: &[NfoInstrument],
+    underlying: &str,
+    expiries: &[NaiveDate],
+    strikes: &[f64],
+) -> (Vec<UniverseInstrument>, BTreeMap<NaiveDate, Vec<(f64, String)>>) {
+    // Build lookup: (expiry, strike_key, type) -> instrument
+    let mut map: HashMap<(NaiveDate, i64, String), &NfoInstrument> = HashMap::new();
+
+    for ins in instruments.iter().filter(|i| i.name == underlying) {
+        let strike_key = (ins.strike * 100.0).round() as i64;
+        map.insert(
+            (ins.expiry, strike_key, ins.instrument_type.clone()),
+            ins,
+        );
+    }
+
+    let mut resolved = Vec::new();
+    let mut missing: BTreeMap<NaiveDate, Vec<(f64, String)>> = BTreeMap::new();
+
+    for &e in expiries.iter() {
+        for &k in strikes.iter() {
+            let strike_key = (k * 100.0).round() as i64;
+            for ty in ["CE", "PE"] {
+                let key = (e, strike_key, ty.to_string());
+                if let Some(ins) = map.get(&key) {
+                    resolved.push(UniverseInstrument {
+                        instrument_token: ins.instrument_token,
+                        tradingsymbol: ins.tradingsymbol.clone(),
+                        underlying: ins.name.clone(),
+                        expiry: ins.expiry,
+                        strike: ins.strike,
+                        instrument_type: ins.instrument_type.clone(),
+                        lot_size: ins.lot_size,
+                    });
+                } else {
+                    missing.entry(e).or_default().push((k, ty.to_string()));
+                }
+            }
+        }
+    }
+
+    (resolved, missing)
 }
