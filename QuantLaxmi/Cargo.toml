@@ -12,10 +12,8 @@ members = [
     "crates/kubera-ffi",
     "crates/kubera-strategy-host",
 
-    # Legacy runner (to be deprecated)
-    "crates/kubera-runner",
+    # Legacy backtest (kept for now)
     "crates/kubera-backtest",
-    "crates/kubera-connectors",
 
     # New isolated connectors
     "crates/quantlaxmi-connectors-zerodha",

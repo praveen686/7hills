@@ -38,4 +38,24 @@ else
 fi
 
 echo ""
+echo "[5/6] Checking that banned kubera crates are removed..."
+# kubera-runner and kubera-connectors were retired and must not return
+if cargo tree -e normal 2>/dev/null | grep -E "kubera-runner|kubera-connectors" > /dev/null; then
+    echo "FAIL: Banned kubera crates still in dependency tree!"
+    cargo tree -e normal | grep -E "kubera-runner|kubera-connectors"
+    exit 1
+else
+    echo "PASS: No banned kubera crates (runner/connectors) in workspace"
+fi
+
+echo ""
+echo "[6/6] Checking for QuantKubera1 references..."
+if [ -d "../QuantKubera1" ]; then
+    echo "FAIL: QuantKubera1 directory still exists!"
+    exit 1
+else
+    echo "PASS: QuantKubera1 directory removed"
+fi
+
+echo ""
 echo "=== All isolation checks passed ==="

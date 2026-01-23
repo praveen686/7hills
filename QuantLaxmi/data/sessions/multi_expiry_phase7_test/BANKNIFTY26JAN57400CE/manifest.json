@@ -1,0 +1,78 @@
+{
+  "run_id": "55a45199-bfe6-4180-b068-bf6f0969e55f",
+  "family": "india",
+  "profile": "certified",
+  "watermark": "QuantLaxmi-india-20260123-060757-55a45199",
+  "build": {
+    "version": "0.1.0",
+    "git_commit": null,
+    "build_timestamp": "2026-01-23T06:07:57.624678346Z",
+    "rust_version": "",
+    "cargo_lock_hash": null
+  },
+  "environment": {
+    "hostname": "isoula-dhruv",
+    "os": "linux",
+    "started_at": "2026-01-23T06:07:57.624678829Z",
+    "finished_at": "2026-01-23T06:07:57.624687663Z",
+    "duration_secs": 0.0
+  },
+  "inputs": {
+    "universe": null,
+    "quotes": null,
+    "depth_events": null,
+    "trade_events": null,
+    "tick_events": {
+      "path": "data/sessions/multi_expiry_phase7_test/BANKNIFTY26JAN57400CE/ticks.jsonl",
+      "sha256": "729c9b181c852275c099a4aa1649dc7a5d633a794b8f5be9e9e3df2417405b5a",
+      "size_bytes": 4608
+    },
+    "orders": null,
+    "config": null
+  },
+  "outputs": {
+    "fills": null,
+    "report": null,
+    "strategy_gates": null,
+    "vectorbt_market": null,
+    "vectorbt_fills": null,
+    "vectorbt_summary": null
+  },
+  "diagnostics": {
+    "gate_decisions": [],
+    "regime_transitions": [
+      {
+        "timestamp": "2026-01-23T06:07:57.624687033Z",
+        "previous_regime": "capture_start",
+        "new_regime": "capture_complete",
+        "confidence": 1.0,
+        "features": {
+          "certified_ticks": 18,
+          "has_depth": true,
+          "instrument_token": 13257218,
+          "price_exponent": -2,
+          "research_ticks": 0,
+          "source": "zerodha_session_capture",
+          "ticks_written": 18,
+          "tradingsymbol": "BANKNIFTY26JAN57400CE"
+        }
+      }
+    ],
+    "context_validation": {
+      "underlying_present": false,
+      "underlying_symbols": [],
+      "options_symbols": [],
+      "history_window_bars": 0,
+      "min_history_required": 0,
+      "validation_passed": false,
+      "validation_errors": []
+    }
+  },
+  "determinism": {
+    "certified": true,
+    "input_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "compared_to": null,
+    "matches_previous": null
+  }
+}

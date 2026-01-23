@@ -1,0 +1,78 @@
+{
+  "run_id": "ec7a69d6-9a73-431a-9f62-0913503370df",
+  "family": "india",
+  "profile": "certified",
+  "watermark": "QuantLaxmi-india-20260123-090320-ec7a69d6",
+  "build": {
+    "version": "0.1.0",
+    "git_commit": null,
+    "build_timestamp": "2026-01-23T09:03:20.961802731Z",
+    "rust_version": "",
+    "cargo_lock_hash": null
+  },
+  "environment": {
+    "hostname": "isoula-dhruv",
+    "os": "linux",
+    "started_at": "2026-01-23T09:03:20.961805001Z",
+    "finished_at": "2026-01-23T09:03:20.962910776Z",
+    "duration_secs": 0.001
+  },
+  "inputs": {
+    "universe": null,
+    "quotes": null,
+    "depth_events": null,
+    "trade_events": null,
+    "tick_events": {
+      "path": "/home/isoula/7hills/QuantLaxmi/data/sessions/phase9_3_20260123_135647/BANKNIFTY26FEB60000CE/ticks.jsonl",
+      "sha256": "c6187d282e479c25230f624299ac27f7f1b9399a9f2093ba26b91beece010947",
+      "size_bytes": 946790
+    },
+    "orders": null,
+    "config": null
+  },
+  "outputs": {
+    "fills": null,
+    "report": null,
+    "strategy_gates": null,
+    "vectorbt_market": null,
+    "vectorbt_fills": null,
+    "vectorbt_summary": null
+  },
+  "diagnostics": {
+    "gate_decisions": [],
+    "regime_transitions": [
+      {
+        "timestamp": "2026-01-23T09:03:20.962901621Z",
+        "previous_regime": "capture_start",
+        "new_regime": "capture_complete",
+        "confidence": 1.0,
+        "features": {
+          "certified_ticks": 3680,
+          "has_depth": true,
+          "instrument_token": 15422210,
+          "price_exponent": -2,
+          "research_ticks": 0,
+          "source": "zerodha_session_capture",
+          "ticks_written": 3680,
+          "tradingsymbol": "BANKNIFTY26FEB60000CE"
+        }
+      }
+    ],
+    "context_validation": {
+      "underlying_present": false,
+      "underlying_symbols": [],
+      "options_symbols": [],
+      "history_window_bars": 0,
+      "min_history_required": 0,
+      "validation_passed": false,
+      "validation_errors": []
+    }
+  },
+  "determinism": {
+    "certified": true,
+    "input_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "compared_to": null,
+    "matches_previous": null
+  }
+}

@@ -1,15 +1,13 @@
-# 7hills Migration Policy (Revised & Enforced)
+# 7hills Migration Policy (Post-Decommission)
 
-## 1. Authoritative Projects
+## 1. Current State
 
 | Project | Status | Policy |
 |---------|--------|--------|
 | **QuantLaxmi** | **Authoritative** | All active development, CI-enforced |
-| QuantKubera1 | Legacy / Frozen | Read-only migration reference |
+| ~~QuantKubera1~~ | **DELETED** | Decommissioned 2026-01-23 |
 
-**Rules:**
-- No new logic, fixes, or refactors are allowed in QuantKubera1
-- Any required change must be ported to QuantLaxmi or documented as intentionally abandoned
+**QuantKubera1 has been permanently deleted.** All development happens in QuantLaxmi.
 
 ---
 
@@ -20,14 +18,10 @@
 Only root-level workflows are allowed.
 
 Root CI **must explicitly fail** if:
-- Any workflow exists under `QuantKubera1/.github/`
 - Any workflow exists under `QuantLaxmi/.github/`
-
-**Rationale:** GitHub executes all workflows recursively. This rule prevents accidental CI re-activation of legacy code.
 
 ### Enforcement (required in CI):
 ```bash
-test ! -d QuantKubera1/.github
 test ! -d QuantLaxmi/.github
 ```
 
@@ -44,70 +38,31 @@ Root CI (`.github/workflows/quantlaxmi-ci.yml`) must:
    - `kubera-*` crates (until migration complete)
 4. **Enforce dependency isolation** (India ↔ Crypto)
 
-**QuantKubera1 must never be built, tested, or linted by CI.**
+---
+
+## 4. Legacy Crate Retirement (In Progress)
+
+The following `kubera-*` crates inside QuantLaxmi are being retired:
+
+| Crate | Status | Replacement |
+|-------|--------|-------------|
+| `kubera-options` | Pending retirement | `quantlaxmi-options` |
+| `kubera-connectors` | Pending retirement | `quantlaxmi-connectors-zerodha` |
+| `kubera-runner` | Pending retirement | `quantlaxmi-runner-*` |
+
+**No new code should depend on `kubera-*` crates.**
 
 ---
 
-## 4. Deletion Gate for QuantKubera1 (Hard Gate)
+## 5. Final Cleanup Checklist
 
-QuantKubera1 may be deleted **only when all of the following are true**.
-
-### Crypto (Binance) Parity Gate
-
-- [ ] SBE + REST capture certified
-- [ ] Replay determinism:
-  - Identical inputs → identical output hashes
-- [ ] Paper + backtest pipelines produce:
-  - Stable manifests
-  - Stable VectorBT exports
-- [ ] Metric parity validated vs QuantKubera:
-  - Trade count match
-  - PnL tolerance ≤ ε
-  - No missing fills
-
-### India (Zerodha) Parity Gate
-
-- [ ] Capture includes:
-  - Underlying reference (FUT or spot proxy)
-  - Options universe
-- [ ] Validation strategies produce fills
-- [ ] HYDRA / AEON:
-  - Trades OR
-  - Explainable gate diagnostics
-- [ ] VectorBT export runs end-to-end
-- [ ] At least one real session certified
+- [x] Delete `QuantKubera1/` external project
+- [ ] Retire `kubera-options` crate (deferred - core functionality)
+- [x] Retire `kubera-connectors` crate
+- [x] Retire `kubera-runner` crate
+- [x] Update `check_isolation.sh` to ban `kubera-*`
+- [ ] All `cargo tree | rg kubera` returns empty (foundational crates remain)
 
 ---
 
-## 5. Legacy Crate Handling (Non-Binary)
-
-After QuantKubera deletion, each `kubera-*` crate must be classified as one of:
-
-| State | Meaning |
-|-------|---------|
-| **Retained** | Still authoritative, used directly |
-| **Wrapped** | Used via QuantLaxmi adapter layer |
-| **Deprecated** | Marked for deletion, not used |
-
-**No crate may remain in an implicit state.**
-
----
-
-## 6. Final Cleanup (After Gates Pass)
-
-1. Delete `QuantKubera1/`
-2. Remove unused legacy crates
-3. Rename retained crates if branding cleanup is desired
-4. Freeze migration policy (historical document)
-
----
-
-## 7. Timeline
-
-**There is no calendar-based deadline.**
-
-Migration completes only when parity and determinism gates pass.
-
----
-
-*Last revised: 2026-01-22*
+*Last revised: 2026-01-23*

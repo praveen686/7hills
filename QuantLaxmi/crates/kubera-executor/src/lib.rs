@@ -169,6 +169,7 @@ pub enum RiskMode {
 ///
 /// # Example
 /// ```rust
+/// use kubera_executor::RiskEnvelope;
 /// let envelope = RiskEnvelope::for_equity(100_000.0); // $100k account
 /// // max_gross_notional_usd = $200k (2x)
 /// // max_symbol_notional_usd = $50k (0.5x)

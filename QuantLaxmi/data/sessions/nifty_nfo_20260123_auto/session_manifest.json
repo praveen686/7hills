@@ -1,0 +1,261 @@
+{
+  "session_id": "ae3b14ec-c098-478f-b838-debd47f1b865",
+  "watermark": "QuantLaxmi-india-session-20260123-042130-ae3b14ec",
+  "family": "india",
+  "profile": "certified",
+  "instruments": [
+    "NIFTY26JAN25050CE",
+    "NIFTY26JAN25050PE",
+    "NIFTY26JAN25100CE",
+    "NIFTY26JAN25100PE",
+    "NIFTY26JAN25150CE",
+    "NIFTY26JAN25150PE",
+    "NIFTY26JAN25200CE",
+    "NIFTY26JAN25200PE",
+    "NIFTY26JAN25250CE",
+    "NIFTY26JAN25250PE",
+    "NIFTY26JAN25300CE",
+    "NIFTY26JAN25300PE",
+    "NIFTY26JAN25350CE",
+    "NIFTY26JAN25350PE",
+    "NIFTY26JAN25400CE",
+    "NIFTY26JAN25400PE",
+    "NIFTY26JAN25450CE",
+    "NIFTY26JAN25450PE",
+    "NIFTY26JAN25500CE",
+    "NIFTY26JAN25500PE",
+    "NIFTY26JAN25550CE",
+    "NIFTY26JAN25550PE"
+  ],
+  "captures": [
+    {
+      "tradingsymbol": "NIFTY26JAN25050CE",
+      "instrument_token": 15017730,
+      "manifest_path": "NIFTY26JAN25050CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25050CE/ticks.jsonl",
+      "ticks_hash": "1d3aac049523afa00b0c072f82e6457a6a19d136dd46b28b99cb1a1a23e03c99",
+      "ticks_written": 89,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25050PE",
+      "instrument_token": 15017986,
+      "manifest_path": "NIFTY26JAN25050PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25050PE/ticks.jsonl",
+      "ticks_hash": "e8daa658b351e106bdd1426ca3ae69ce31e27c2a6b5c84ccac76c012b02f99a8",
+      "ticks_written": 124,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25100CE",
+      "instrument_token": 15018242,
+      "manifest_path": "NIFTY26JAN25100CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25100CE/ticks.jsonl",
+      "ticks_hash": "eb1c0d8436c85712ba6ce7b7c8e8d455994ba89c94d4fde3c1047f7f5b572004",
+      "ticks_written": 110,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25100PE",
+      "instrument_token": 15018498,
+      "manifest_path": "NIFTY26JAN25100PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25100PE/ticks.jsonl",
+      "ticks_hash": "0803de7a389ea719db9ef2aa1cd50d7c869e9edd2a853429bc6ace0e5a518f5e",
+      "ticks_written": 127,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25150CE",
+      "instrument_token": 15018754,
+      "manifest_path": "NIFTY26JAN25150CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25150CE/ticks.jsonl",
+      "ticks_hash": "7251a6225a278678c4ccdcb218a9cfa6e448efa897a15f188c349813bfde13c3",
+      "ticks_written": 112,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25150PE",
+      "instrument_token": 15020802,
+      "manifest_path": "NIFTY26JAN25150PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25150PE/ticks.jsonl",
+      "ticks_hash": "afbba6ee9c78a5e4698238dbb2ecd308263d5aff95d4165b27763a2e7a55e174",
+      "ticks_written": 118,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25200CE",
+      "instrument_token": 15024386,
+      "manifest_path": "NIFTY26JAN25200CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25200CE/ticks.jsonl",
+      "ticks_hash": "b99421ee83f82389a02b72f26c04bc64f1d14e921133bcc20dd016f734ecae53",
+      "ticks_written": 123,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25200PE",
+      "instrument_token": 15024642,
+      "manifest_path": "NIFTY26JAN25200PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25200PE/ticks.jsonl",
+      "ticks_hash": "2db36d76138763f83d8de2e2b31f19eecba8b93246f5d8901c20c35045cbca6b",
+      "ticks_written": 128,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25250CE",
+      "instrument_token": 15025410,
+      "manifest_path": "NIFTY26JAN25250CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25250CE/ticks.jsonl",
+      "ticks_hash": "0def8c5bc1bf7ff3743c57dc97a64e670e64b736d0b0ed7c7041d35792f51288",
+      "ticks_written": 130,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25250PE",
+      "instrument_token": 15025666,
+      "manifest_path": "NIFTY26JAN25250PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25250PE/ticks.jsonl",
+      "ticks_hash": "84177f11a993a78fb8bfefbde3aa5c7d91ad6f86b8a3f8cb0404b91294780ba6",
+      "ticks_written": 134,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25300CE",
+      "instrument_token": 15025922,
+      "manifest_path": "NIFTY26JAN25300CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25300CE/ticks.jsonl",
+      "ticks_hash": "3085a0dc0deffb95d5962de9c190f013a6a6affb5a19241f9008ce6332f91422",
+      "ticks_written": 108,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25300PE",
+      "instrument_token": 15027714,
+      "manifest_path": "NIFTY26JAN25300PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25300PE/ticks.jsonl",
+      "ticks_hash": "4f5659d3e60c448d9f6fe4515e09e7b4a1a7dbe7c3b36d5eeb31faead1fd64eb",
+      "ticks_written": 107,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25350CE",
+      "instrument_token": 15027970,
+      "manifest_path": "NIFTY26JAN25350CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25350CE/ticks.jsonl",
+      "ticks_hash": "ee3f25a170d983fcce96453a0b641e19fc9ea6088db87da40746637de656e94c",
+      "ticks_written": 127,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25350PE",
+      "instrument_token": 15028226,
+      "manifest_path": "NIFTY26JAN25350PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25350PE/ticks.jsonl",
+      "ticks_hash": "b0ee35b4c0a8dce348687a69fd70d5d60df6491c027284ea7530f7fb0e84b9bb",
+      "ticks_written": 130,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25400CE",
+      "instrument_token": 15028482,
+      "manifest_path": "NIFTY26JAN25400CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25400CE/ticks.jsonl",
+      "ticks_hash": "dea77c73f53363f419d5edb4828b89992562117a72998cce0533bbbf04c6834a",
+      "ticks_written": 125,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25400PE",
+      "instrument_token": 15028738,
+      "manifest_path": "NIFTY26JAN25400PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25400PE/ticks.jsonl",
+      "ticks_hash": "3a0bbf47e801ef415cd47b743ff3bab5d170378713d312b2ca5b933682253125",
+      "ticks_written": 130,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25450CE",
+      "instrument_token": 15028994,
+      "manifest_path": "NIFTY26JAN25450CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25450CE/ticks.jsonl",
+      "ticks_hash": "cae571604d79fb4421c4df3e69ea752671bbd1bfd16609c64975e5ccce3d86a9",
+      "ticks_written": 123,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25450PE",
+      "instrument_token": 15029762,
+      "manifest_path": "NIFTY26JAN25450PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25450PE/ticks.jsonl",
+      "ticks_hash": "46a74c05c19ca2f76dd6c7a127edf9cc33b281ccd2414b15132b75e4144e1b8f",
+      "ticks_written": 130,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25500CE",
+      "instrument_token": 15030018,
+      "manifest_path": "NIFTY26JAN25500CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25500CE/ticks.jsonl",
+      "ticks_hash": "af61b6fe0316df2cb496e1e4fc5f15e969f92a0c8ed5b8d620a71472db8d527d",
+      "ticks_written": 121,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25500PE",
+      "instrument_token": 15031298,
+      "manifest_path": "NIFTY26JAN25500PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25500PE/ticks.jsonl",
+      "ticks_hash": "7fbfe4e806e4a461981b93726ea5c76cdbb5e539b3df19c1d637e03083302cd4",
+      "ticks_written": 130,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25550CE",
+      "instrument_token": 15032322,
+      "manifest_path": "NIFTY26JAN25550CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25550CE/ticks.jsonl",
+      "ticks_hash": "c3bfbc6d630970b3220515ce69754d722314ae483b8fdd5168530ffe9a202352",
+      "ticks_written": 124,
+      "has_depth": true
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25550PE",
+      "instrument_token": 15032578,
+      "manifest_path": "NIFTY26JAN25550PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25550PE/ticks.jsonl",
+      "ticks_hash": "fdfe4d77c32b270004bf2061de5ee44e44da3123484683e7f43fedd396609e7c",
+      "ticks_written": 102,
+      "has_depth": true
+    }
+  ],
+  "determinism": {
+    "certified": true,
+    "all_instruments_clean": true,
+    "instrument_hashes": {
+      "NIFTY26JAN25550PE": "fdfe4d77c32b270004bf2061de5ee44e44da3123484683e7f43fedd396609e7c",
+      "NIFTY26JAN25150PE": "afbba6ee9c78a5e4698238dbb2ecd308263d5aff95d4165b27763a2e7a55e174",
+      "NIFTY26JAN25550CE": "c3bfbc6d630970b3220515ce69754d722314ae483b8fdd5168530ffe9a202352",
+      "NIFTY26JAN25200PE": "2db36d76138763f83d8de2e2b31f19eecba8b93246f5d8901c20c35045cbca6b",
+      "NIFTY26JAN25150CE": "7251a6225a278678c4ccdcb218a9cfa6e448efa897a15f188c349813bfde13c3",
+      "NIFTY26JAN25300CE": "3085a0dc0deffb95d5962de9c190f013a6a6affb5a19241f9008ce6332f91422",
+      "NIFTY26JAN25050PE": "e8daa658b351e106bdd1426ca3ae69ce31e27c2a6b5c84ccac76c012b02f99a8",
+      "NIFTY26JAN25450CE": "cae571604d79fb4421c4df3e69ea752671bbd1bfd16609c64975e5ccce3d86a9",
+      "NIFTY26JAN25250CE": "0def8c5bc1bf7ff3743c57dc97a64e670e64b736d0b0ed7c7041d35792f51288",
+      "NIFTY26JAN25400PE": "3a0bbf47e801ef415cd47b743ff3bab5d170378713d312b2ca5b933682253125",
+      "NIFTY26JAN25350PE": "b0ee35b4c0a8dce348687a69fd70d5d60df6491c027284ea7530f7fb0e84b9bb",
+      "NIFTY26JAN25050CE": "1d3aac049523afa00b0c072f82e6457a6a19d136dd46b28b99cb1a1a23e03c99",
+      "NIFTY26JAN25350CE": "ee3f25a170d983fcce96453a0b641e19fc9ea6088db87da40746637de656e94c",
+      "NIFTY26JAN25100CE": "eb1c0d8436c85712ba6ce7b7c8e8d455994ba89c94d4fde3c1047f7f5b572004",
+      "NIFTY26JAN25100PE": "0803de7a389ea719db9ef2aa1cd50d7c869e9edd2a853429bc6ace0e5a518f5e",
+      "NIFTY26JAN25500PE": "7fbfe4e806e4a461981b93726ea5c76cdbb5e539b3df19c1d637e03083302cd4",
+      "NIFTY26JAN25500CE": "af61b6fe0316df2cb496e1e4fc5f15e969f92a0c8ed5b8d620a71472db8d527d",
+      "NIFTY26JAN25400CE": "dea77c73f53363f419d5edb4828b89992562117a72998cce0533bbbf04c6834a",
+      "NIFTY26JAN25250PE": "84177f11a993a78fb8bfefbde3aa5c7d91ad6f86b8a3f8cb0404b91294780ba6",
+      "NIFTY26JAN25300PE": "4f5659d3e60c448d9f6fe4515e09e7b4a1a7dbe7c3b36d5eeb31faead1fd64eb",
+      "NIFTY26JAN25200CE": "b99421ee83f82389a02b72f26c04bc64f1d14e921133bcc20dd016f734ecae53",
+      "NIFTY26JAN25450PE": "46a74c05c19ca2f76dd6c7a127edf9cc33b281ccd2414b15132b75e4144e1b8f"
+    }
+  },
+  "started_at": "2026-01-23T04:21:30.553198921Z",
+  "finished_at": "2026-01-23T04:22:31.642907973Z",
+  "duration_secs": 61.089
+}
