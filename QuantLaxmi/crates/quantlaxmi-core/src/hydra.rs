@@ -1,4 +1,4 @@
-//! # KUBERA HYDRA Flagship Strategy
+//! # QUANTLAXMI HYDRA Flagship Strategy
 //!
 //! ## P.1016 - IEEE Standard
 //! **Module**: HYDRA-v2.0
@@ -44,10 +44,10 @@
 use crate::EventBus;
 use crate::rmt;
 use chrono::{DateTime, Utc};
-use kubera_models::{
+use quantlaxmi_models::{
     L2Update, MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side, SignalEvent,
 };
-use kubera_models::{OptionGreeks, OptionType};
+use quantlaxmi_models::{OptionGreeks, OptionType};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -1302,7 +1302,7 @@ impl MeanRevExpert {
         // Soft clip to [-1,1] without hard saturation
         self.signal = boosted.tanh();
 
-        // Diagnostics for tuning (enable with RUST_LOG=kubera_core::hydra=debug)
+        // Diagnostics for tuning (enable with RUST_LOG=quantlaxmi_core::hydra=debug)
         debug!(
             "[MEANREV] vwap_z={:.2} bb_z={:.2} vwap_sig={:.2} bb_sig={:.2} vacuum={} combined={:.2} boosted={:.2} signal={:.2}",
             vwap_zscore,
@@ -3299,7 +3299,7 @@ impl GreeksRiskManager {
 
     /// Update Greeks from actual option parameters using Black-Scholes
     ///
-    /// This is the PRODUCTION method - uses real Greeks calculations from kubera_options
+    /// This is the PRODUCTION method - uses real Greeks calculations from quantlaxmi_options
     ///
     /// # Parameters
     /// * `position` - Number of lots (positive = long, negative = short)
@@ -3319,7 +3319,7 @@ impl GreeksRiskManager {
         option_type: OptionType,
         risk_free_rate: f64,
     ) {
-        // Calculate real Greeks using Black-Scholes from kubera_options
+        // Calculate real Greeks using Black-Scholes from quantlaxmi_options
         let single_option_greeks = match option_type {
             OptionType::Call => OptionGreeks::for_call(
                 spot_price,
@@ -3937,7 +3937,7 @@ impl HydraStrategy {
                 self.option_time_to_expiry,
                 self.option_type,
             ) {
-                // PRODUCTION: Real Greeks from kubera_options Black-Scholes
+                // PRODUCTION: Real Greeks from quantlaxmi_options Black-Scholes
                 greeks_mgr.update_from_option(
                     current_pos,
                     price,
@@ -4328,8 +4328,8 @@ impl crate::Strategy for HydraStrategy {
             status,
         } = &fill.payload
         {
-            if *status == kubera_models::OrderStatus::Filled
-                || *status == kubera_models::OrderStatus::PartiallyFilled
+            if *status == quantlaxmi_models::OrderStatus::Filled
+                || *status == quantlaxmi_models::OrderStatus::PartiallyFilled
             {
                 let symbol = &fill.symbol;
 

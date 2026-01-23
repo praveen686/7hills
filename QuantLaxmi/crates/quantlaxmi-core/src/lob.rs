@@ -24,8 +24,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-// Import from models (leaf crate) - breaks kubera-core -> kubera-options cycle
-use kubera_models::DepthEvent;
+// Import from models (leaf crate) - breaks quantlaxmi-core -> quantlaxmi-options cycle
+use quantlaxmi_models::DepthEvent;
 
 /// Error types for order book operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn test_apply_depth_event() {
         use chrono::Utc;
-        use kubera_models::{DepthLevel, IntegrityTier};
+        use quantlaxmi_models::{DepthLevel, IntegrityTier};
 
         let mut book = OrderBook::new("BTCUSDT".to_string(), -2, -8);
 
@@ -634,7 +634,7 @@ mod tests {
     #[test]
     fn test_depth_event_symbol_mismatch() {
         use chrono::Utc;
-        use kubera_models::IntegrityTier;
+        use quantlaxmi_models::IntegrityTier;
 
         let mut book = OrderBook::new("BTCUSDT".to_string(), -2, -8);
 
@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn test_depth_event_exponent_mismatch() {
         use chrono::Utc;
-        use kubera_models::IntegrityTier;
+        use quantlaxmi_models::IntegrityTier;
 
         let mut book = OrderBook::new("BTCUSDT".to_string(), -2, -8);
 
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn test_depth_event_gap_detection() {
         use chrono::Utc;
-        use kubera_models::{DepthLevel, IntegrityTier};
+        use quantlaxmi_models::{DepthLevel, IntegrityTier};
 
         let mut book = OrderBook::new("BTCUSDT".to_string(), -2, -8);
 

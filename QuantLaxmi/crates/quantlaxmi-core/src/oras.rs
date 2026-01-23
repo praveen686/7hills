@@ -2,7 +2,7 @@
 //!
 //! ## P.1016 - IEEE Standard for Information Technology
 //! **Module**: ORAS-v1
-//! **Author**: QuantKubera Team
+//! **Author**: QuantLaxmi Team
 //! **Date**: 2024-12-18
 //! **Compliance**: ISO/IEC/IEEE 12207:2017
 //!
@@ -17,7 +17,7 @@
 //! - **Self-Correction**: Online weight adjustment based on execution feedback (Slippage).
 
 use crate::EventBus;
-use kubera_models::{MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side, SignalEvent};
+use quantlaxmi_models::{MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side, SignalEvent};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tracing::info;

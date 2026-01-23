@@ -13,7 +13,7 @@
 //! It generates zero trades and only emits heartbeat signals for pipeline continuity.
 
 use crate::{EventBus, Strategy};
-use kubera_models::{MarketEvent, MarketPayload, OrderEvent};
+use quantlaxmi_models::{MarketEvent, MarketPayload, OrderEvent};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 

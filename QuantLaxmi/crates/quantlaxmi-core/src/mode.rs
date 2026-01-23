@@ -3,7 +3,7 @@
 //! Environment configuration for the trading engine lifecycle.
 //!
 //! ## Description
-//! Defines the three primary operational modes for the QuantKubera system,
+//! Defines the three primary operational modes for the QuantLaxmi system,
 //! enabling seamless transition between historical simulation, real-time
 //! paper trading, and production live trading.
 //!

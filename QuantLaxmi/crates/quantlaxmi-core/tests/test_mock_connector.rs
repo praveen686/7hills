@@ -1,8 +1,8 @@
-use kubera_core::{connector::MarketConnector, connector::MockConnector};
+use quantlaxmi_core::{connector::MarketConnector, connector::MockConnector};
 
 #[tokio::test]
 async fn test_mock_connector_integration() {
-    let _bus = kubera_core::EventBus::new(100);
+    let _bus = quantlaxmi_core::EventBus::new(100);
     let connector = MockConnector::new("TestMock");
 
     assert_eq!(connector.name(), "TestMock");

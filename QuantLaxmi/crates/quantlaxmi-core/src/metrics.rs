@@ -203,33 +203,33 @@ impl MetricsSnapshot {
         use metrics::gauge;
 
         // Return metrics
-        gauge!("kubera_trading_total_pnl").set(self.total_pnl);
-        gauge!("kubera_trading_total_return_pct").set(self.total_return_pct);
-        gauge!("kubera_trading_annualized_return").set(self.annualized_return);
+        gauge!("quantlaxmi_trading_total_pnl").set(self.total_pnl);
+        gauge!("quantlaxmi_trading_total_return_pct").set(self.total_return_pct);
+        gauge!("quantlaxmi_trading_annualized_return").set(self.annualized_return);
 
         // Risk metrics
-        gauge!("kubera_trading_sharpe_ratio").set(self.sharpe_ratio);
-        gauge!("kubera_trading_sortino_ratio").set(self.sortino_ratio);
-        gauge!("kubera_trading_calmar_ratio").set(self.calmar_ratio);
-        gauge!("kubera_trading_max_drawdown_pct").set(self.max_drawdown_pct);
-        gauge!("kubera_trading_current_drawdown_pct").set(self.current_drawdown_pct);
-        gauge!("kubera_trading_var_95").set(self.var_95);
-        gauge!("kubera_trading_volatility").set(self.volatility);
+        gauge!("quantlaxmi_trading_sharpe_ratio").set(self.sharpe_ratio);
+        gauge!("quantlaxmi_trading_sortino_ratio").set(self.sortino_ratio);
+        gauge!("quantlaxmi_trading_calmar_ratio").set(self.calmar_ratio);
+        gauge!("quantlaxmi_trading_max_drawdown_pct").set(self.max_drawdown_pct);
+        gauge!("quantlaxmi_trading_current_drawdown_pct").set(self.current_drawdown_pct);
+        gauge!("quantlaxmi_trading_var_95").set(self.var_95);
+        gauge!("quantlaxmi_trading_volatility").set(self.volatility);
 
         // Trade metrics
-        gauge!("kubera_trading_total_trades").set(self.total_trades as f64);
-        gauge!("kubera_trading_win_rate").set(self.win_rate);
-        gauge!("kubera_trading_profit_factor").set(self.profit_factor);
-        gauge!("kubera_trading_expectancy").set(self.expectancy);
-        gauge!("kubera_trading_kelly_fraction").set(self.kelly_fraction);
+        gauge!("quantlaxmi_trading_total_trades").set(self.total_trades as f64);
+        gauge!("quantlaxmi_trading_win_rate").set(self.win_rate);
+        gauge!("quantlaxmi_trading_profit_factor").set(self.profit_factor);
+        gauge!("quantlaxmi_trading_expectancy").set(self.expectancy);
+        gauge!("quantlaxmi_trading_kelly_fraction").set(self.kelly_fraction);
 
         // Execution metrics
-        gauge!("kubera_trading_avg_slippage_bps").set(self.avg_slippage_bps);
-        gauge!("kubera_trading_total_commission").set(self.total_commission);
+        gauge!("quantlaxmi_trading_avg_slippage_bps").set(self.avg_slippage_bps);
+        gauge!("quantlaxmi_trading_total_commission").set(self.total_commission);
 
         // Equity state
-        gauge!("kubera_trading_equity").set(self.equity);
-        gauge!("kubera_trading_peak_equity").set(self.peak_equity);
+        gauge!("quantlaxmi_trading_equity").set(self.equity);
+        gauge!("quantlaxmi_trading_peak_equity").set(self.peak_equity);
     }
 
     /// Format as a compact single-line summary

@@ -3,7 +3,7 @@
 //! Defines the unified abstractions for market data ingestion and execution.
 //!
 //! ## Description
-//! Implements the core traits and mock providers for the QuantKubera ecosystem.
+//! Implements the core traits and mock providers for the QuantLaxmi ecosystem.
 //! Following the Adapter pattern, this module decouples strategy logic from
 //! exchange-specific API nuances.
 //!

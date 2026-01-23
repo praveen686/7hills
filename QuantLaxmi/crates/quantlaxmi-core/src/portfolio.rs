@@ -12,7 +12,7 @@
 //! ## References
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
-use kubera_models::Side;
+use quantlaxmi_models::Side;
 use std::collections::HashMap;
 use tracing::info;
 

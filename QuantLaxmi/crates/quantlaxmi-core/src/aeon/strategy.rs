@@ -21,7 +21,7 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
-use kubera_models::{
+use quantlaxmi_models::{
     MarketEvent, MarketPayload, OrderEvent, OrderPayload, OrderStatus, Side, SignalEvent,
 };
 use std::collections::VecDeque;

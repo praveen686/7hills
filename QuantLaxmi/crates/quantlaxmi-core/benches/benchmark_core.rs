@@ -1,7 +1,7 @@
 use chrono::Utc;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use kubera_core::EventBus;
-use kubera_models::{MarketEvent, MarketPayload, Side};
+use quantlaxmi_core::EventBus;
+use quantlaxmi_models::{MarketEvent, MarketPayload, Side};
 use tokio::runtime::Runtime;
 
 fn bench_event_bus(c: &mut Criterion) {
@@ -28,7 +28,7 @@ fn bench_event_bus(c: &mut Criterion) {
 }
 
 fn bench_sbe_decoding(c: &mut Criterion) {
-    use kubera_sbe::{BinanceSbeDecoder, SbeHeader};
+    use quantlaxmi_sbe::{BinanceSbeDecoder, SbeHeader};
 
     // Example Binance SBE Trade message (Template ID 10000)
     // Header (8 bytes) + Body
@@ -45,8 +45,8 @@ fn bench_sbe_decoding(c: &mut Criterion) {
 }
 
 fn bench_e2e_tick_to_decision(c: &mut Criterion) {
-    use kubera_core::MomentumStrategy;
-    use kubera_core::Strategy;
+    use quantlaxmi_core::MomentumStrategy;
+    use quantlaxmi_core::Strategy;
     use std::sync::Arc;
 
     let rt = Runtime::new().unwrap();

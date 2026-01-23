@@ -17,7 +17,7 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
 use crate::EventBus;
-use kubera_models::{MarketEvent, OrderEvent, RiskEvent, SignalEvent};
+use quantlaxmi_models::{MarketEvent, OrderEvent, RiskEvent, SignalEvent};
 use std::sync::Arc;
 
 /// Core interface for systematic trading logic.
@@ -105,10 +105,10 @@ impl StrategyRunner {
                 Ok(event) = market_rx.recv() => {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         match &event.payload {
-                            kubera_models::MarketPayload::Tick { .. } => {
+                            quantlaxmi_models::MarketPayload::Tick { .. } => {
                                 self.strategy.on_tick(&event);
                             }
-                            kubera_models::MarketPayload::Bar { .. } => {
+                            quantlaxmi_models::MarketPayload::Bar { .. } => {
                                 self.strategy.on_bar(&event);
                             }
                             _ => {}
@@ -119,8 +119,8 @@ impl StrategyRunner {
 
                 Ok(event) = order_update_rx.recv() => {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        if let kubera_models::OrderPayload::Update { status, .. } = &event.payload {
-                            if *status == kubera_models::OrderStatus::Filled {
+                        if let quantlaxmi_models::OrderPayload::Update { status, .. } = &event.payload {
+                            if *status == quantlaxmi_models::OrderStatus::Filled {
                                 self.strategy.on_fill(&event);
                             }
                         }
@@ -187,7 +187,7 @@ impl MomentumStrategy {
         }
     }
 
-    fn emit_signal(&self, event: &MarketEvent, side: kubera_models::Side, price: f64) {
+    fn emit_signal(&self, event: &MarketEvent, side: quantlaxmi_models::Side, price: f64) {
         if let Some(bus) = &self.bus {
             let signal = SignalEvent {
                 timestamp: event.exchange_time,
@@ -219,7 +219,7 @@ impl Strategy for MomentumStrategy {
     fn on_tick(&mut self, _event: &MarketEvent) {}
 
     fn on_bar(&mut self, event: &MarketEvent) {
-        if let kubera_models::MarketPayload::Bar { close, .. } = &event.payload {
+        if let quantlaxmi_models::MarketPayload::Bar { close, .. } = &event.payload {
             self.prices.push(*close);
             if self.prices.len() > self.lookback {
                 self.prices.remove(0);
@@ -231,11 +231,11 @@ impl Strategy for MomentumStrategy {
                 if momentum > 0.0 && self.position == 0.0 {
                     tracing::info!("[{}] BUY signal @ {}", self.name, close);
                     self.position = 1.0;
-                    self.emit_signal(event, kubera_models::Side::Buy, *close);
+                    self.emit_signal(event, quantlaxmi_models::Side::Buy, *close);
                 } else if momentum < 0.0 && self.position > 0.0 {
                     tracing::info!("[{}] SELL signal @ {}", self.name, close);
                     self.position = 0.0;
-                    self.emit_signal(event, kubera_models::Side::Sell, *close);
+                    self.emit_signal(event, quantlaxmi_models::Side::Sell, *close);
                 }
             }
         }

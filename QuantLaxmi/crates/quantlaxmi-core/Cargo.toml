@@ -1,8 +1,38 @@
 [package]
 name = "quantlaxmi-core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+description = "Core event bus and trading abstractions for QuantLaxmi"
 publish = false
 
 [dependencies]
-kubera-core = { path = "../kubera-core" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+axum = { workspace = true }
+opentelemetry = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-stdout = { workspace = true }
+arrow = { workspace = true }
+parquet = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
+proptest = "1.4"
+
+[[bench]]
+name = "benchmark_core"
+harness = false
