@@ -60,13 +60,17 @@ pub struct TickEvent {
     pub integrity_tier: IntegrityTier,
 }
 
-/// Integrity tier for captured data.
+/// Integrity tier for captured tick data.
+///
+/// Note: "Certified" is reserved for artifacts that persist FULL L2 depth.
+/// Since TickEvent only stores L1 (best bid/ask), we use L2Present/L1Only
+/// to indicate whether the source tick had depth data available.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum IntegrityTier {
-    /// Full L2 depth data available
-    Certified,
-    /// Synthetic spread applied (depth unavailable)
-    Research,
+    /// Source tick had L2 depth data (but only L1 is persisted in TickEvent)
+    L2Present,
+    /// Source tick had no depth data; synthetic spread applied
+    L1Only,
 }
 
 /// Session manifest for multi-instrument capture.
@@ -143,12 +147,14 @@ struct AuthOutput {
 }
 
 /// Authenticate with Zerodha via Python sidecar.
+///
+/// The sidecar script is located at `scripts/zerodha_auth.py` in the QuantLaxmi repo root.
 fn authenticate() -> Result<(String, String)> {
     println!("Authenticating with Zerodha...");
     let output = Command::new("python3")
-        .arg("crates/kubera-connectors/scripts/zerodha_auth.py")
+        .arg("scripts/zerodha_auth.py")
         .output()
-        .context("Failed to run zerodha_auth.py")?;
+        .context("Failed to run scripts/zerodha_auth.py")?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
@@ -162,16 +168,50 @@ fn authenticate() -> Result<(String, String)> {
     Ok((auth.api_key, auth.access_token))
 }
 
-/// Fetch instrument tokens from NFO instruments master.
+/// Kite exchange segment for instrument master download.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum KiteSegment {
+    /// NSE Futures & Options (default for options capture)
+    #[default]
+    NFO,
+    /// NSE Cash/Equities (includes indices like NIFTY 50, NIFTY BANK)
+    NSE,
+    /// BSE Cash/Equities
+    BSE,
+    /// BSE Futures & Options
+    BFO,
+}
+
+impl KiteSegment {
+    fn as_str(&self) -> &'static str {
+        match self {
+            KiteSegment::NFO => "NFO",
+            KiteSegment::NSE => "NSE",
+            KiteSegment::BSE => "BSE",
+            KiteSegment::BFO => "BFO",
+        }
+    }
+}
+
+/// Fetch instrument tokens from Kite instruments master.
+///
+/// # Parameters
+/// * `segment` - Exchange segment (NFO for options, NSE for indices/equities)
+///
+/// For indices (NIFTY 50, NIFTY BANK), use `KiteSegment::NSE`.
+/// For F&O instruments, use `KiteSegment::NFO` (default).
 async fn fetch_instrument_tokens(
     api_key: &str,
     access_token: &str,
     symbols: &[String],
+    segment: KiteSegment,
 ) -> Result<Vec<(String, u32)>> {
     let client = reqwest::Client::new();
 
-    // Fetch NFO instruments master
-    let url = format!("{}/instruments/NFO", KITE_API_URL);
+    // Fetch instruments master for the specified segment
+    let url = format!("{}/instruments/{}", KITE_API_URL, segment.as_str());
+    println!("Fetching instruments from: {}", url);
+
     let response = client
         .get(&url)
         .header("X-Kite-Version", "3")
@@ -205,6 +245,51 @@ async fn fetch_instrument_tokens(
     Ok(tokens)
 }
 
+/// Fetch instrument tokens from multiple segments.
+///
+/// Automatically determines segment based on symbol patterns:
+/// - Symbols containing expiry codes (e.g., "26JAN") → NFO
+/// - Symbols like "NIFTY 50", "NIFTY BANK" → NSE
+async fn fetch_instrument_tokens_auto(
+    api_key: &str,
+    access_token: &str,
+    symbols: &[String],
+) -> Result<Vec<(String, u32)>> {
+    let mut nfo_symbols = Vec::new();
+    let mut nse_symbols = Vec::new();
+
+    for sym in symbols {
+        let upper = sym.to_uppercase();
+        // F&O symbols contain expiry patterns like "26JAN", "26FEB", etc.
+        if upper.contains("JAN") || upper.contains("FEB") || upper.contains("MAR") ||
+           upper.contains("APR") || upper.contains("MAY") || upper.contains("JUN") ||
+           upper.contains("JUL") || upper.contains("AUG") || upper.contains("SEP") ||
+           upper.contains("OCT") || upper.contains("NOV") || upper.contains("DEC") ||
+           upper.ends_with("CE") || upper.ends_with("PE") || upper.ends_with("FUT") {
+            nfo_symbols.push(upper);
+        } else {
+            // Likely an index or equity
+            nse_symbols.push(upper);
+        }
+    }
+
+    let mut all_tokens = Vec::new();
+
+    // Fetch from NFO if any F&O symbols
+    if !nfo_symbols.is_empty() {
+        let tokens = fetch_instrument_tokens(api_key, access_token, &nfo_symbols, KiteSegment::NFO).await?;
+        all_tokens.extend(tokens);
+    }
+
+    // Fetch from NSE if any index/equity symbols
+    if !nse_symbols.is_empty() {
+        let tokens = fetch_instrument_tokens(api_key, access_token, &nse_symbols, KiteSegment::NSE).await?;
+        all_tokens.extend(tokens);
+    }
+
+    Ok(all_tokens)
+}
+
 /// Parse binary tick data from Kite WebSocket.
 /// Returns parsed tick data if valid.
 ///
@@ -212,8 +297,21 @@ async fn fetch_instrument_tokens(
 /// - Offset 0-4: Token (uint32)
 /// - Offset 4-8: LTP (int32, divide by 100)
 /// - Offset 8-12: Last traded quantity
-/// - Offset 44-104: Buy depth (5 levels x 12 bytes each)
-/// - Offset 104-164: Sell depth (5 levels x 12 bytes each)
+/// - Offset 12-16: Average traded price
+/// - Offset 16-20: Volume traded
+/// - Offset 20-24: Total buy quantity
+/// - Offset 24-28: Total sell quantity
+/// - Offset 28-32: Open
+/// - Offset 32-36: High
+/// - Offset 36-40: Low
+/// - Offset 40-44: Close
+/// - Offset 44-48: Last trade time (Unix timestamp)
+/// - Offset 48-52: OI (open interest)
+/// - Offset 52-56: OI day high
+/// - Offset 56-60: OI day low
+/// - Offset 60-64: Exchange timestamp (Unix timestamp)
+/// - Offset 64-124: Buy depth (5 levels x 12 bytes each)
+/// - Offset 124-184: Sell depth (5 levels x 12 bytes each)
 fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> {
     if data.len() < 4 {
         return None;
@@ -251,7 +349,9 @@ fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> 
 
         // Full mode (184 bytes) has depth data
         let (bid_price, ask_price, bid_qty, ask_qty, has_depth) = if packet_len >= 184 {
-            let depth_start = 44;
+            // Depth starts at offset 64, after the 64-byte header that includes:
+            // OHLC, timestamps, OI, and exchange_timestamp
+            let depth_start = 64;
 
             // Find best bid (highest price with qty > 0 from buy side)
             let mut best_bid_price = 0i64;
@@ -283,6 +383,28 @@ fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> 
             let valid_depth = best_bid_price > 0
                 && best_ask_price < i64::MAX
                 && best_bid_price < best_ask_price;
+
+            // Debug: dump full packet to find where depth actually is
+            static DEBUG_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let count = DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if count < 1 {
+                eprintln!("[DEBUG] token={} ltp={} (₹{:.2})", token, ltp_raw, ltp_raw as f64 / 100.0);
+                eprintln!("[DEBUG] Full packet ({} bytes):", packet_len);
+                // Dump in 20-byte chunks with offset labels
+                for chunk_start in (0..packet_len).step_by(20) {
+                    let chunk_end = (chunk_start + 20).min(packet_len);
+                    let chunk = &packet[chunk_start..chunk_end];
+                    // Also show as i32 values
+                    let mut i32_vals = String::new();
+                    for i in (0..chunk.len()).step_by(4) {
+                        if i + 4 <= chunk.len() {
+                            let val = BigEndian::read_i32(&chunk[i..i+4]);
+                            i32_vals.push_str(&format!("{:>10} ", val));
+                        }
+                    }
+                    eprintln!("[{:3}] {:02x?} | {}", chunk_start, chunk, i32_vals);
+                }
+            }
 
             if valid_depth {
                 (best_bid_price, best_ask_price, best_bid_qty, best_ask_qty, true)
@@ -361,9 +483,9 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     // Authenticate
     let (api_key, access_token) = authenticate()?;
 
-    // Fetch instrument tokens
+    // Fetch instrument tokens (auto-detects segment: NFO for options, NSE for indices)
     println!("Fetching instrument tokens for {} symbols...", config.instruments.len());
-    let tokens = fetch_instrument_tokens(&api_key, &access_token, &config.instruments).await?;
+    let tokens = fetch_instrument_tokens_auto(&api_key, &access_token, &config.instruments).await?;
 
     if tokens.is_empty() {
         bail!("No valid instrument tokens found for symbols: {:?}", config.instruments);
@@ -476,9 +598,9 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
                                 volume: tick.volume,
                                 price_exponent: config.price_exponent,
                                 integrity_tier: if tick.has_depth {
-                                    IntegrityTier::Certified
+                                    IntegrityTier::L2Present
                                 } else {
-                                    IntegrityTier::Research
+                                    IntegrityTier::L1Only
                                 },
                             };
 
@@ -725,7 +847,7 @@ mod tests {
             ltq: 50,
             volume: 10000,
             price_exponent: -2,
-            integrity_tier: IntegrityTier::Certified,
+            integrity_tier: IntegrityTier::L2Present,
         };
 
         let json = serde_json::to_string(&event).unwrap();

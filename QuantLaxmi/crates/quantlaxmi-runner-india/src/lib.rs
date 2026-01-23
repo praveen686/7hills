@@ -74,8 +74,18 @@ pub enum Commands {
     /// Capture multi-instrument session with TickEvent JSONL (mantissa-based pricing)
     CaptureSession {
         /// Comma-separated instruments, e.g. BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE
+        /// If not provided, use --underlying and --strikes for auto-discovery
         #[arg(long)]
-        instruments: String,
+        instruments: Option<String>,
+
+        /// Underlying(s) for auto-discovery: NIFTY, BANKNIFTY, FINNIFTY (comma-separated)
+        /// Use with --strikes to auto-discover ATM options
+        #[arg(long, value_delimiter = ',')]
+        underlying: Option<Vec<String>>,
+
+        /// Strikes around ATM for auto-discovery (e.g., 5 = ATM ± 5 strikes = 11 strikes * 2 = 22 symbols)
+        #[arg(long, default_value_t = 5)]
+        strikes: u32,
 
         /// Output directory, e.g. data/sessions/banknifty_20260122
         #[arg(long)]
@@ -196,10 +206,12 @@ async fn async_main() -> anyhow::Result<()> {
         } => run_capture_zerodha(&symbols, &out, duration_secs).await,
         Commands::CaptureSession {
             instruments,
+            underlying,
+            strikes,
             out_dir,
             duration_secs,
             price_exponent,
-        } => run_capture_session(&instruments, &out_dir, duration_secs, price_exponent).await,
+        } => run_capture_session(instruments.as_deref(), underlying.as_deref(), strikes, &out_dir, duration_secs, price_exponent).await,
         Commands::BacktestKitesim {
             qty_scale,
             strategy,
@@ -308,20 +320,61 @@ async fn run_capture_zerodha(symbols: &str, out: &str, duration_secs: u64) -> an
 }
 
 async fn run_capture_session(
-    instruments: &str,
+    instruments: Option<&str>,
+    underlyings: Option<&[String]>,
+    strikes: u32,
     out_dir: &str,
     duration_secs: u64,
     price_exponent: i8,
 ) -> anyhow::Result<()> {
-    let instrument_list: Vec<String> = instruments
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    // Determine instrument list: either from --instruments or auto-discovery via --underlying
+    let instrument_list: Vec<String> = if let Some(instr) = instruments {
+        instr
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else if let Some(underlying_list) = underlyings {
+        // Auto-discover ATM options for all underlyings
+        let mut all_symbols = Vec::new();
+        let discovery = ZerodhaAutoDiscovery::from_sidecar()?;
+
+        for underlying_sym in underlying_list {
+            println!(
+                "Auto-discovering {} options (ATM ± {} strikes)...",
+                underlying_sym, strikes
+            );
+
+            let config = AutoDiscoveryConfig {
+                underlying: underlying_sym.to_uppercase(),
+                strikes_around_atm: strikes,
+                strike_interval: if underlying_sym.to_uppercase() == "BANKNIFTY" {
+                    100.0
+                } else {
+                    50.0
+                },
+                ..Default::default()
+            };
+
+            let symbols = discovery.discover_symbols(&config).await?;
+            println!("✅ Discovered {} instruments for {}:", symbols.len(), underlying_sym);
+            for (sym, token) in &symbols {
+                println!("  {} (token: {})", sym, token);
+            }
+
+            all_symbols.extend(symbols.into_iter().map(|(sym, _)| sym));
+        }
+
+        all_symbols
+    } else {
+        return Err(anyhow::anyhow!(
+            "Must provide either --instruments or --underlying for auto-discovery"
+        ));
+    };
 
     if instrument_list.is_empty() {
         return Err(anyhow::anyhow!(
-            "No instruments provided. Use --instruments BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE"
+            "No instruments found. Check --instruments or --underlying + --strikes"
         ));
     }
 

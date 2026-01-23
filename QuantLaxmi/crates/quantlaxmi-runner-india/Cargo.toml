@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2024"
 description = "India trading runner for QuantLaxmi (Zerodha/NSE/BSE)"
 
+[[bin]]
+name = "quantlaxmi-india"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 # Shared runner infrastructure
 quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }

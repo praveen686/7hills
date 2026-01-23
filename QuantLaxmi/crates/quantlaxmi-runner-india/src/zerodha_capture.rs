@@ -82,12 +82,14 @@ impl std::fmt::Display for CaptureStats {
 }
 
 /// Authenticate with Zerodha via Python sidecar.
+///
+/// The sidecar script is located at `scripts/zerodha_auth.py` in the QuantLaxmi repo root.
 fn authenticate() -> Result<(String, String)> {
     println!("Authenticating with Zerodha...");
     let output = Command::new("python3")
-        .arg("crates/kubera-connectors/scripts/zerodha_auth.py")
+        .arg("scripts/zerodha_auth.py")
         .output()
-        .context("Failed to run zerodha_auth.py")?;
+        .context("Failed to run scripts/zerodha_auth.py")?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
@@ -207,8 +209,13 @@ pub async fn fetch_quotes(
 /// - Offset 32-36: High price
 /// - Offset 36-40: Low price
 /// - Offset 40-44: Close price
-/// - Offset 44-104: Buy depth (5 levels x 12 bytes each)
-/// - Offset 104-164: Sell depth (5 levels x 12 bytes each)
+/// - Offset 44-48: Last trade time (Unix timestamp)
+/// - Offset 48-52: OI (open interest)
+/// - Offset 52-56: OI day high
+/// - Offset 56-60: OI day low
+/// - Offset 60-64: Exchange timestamp (Unix timestamp)
+/// - Offset 64-124: Buy depth (5 levels x 12 bytes each)
+/// - Offset 124-184: Sell depth (5 levels x 12 bytes each)
 ///
 /// Each depth level (12 bytes):
 /// - Offset +0: Quantity (int32)
@@ -241,7 +248,9 @@ fn parse_tick(data: &[u8]) -> Option<Vec<TickData>> {
 
         // Full mode (184 bytes) has depth data
         if packet_len >= 184 {
-            let depth_start = 44;
+            // Depth starts at offset 64, after: token, LTP, LTQ, ATP, volume,
+            // buy/sell qty, OHLC, last_trade_time, OI, OI high/low, exchange_timestamp
+            let depth_start = 64;
 
             // Find best bid (highest price with qty > 0 from buy side)
             let mut best_bid_price = 0.0;
