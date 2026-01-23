@@ -1,13 +1,10 @@
 [package]
 name = "kubera-models"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "Legacy shim - re-exports quantlaxmi-models"
+publish = false
 
 [dependencies]
-serde = { workspace = true }
-chrono = { workspace = true }
-uuid = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }
-
+# Re-export from quantlaxmi-models (implementation moved there)
+quantlaxmi-models = { path = "../quantlaxmi-models" }

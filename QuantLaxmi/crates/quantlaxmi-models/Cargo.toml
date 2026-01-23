@@ -1,8 +1,14 @@
 [package]
 name = "quantlaxmi-models"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+description = "Core trading event models for QuantLaxmi"
 publish = false
 
 [dependencies]
-kubera-models = { path = "../kubera-models" }
+serde = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
