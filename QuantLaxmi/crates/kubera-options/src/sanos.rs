@@ -53,6 +53,9 @@ pub const FAR_OTM_MULTIPLIER: f64 = 3.0;
 /// Risk-free rate for Indian markets (approximate)
 pub const RISK_FREE_RATE: f64 = 0.065;
 
+/// Augmented strike data: (strikes, prices, bids, asks, metadata)
+pub type AugmentedStrikeData = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<StrikeMeta>);
+
 /// Strike metadata for boundary hardening (Phase 8.1)
 ///
 /// Tracks the domain of each strike point for safe feature extraction:
@@ -318,7 +321,7 @@ impl SanosCalibrator {
     ///
     /// Add boundary strikes: K0=0 (C=1), K1=ε (C=1-ε), KN=far OTM (C=0)
     /// Returns (strikes, prices, bids, asks, strike_meta)
-    fn augment_strikes(&self, norm: &NormalizedSlice) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<StrikeMeta>) {
+    fn augment_strikes(&self, norm: &NormalizedSlice) -> AugmentedStrikeData {
         let mut strikes = Vec::new();
         let mut prices = Vec::new();
         let mut bids = Vec::new();
@@ -346,7 +349,7 @@ impl SanosCalibrator {
         // Market strikes
         for i in 0..norm.strikes.len() {
             let k = norm.strikes[i];
-            let is_interior = k >= INTERIOR_LOW && k <= INTERIOR_HIGH;
+            let is_interior = (INTERIOR_LOW..=INTERIOR_HIGH).contains(&k);
             strikes.push(k);
             prices.push(norm.call_prices[i]);
             bids.push(norm.call_bids[i]);
@@ -554,8 +557,8 @@ impl SanosCalibrator {
         }
 
         // Boundary check
-        let boundary_check = fitted_calls.first().map_or(false, |&c| c > 0.95)
-            && fitted_calls.last().map_or(false, |&c| c < 0.05);
+        let boundary_check = fitted_calls.first().is_some_and(|&c| c > 0.95)
+            && fitted_calls.last().is_some_and(|&c| c < 0.05);
 
         // Spread compliance: how many fitted prices fall within bid-ask
         let compliant = fitted_calls

@@ -625,7 +625,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
                 }
 
                 // Progress indicator
-                if total_ticks % 500 == 0 && total_ticks > 0 {
+                if total_ticks > 0 && total_ticks.is_multiple_of(500) {
                     print!("\rCaptured {} ticks...", total_ticks);
                     let _ = std::io::Write::flush(&mut std::io::stdout());
                 }

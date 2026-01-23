@@ -271,10 +271,10 @@ impl GateCounters {
         if !gates.e2_friction_dominance.passed { self.e2_friction_dominance_fail += 1; }
         if !gates.e3_friction_floor.passed { self.e3_friction_floor_fail += 1; }
         // Track floor binding: check if E3 reason contains "FLOOR_BINDING"
-        if let Some(ref reason) = gates.e3_friction_floor.reason {
-            if reason.contains("FLOOR_BINDING") {
-                self.e3_floor_binding_count += 1;
-            }
+        if let Some(ref reason) = gates.e3_friction_floor.reason
+            && reason.contains("FLOOR_BINDING")
+        {
+            self.e3_floor_binding_count += 1;
         }
         if gates.all_passed() { self.all_gates_pass += 1; }
     }
@@ -562,12 +562,12 @@ fn parse_symbol(symbol: &str) -> Option<(String, String, u32, bool)> {
 
     let without_type = &symbol[..symbol.len() - 2];
 
-    let (underlying, rest) = if without_type.starts_with("BANKNIFTY") {
-        ("BANKNIFTY".to_string(), &without_type[9..])
-    } else if without_type.starts_with("NIFTY") {
-        ("NIFTY".to_string(), &without_type[5..])
-    } else if without_type.starts_with("FINNIFTY") {
-        ("FINNIFTY".to_string(), &without_type[8..])
+    let (underlying, rest) = if let Some(rest) = without_type.strip_prefix("BANKNIFTY") {
+        ("BANKNIFTY".to_string(), rest)
+    } else if let Some(rest) = without_type.strip_prefix("FINNIFTY") {
+        ("FINNIFTY".to_string(), rest)
+    } else if let Some(rest) = without_type.strip_prefix("NIFTY") {
+        ("NIFTY".to_string(), rest)
     } else {
         return None;
     };
@@ -666,10 +666,10 @@ fn discover_expiries(session_dir: &PathBuf, underlying: &str) -> Result<Vec<Stri
 
         let symbol = path.file_name().unwrap().to_string_lossy().to_string();
 
-        if let Some((und, exp, _, _)) = parse_symbol(&symbol) {
-            if und == underlying {
-                expiries.insert(exp);
-            }
+        if let Some((und, exp, _, _)) = parse_symbol(&symbol)
+            && und == underlying
+        {
+            expiries.insert(exp);
         }
     }
 
@@ -1159,7 +1159,7 @@ fn main() -> Result<()> {
         // Check market hours - skip decisions outside trading window
         if !is_market_hours(current_ts) {
             counters.outside_market_hours += 1;
-            current_ts = current_ts + interval;
+            current_ts += interval;
             continue;
         }
         counters.inside_market_hours += 1;
@@ -1167,7 +1167,7 @@ fn main() -> Result<()> {
         // Calibrate slices for all expiries at this timestamp
         let mut slices: Vec<SanosSlice> = Vec::new();
 
-        for (_i, expiry) in expiries.iter().enumerate() {
+        for expiry in expiries.iter() {
             let tte = time_to_expiry(current_ts, expiry);
             let slice = build_slice(&all_ticks, &args.underlying, expiry, current_ts, tte);
 
@@ -1186,7 +1186,7 @@ fn main() -> Result<()> {
         }
 
         if slices.len() < 2 {
-            current_ts = current_ts + interval;
+            current_ts += interval;
             continue;
         }
 
@@ -1194,7 +1194,7 @@ fn main() -> Result<()> {
         let features = match build_features(&slices) {
             Ok(f) => f,
             Err(_) => {
-                current_ts = current_ts + interval;
+                current_ts += interval;
                 continue;
             }
         };
@@ -1213,7 +1213,7 @@ fn main() -> Result<()> {
         ) {
             Some(s) => s,
             None => {
-                current_ts = current_ts + interval;
+                current_ts += interval;
                 continue;
             }
         };
@@ -1227,7 +1227,7 @@ fn main() -> Result<()> {
         ) {
             Some(s) => s,
             None => {
-                current_ts = current_ts + interval;
+                current_ts += interval;
                 continue;
             }
         };
@@ -1369,7 +1369,7 @@ fn main() -> Result<()> {
                 counters.update(gates);
 
                 // Check cooldown (Phase 9: S2)
-                let in_cooldown = last_entry_ts.map_or(false, |last| {
+                let in_cooldown = last_entry_ts.is_some_and(|last| {
                     (current_ts - last).num_seconds() < COOLDOWN_SECS
                 });
 
@@ -1445,7 +1445,7 @@ fn main() -> Result<()> {
 
         audit_records.push(audit);
 
-        current_ts = current_ts + interval;
+        current_ts += interval;
     }
 
     // Print gate hit report

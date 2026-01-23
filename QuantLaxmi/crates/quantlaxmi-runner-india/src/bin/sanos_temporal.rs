@@ -150,12 +150,12 @@ fn parse_symbol(symbol: &str) -> Option<(String, String, u32, bool)> {
     }
 
     let without_type = &symbol[..symbol.len() - 2];
-    let (underlying, rest) = if without_type.starts_with("BANKNIFTY") {
-        ("BANKNIFTY".to_string(), &without_type[9..])
-    } else if without_type.starts_with("NIFTY") {
-        ("NIFTY".to_string(), &without_type[5..])
-    } else if without_type.starts_with("FINNIFTY") {
-        ("FINNIFTY".to_string(), &without_type[8..])
+    let (underlying, rest) = if let Some(rest) = without_type.strip_prefix("BANKNIFTY") {
+        ("BANKNIFTY".to_string(), rest)
+    } else if let Some(rest) = without_type.strip_prefix("FINNIFTY") {
+        ("FINNIFTY".to_string(), rest)
+    } else if let Some(rest) = without_type.strip_prefix("NIFTY") {
+        ("NIFTY".to_string(), rest)
     } else {
         return None;
     };
@@ -404,7 +404,7 @@ fn main() -> Result<()> {
 
         if slice.calls.is_empty() || slice.puts.is_empty() {
             info!("  Skipping: insufficient data");
-            current_ts = current_ts + Duration::seconds(args.interval_secs);
+            current_ts += Duration::seconds(args.interval_secs);
             continue;
         }
 
@@ -428,7 +428,7 @@ fn main() -> Result<()> {
             }
         }
 
-        current_ts = current_ts + Duration::seconds(args.interval_secs);
+        current_ts += Duration::seconds(args.interval_secs);
     }
 
     info!("Completed: {} feasible, {} infeasible", num_feasible, num_infeasible);

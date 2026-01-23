@@ -1570,21 +1570,16 @@ impl ZerodhaAutoDiscovery {
 // =============================================================================
 
 /// Expiry selection policy for multi-expiry discovery
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum ExpiryPolicy {
     /// Select T1 (nearest), T2 (next), T3 (front monthly)
+    #[default]
     T1T2T3,
     /// Select first N expiries and optionally a "front monthly"
     Count {
         expiry_count: usize,
         include_front_monthly: bool,
     },
-}
-
-impl Default for ExpiryPolicy {
-    fn default() -> Self {
-        ExpiryPolicy::T1T2T3
-    }
 }
 
 /// Configuration for multi-expiry universe discovery
@@ -1653,6 +1648,12 @@ pub struct ExpirySelection {
     pub selected: Vec<NaiveDate>,
 }
 
+/// Missing instruments map: expiry -> [(strike, option_type)]
+pub type MissingInstrumentsMap = BTreeMap<NaiveDate, Vec<(f64, String)>>;
+
+/// Result of universe instrument resolution
+pub type UniverseResolutionResult = (Vec<UniverseInstrument>, MissingInstrumentsMap);
+
 /// Universe manifest for deterministic capture and replay
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UniverseManifest {
@@ -1669,7 +1670,7 @@ pub struct UniverseManifest {
     pub instruments: Vec<UniverseInstrument>,
     /// Missing instruments per expiry: (strike, "CE"/"PE")
     #[serde(default)]
-    pub missing: BTreeMap<NaiveDate, Vec<(f64, String)>>,
+    pub missing: MissingInstrumentsMap,
 }
 
 // =============================================================================
@@ -1721,10 +1722,10 @@ fn select_t1_t2_t3(
             let mut t3: Option<NaiveDate> = None;
 
             // T3 = max expiry in T1's month if that month has ≥2 expiries
-            if let Some(v) = by_month.get(&(y1, m1)) {
-                if v.len() >= 2 {
-                    t3 = v.iter().copied().max();
-                }
+            if let Some(v) = by_month.get(&(y1, m1))
+                && v.len() >= 2
+            {
+                t3 = v.iter().copied().max();
             }
 
             // Otherwise, pick max expiry from next month
@@ -1849,7 +1850,7 @@ fn resolve_universe_instruments(
     underlying: &str,
     expiries: &[NaiveDate],
     strikes: &[f64],
-) -> (Vec<UniverseInstrument>, BTreeMap<NaiveDate, Vec<(f64, String)>>) {
+) -> UniverseResolutionResult {
     // Build lookup: (expiry, strike_key, type) -> instrument
     let mut map: HashMap<(NaiveDate, i64, String), &NfoInstrument> = HashMap::new();
 
@@ -1862,7 +1863,7 @@ fn resolve_universe_instruments(
     }
 
     let mut resolved = Vec::new();
-    let mut missing: BTreeMap<NaiveDate, Vec<(f64, String)>> = BTreeMap::new();
+    let mut missing: MissingInstrumentsMap = BTreeMap::new();
 
     for &e in expiries.iter() {
         for &k in strikes.iter() {

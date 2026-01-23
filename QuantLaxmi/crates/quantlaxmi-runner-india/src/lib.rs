@@ -357,7 +357,7 @@ async fn run_capture_session(
                 expiry_count: 2,
                 include_front_monthly: false,
             },
-            "t1t2t3" | _ => ExpiryPolicy::T1T2T3,
+            _ => ExpiryPolicy::T1T2T3,
         };
 
         let today = chrono::Local::now().date_naive();

@@ -1,4 +1,4 @@
-// Legacy crate - suppress clippy warnings pending migration
+// Legacy crate - suppress pre-existing clippy warnings pending migration
 #![allow(clippy::collapsible_if)]
 #![allow(clippy::collapsible_else_if)]
 #![allow(clippy::unnecessary_sort_by)]

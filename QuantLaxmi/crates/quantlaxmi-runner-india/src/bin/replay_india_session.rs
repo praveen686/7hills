@@ -33,6 +33,7 @@ struct IndiaSessionManifest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // Fields used for deserialization
 struct IndiaCaptureInfo {
     tradingsymbol: String,
     #[serde(default)]
@@ -45,6 +46,7 @@ struct IndiaCaptureInfo {
 
 /// TickEvent from India session capture (L1 bid/ask with LTP)
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // Fields used for deserialization
 struct TickEvent {
     ts: DateTime<Utc>,
     tradingsymbol: String,
@@ -216,6 +218,7 @@ struct BacktestMetrics {
     max_drawdown: f64,
 }
 
+#[allow(dead_code)] // Utility methods for future use
 impl BacktestMetrics {
     fn new(initial_capital: f64) -> Self {
         Self {
@@ -477,14 +480,14 @@ async fn main() -> Result<()> {
                 unrealized_pnl: unrealized,
             });
 
-            if let Some((prev_side, prev_price)) = last_fill_info {
-                if prev_side != fill.side {
-                    let trade_pnl = match prev_side {
-                        Side::Buy => (fill.price - prev_price) * fill.quantity,
-                        Side::Sell => (prev_price - fill.price) * fill.quantity,
-                    };
-                    metrics.trade_pnls.push(trade_pnl);
-                }
+            if let Some((prev_side, prev_price)) = last_fill_info
+                && prev_side != fill.side
+            {
+                let trade_pnl = match prev_side {
+                    Side::Buy => (fill.price - prev_price) * fill.quantity,
+                    Side::Sell => (prev_price - fill.price) * fill.quantity,
+                };
+                metrics.trade_pnls.push(trade_pnl);
             }
             last_fill_info = Some((fill.side, fill.price));
 
@@ -507,7 +510,7 @@ async fn main() -> Result<()> {
         }
 
         // Progress logging
-        if progress_interval > 0 && metrics.market_events % progress_interval == 0 {
+        if progress_interval > 0 && metrics.market_events.is_multiple_of(progress_interval) {
             let pct = (metrics.market_events as f64 / total_events as f64) * 100.0;
             let elapsed = start_time.elapsed().as_secs_f64();
             let rate = metrics.market_events as f64 / elapsed;

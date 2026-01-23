@@ -181,12 +181,12 @@ fn parse_symbol(symbol: &str) -> Option<(String, String, u32, bool)> {
 
     let without_type = &symbol[..symbol.len() - 2];
 
-    let (underlying, rest) = if without_type.starts_with("BANKNIFTY") {
-        ("BANKNIFTY".to_string(), &without_type[9..])
-    } else if without_type.starts_with("NIFTY") {
-        ("NIFTY".to_string(), &without_type[5..])
-    } else if without_type.starts_with("FINNIFTY") {
-        ("FINNIFTY".to_string(), &without_type[8..])
+    let (underlying, rest) = if let Some(rest) = without_type.strip_prefix("BANKNIFTY") {
+        ("BANKNIFTY".to_string(), rest)
+    } else if let Some(rest) = without_type.strip_prefix("FINNIFTY") {
+        ("FINNIFTY".to_string(), rest)
+    } else if let Some(rest) = without_type.strip_prefix("NIFTY") {
+        ("NIFTY".to_string(), rest)
     } else {
         return None;
     };
@@ -271,10 +271,10 @@ fn discover_expiries(session_dir: &PathBuf, underlying: &str) -> Result<Vec<Stri
 
         let symbol = path.file_name().unwrap().to_string_lossy().to_string();
 
-        if let Some((und, exp, _, _)) = parse_symbol(&symbol) {
-            if und == underlying {
-                expiries.insert(exp);
-            }
+        if let Some((und, exp, _, _)) = parse_symbol(&symbol)
+            && und == underlying
+        {
+            expiries.insert(exp);
         }
     }
 
@@ -787,7 +787,7 @@ fn main() -> Result<()> {
         "cal12", "cal23", "sk1", "sk2", "sk3", "roll12", "rollc12"
     ];
     debug_assert_eq!(header.len(), CSV_COLUMN_COUNT, "Header column count mismatch");
-    wtr.write_record(&header)?;
+    wtr.write_record(header)?;
 
     // Data row
     let row = [
