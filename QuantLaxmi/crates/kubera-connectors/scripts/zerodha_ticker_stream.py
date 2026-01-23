@@ -43,12 +43,34 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Dict
 
 
 def _now_ns() -> int:
     # monotonic is not epoch; we need epoch ns
     return time.time_ns()
+
+
+# Zerodha tick timestamps are typically naive datetimes in IST.
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _to_epoch_ns(ts: object) -> int | None:
+    """Convert a Kite tick timestamp into epoch-nanoseconds.
+
+    Kite may provide timestamps as `datetime` objects (often naive, assumed IST).
+    This function normalizes those to Asia/Kolkata and returns epoch ns.
+    """
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        dt = ts
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_IST)
+        return int(dt.timestamp() * 1_000_000_000)
+    return None
 
 
 def build_instrument_info(kite, tokens: list[int]) -> tuple[Dict[int, str], Dict[str, dict]]:
@@ -145,15 +167,31 @@ def main() -> int:
         ws.set_mode(ws.MODE_FULL, tokens)
 
     def on_ticks(ws, ticks):
-        ts_ns = _now_ns()
+        # IMPORTANT: For deterministic replay and backtesting, the primary timestamp
+        # must reflect exchange time (if available), not arrival time.
+        # We still emit a local arrival timestamp for audit/debug.
+        local_ts_ns = _now_ns()
+
         for t in ticks:
             inst_token = t.get("instrument_token")
             # Use mapping if tradingsymbol is missing from tick
             symbol = t.get("tradingsymbol") or token_to_symbol.get(inst_token, "")
 
+            # Kite usually supplies exchange_timestamp in FULL mode.
+            # Fallback to other common timestamp fields if needed.
+            exch_ts_obj = (
+                t.get("exchange_timestamp")
+                or t.get("last_trade_time")
+                or t.get("timestamp")
+            )
+            exch_ts_ns = _to_epoch_ns(exch_ts_obj)
+            ts_ns = exch_ts_ns if exch_ts_ns is not None else local_ts_ns
+
             out = {
                 "type": "tick",
                 "ts_ns": ts_ns,
+                "exchange_ts_ns": exch_ts_ns,
+                "local_ts_ns": local_ts_ns,
                 "instrument_token": inst_token,
                 "tradingsymbol": symbol,
                 "last_price": t.get("last_price"),
