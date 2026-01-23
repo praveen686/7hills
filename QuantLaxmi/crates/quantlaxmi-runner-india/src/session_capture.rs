@@ -821,14 +821,6 @@ async fn generate_instrument_manifest(
     Ok(())
 }
 
-/// Count lines in a file (for stats recovery on error).
-fn count_file_lines(path: &Path) -> std::io::Result<usize> {
-    use std::io::{BufRead, BufReader};
-    let file = std::fs::File::open(path)?;
-    let reader = BufReader::new(file);
-    Ok(reader.lines().count())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

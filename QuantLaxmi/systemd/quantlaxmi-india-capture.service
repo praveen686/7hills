@@ -1,0 +1,26 @@
+[Unit]
+Description=QuantLaxmi India capture-session (NIFTY/BANKNIFTY, multi-expiry, strike-band)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=isoula
+Group=isoula
+WorkingDirectory=/home/isoula/7hills/QuantLaxmi
+ExecStart=/home/isoula/7hills/QuantLaxmi/systemd/capture-session.sh
+
+# Hardening / stability
+Restart=on-failure
+RestartSec=5
+Nice=0
+LimitNOFILE=1048576
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+# Journald logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

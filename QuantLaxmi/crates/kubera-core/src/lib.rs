@@ -66,11 +66,13 @@ pub mod metrics;
 pub mod aeon;
 pub mod parquet_export;
 pub mod lob;
+pub mod null_observer;
 
 pub use strategy::{Strategy, StrategyRunner, MomentumStrategy};
 pub use oras::OrasStrategy;
 pub use hydra::HydraStrategy;
 pub use aeon::AeonStrategy;
+pub use null_observer::{NullObserverStrategy, OptionChainReport};
 
 pub use mode::{ExecutionMode, ModeConfig};
 pub use portfolio::Portfolio;

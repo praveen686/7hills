@@ -68,3 +68,4 @@ opentelemetry-stdout = { version = "0.2" }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 arrow = { version = "53", default-features = false, features = ["ipc"] }
 parquet = { version = "53", default-features = false, features = ["arrow", "snap"] }
+good_lp = { version = "1.8", default-features = false, features = ["microlp"] }

@@ -8,6 +8,26 @@ description = "India trading runner for QuantLaxmi (Zerodha/NSE/BSE)"
 name = "quantlaxmi-india"
 path = "src/main.rs"
 
+[[bin]]
+name = "replay_india_session"
+path = "src/bin/replay_india_session.rs"
+
+[[bin]]
+name = "sanos_single_slice"
+path = "src/bin/sanos_single_slice.rs"
+
+[[bin]]
+name = "sanos_temporal"
+path = "src/bin/sanos_temporal.rs"
+
+[[bin]]
+name = "sanos_multi_expiry"
+path = "src/bin/sanos_multi_expiry.rs"
+
+[[bin]]
+name = "sanos_features"
+path = "src/bin/sanos_features.rs"
+
 [lib]
 path = "src/lib.rs"
 
@@ -25,6 +45,9 @@ kubera-data = { path = "../kubera-data" }
 kubera-executor = { path = "../kubera-executor" }
 kubera-risk = { path = "../kubera-risk" }
 kubera-options = { path = "../kubera-options" }
+
+# LP solver for SANOS (via kubera-options, but make sure it's available)
+good_lp = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
@@ -68,3 +91,6 @@ dotenv = { workspace = true }
 
 # IDs
 uuid = { workspace = true }
+
+# CSV output
+csv = "1.3"

@@ -13,6 +13,10 @@ output/
 !tests/fixtures/**/*.jsonl
 *.log
 
+# SANOS debug output
+sanos_*.json
+sanos_temporal_*/
+
 # Local secrets
 .env
 .env.*

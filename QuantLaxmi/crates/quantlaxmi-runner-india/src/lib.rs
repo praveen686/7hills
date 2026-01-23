@@ -74,18 +74,22 @@ pub enum Commands {
     /// Capture multi-instrument session with TickEvent JSONL (mantissa-based pricing)
     CaptureSession {
         /// Comma-separated instruments, e.g. BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE
-        /// If not provided, use --underlying and --strikes for auto-discovery
+        /// If not provided, use --underlying and --strike-band for auto-discovery
         #[arg(long)]
         instruments: Option<String>,
 
         /// Underlying(s) for auto-discovery: NIFTY, BANKNIFTY, FINNIFTY (comma-separated)
-        /// Use with --strikes to auto-discover ATM options
+        /// Use with --strike-band to auto-discover options
         #[arg(long, value_delimiter = ',')]
         underlying: Option<Vec<String>>,
 
-        /// Strikes around ATM for auto-discovery (e.g., 5 = ATM ± 5 strikes = 11 strikes * 2 = 22 symbols)
-        #[arg(long, default_value_t = 5)]
-        strikes: u32,
+        /// Strikes around ATM for auto-discovery (e.g., 20 = ATM ± 20 strikes = 41 strikes * 2 = 82 symbols per expiry)
+        #[arg(long, default_value_t = 20)]
+        strike_band: u32,
+
+        /// Expiry policy: "t1" (nearest only), "t1t2t3" (nearest + next + front monthly)
+        #[arg(long, default_value = "t1t2t3")]
+        expiry_policy: String,
 
         /// Output directory, e.g. data/sessions/banknifty_20260122
         #[arg(long)]
@@ -207,11 +211,12 @@ async fn async_main() -> anyhow::Result<()> {
         Commands::CaptureSession {
             instruments,
             underlying,
-            strikes,
+            strike_band,
+            expiry_policy,
             out_dir,
             duration_secs,
             price_exponent,
-        } => run_capture_session(instruments.as_deref(), underlying.as_deref(), strikes, &out_dir, duration_secs, price_exponent).await,
+        } => run_capture_session(instruments.as_deref(), underlying.as_deref(), strike_band, &expiry_policy, &out_dir, duration_secs, price_exponent).await,
         Commands::BacktestKitesim {
             qty_scale,
             strategy,
@@ -322,11 +327,14 @@ async fn run_capture_zerodha(symbols: &str, out: &str, duration_secs: u64) -> an
 async fn run_capture_session(
     instruments: Option<&str>,
     underlyings: Option<&[String]>,
-    strikes: u32,
+    strike_band: u32,
+    expiry_policy: &str,
     out_dir: &str,
     duration_secs: u64,
     price_exponent: i8,
 ) -> anyhow::Result<()> {
+    use quantlaxmi_connectors_zerodha::{ExpiryPolicy, MultiExpiryDiscoveryConfig};
+
     // Determine instrument list: either from --instruments or auto-discovery via --underlying
     let instrument_list: Vec<String> = if let Some(instr) = instruments {
         instr
@@ -335,34 +343,83 @@ async fn run_capture_session(
             .filter(|s| !s.is_empty())
             .collect()
     } else if let Some(underlying_list) = underlyings {
-        // Auto-discover ATM options for all underlyings
+        // Auto-discover multi-expiry universe for all underlyings
         let mut all_symbols = Vec::new();
         let discovery = ZerodhaAutoDiscovery::from_sidecar()?;
 
+        // Parse expiry policy
+        let policy = match expiry_policy.to_lowercase().as_str() {
+            "t1" => ExpiryPolicy::Count {
+                expiry_count: 1,
+                include_front_monthly: false,
+            },
+            "t1t2" => ExpiryPolicy::Count {
+                expiry_count: 2,
+                include_front_monthly: false,
+            },
+            "t1t2t3" | _ => ExpiryPolicy::T1T2T3,
+        };
+
+        let today = chrono::Local::now().date_naive();
+
         for underlying_sym in underlying_list {
             println!(
-                "Auto-discovering {} options (ATM ± {} strikes)...",
-                underlying_sym, strikes
+                "Auto-discovering {} options (±{} strikes, policy={})...",
+                underlying_sym, strike_band, expiry_policy
             );
 
-            let config = AutoDiscoveryConfig {
+            let config = MultiExpiryDiscoveryConfig {
                 underlying: underlying_sym.to_uppercase(),
-                strikes_around_atm: strikes,
-                strike_interval: if underlying_sym.to_uppercase() == "BANKNIFTY" {
-                    100.0
-                } else {
-                    50.0
-                },
-                ..Default::default()
+                strike_band,
+                expiry_policy: policy.clone(),
+                today,
+                prefer_futures_for_atm: false,
+                override_strike_step: None,
             };
 
-            let symbols = discovery.discover_symbols(&config).await?;
-            println!("✅ Discovered {} instruments for {}:", symbols.len(), underlying_sym);
-            for (sym, token) in &symbols {
-                println!("  {} (token: {})", sym, token);
+            let manifest = discovery.discover_universe(&config).await?;
+
+            println!("✅ {} Universe Manifest:", underlying_sym);
+            println!("   Spot: {:.2}", manifest.spot);
+            println!("   ATM: {:.0}", manifest.atm);
+            println!("   Strike step: {:.0}", manifest.strike_step);
+            println!(
+                "   Expiries: T1={}, T2={:?}, T3={:?}",
+                manifest.expiry_selection.t1,
+                manifest.expiry_selection.t2,
+                manifest.expiry_selection.t3
+            );
+            println!(
+                "   Strikes: {} ({:.0} to {:.0})",
+                manifest.target_strikes.len(),
+                manifest.target_strikes.first().unwrap_or(&0.0),
+                manifest.target_strikes.last().unwrap_or(&0.0)
+            );
+            println!("   Instruments: {}", manifest.instruments.len());
+
+            // Log missing
+            for (exp, miss) in &manifest.missing {
+                if !miss.is_empty() {
+                    println!("   Missing for {}: {} instruments", exp, miss.len());
+                }
             }
 
-            all_symbols.extend(symbols.into_iter().map(|(sym, _)| sym));
+            // Save manifest to output directory
+            let manifest_path = std::path::Path::new(out_dir).join(format!(
+                "universe_manifest_{}.json",
+                underlying_sym.to_lowercase()
+            ));
+            std::fs::create_dir_all(out_dir)?;
+            let manifest_json = serde_json::to_string_pretty(&manifest)?;
+            std::fs::write(&manifest_path, &manifest_json)?;
+            println!("   Manifest saved: {:?}", manifest_path);
+
+            all_symbols.extend(
+                manifest
+                    .instruments
+                    .into_iter()
+                    .map(|i| i.tradingsymbol),
+            );
         }
 
         all_symbols
@@ -374,9 +431,11 @@ async fn run_capture_session(
 
     if instrument_list.is_empty() {
         return Err(anyhow::anyhow!(
-            "No instruments found. Check --instruments or --underlying + --strikes"
+            "No instruments found. Check --instruments or --underlying + --strike-band"
         ));
     }
+
+    println!("\nStarting capture with {} instruments...", instrument_list.len());
 
     let config = session_capture::SessionCaptureConfig {
         instruments: instrument_list,

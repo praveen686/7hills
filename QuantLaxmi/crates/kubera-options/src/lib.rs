@@ -49,6 +49,8 @@ pub mod analytics;
 pub mod nse_specs;
 pub mod report;
 pub mod specs;
+pub mod sanos;
+pub mod strategies;
 
 pub use contract::{OptionContract, OptionType, OptionChain};
 pub use greeks::OptionGreeks;
@@ -58,3 +60,4 @@ pub use chain::{OptionChainFetcher, IVSurface, IVPoint};
 pub use signals::{OptionsSignal, SignalType, OptionsSignalGenerator};
 pub use margin::{OptionsMargin, PortfolioGreeks};
 pub use nse_specs::{NseIndex, NseTradingHours, TradingPhase, LotSizeValidator, TickSizeValidator, NseOrderValidator};
+pub use sanos::{SanosCalibrator, SanosSlice, SanosDiagnostics, ExpirySlice, OptionQuote, NormalizedSlice};
