@@ -214,9 +214,11 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
 
         // Extract stats - either from result or from file as fallback
         let (events_written, gaps_detected, snapshot_written) = match &result {
-            Ok(stats) => {
-                (stats.events_written, stats.gaps_detected, stats.snapshot_written)
-            }
+            Ok(stats) => (
+                stats.events_written,
+                stats.gaps_detected,
+                stats.snapshot_written,
+            ),
             Err(e) => {
                 println!("WARNING: {} depth capture error: {}", symbol, e);
                 // Fallback: count lines in file if it exists

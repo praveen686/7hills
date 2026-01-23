@@ -261,11 +261,22 @@ async fn fetch_instrument_tokens_auto(
     for sym in symbols {
         let upper = sym.to_uppercase();
         // F&O symbols contain expiry patterns like "26JAN", "26FEB", etc.
-        if upper.contains("JAN") || upper.contains("FEB") || upper.contains("MAR") ||
-           upper.contains("APR") || upper.contains("MAY") || upper.contains("JUN") ||
-           upper.contains("JUL") || upper.contains("AUG") || upper.contains("SEP") ||
-           upper.contains("OCT") || upper.contains("NOV") || upper.contains("DEC") ||
-           upper.ends_with("CE") || upper.ends_with("PE") || upper.ends_with("FUT") {
+        if upper.contains("JAN")
+            || upper.contains("FEB")
+            || upper.contains("MAR")
+            || upper.contains("APR")
+            || upper.contains("MAY")
+            || upper.contains("JUN")
+            || upper.contains("JUL")
+            || upper.contains("AUG")
+            || upper.contains("SEP")
+            || upper.contains("OCT")
+            || upper.contains("NOV")
+            || upper.contains("DEC")
+            || upper.ends_with("CE")
+            || upper.ends_with("PE")
+            || upper.ends_with("FUT")
+        {
             nfo_symbols.push(upper);
         } else {
             // Likely an index or equity
@@ -277,13 +288,15 @@ async fn fetch_instrument_tokens_auto(
 
     // Fetch from NFO if any F&O symbols
     if !nfo_symbols.is_empty() {
-        let tokens = fetch_instrument_tokens(api_key, access_token, &nfo_symbols, KiteSegment::NFO).await?;
+        let tokens =
+            fetch_instrument_tokens(api_key, access_token, &nfo_symbols, KiteSegment::NFO).await?;
         all_tokens.extend(tokens);
     }
 
     // Fetch from NSE if any index/equity symbols
     if !nse_symbols.is_empty() {
-        let tokens = fetch_instrument_tokens(api_key, access_token, &nse_symbols, KiteSegment::NSE).await?;
+        let tokens =
+            fetch_instrument_tokens(api_key, access_token, &nse_symbols, KiteSegment::NSE).await?;
         all_tokens.extend(tokens);
     }
 
@@ -380,15 +393,20 @@ fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> 
             }
 
             // Validate depth
-            let valid_depth = best_bid_price > 0
-                && best_ask_price < i64::MAX
-                && best_bid_price < best_ask_price;
+            let valid_depth =
+                best_bid_price > 0 && best_ask_price < i64::MAX && best_bid_price < best_ask_price;
 
             // Debug: dump full packet to find where depth actually is
-            static DEBUG_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            static DEBUG_COUNT: std::sync::atomic::AtomicUsize =
+                std::sync::atomic::AtomicUsize::new(0);
             let count = DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if count < 1 {
-                eprintln!("[DEBUG] token={} ltp={} (₹{:.2})", token, ltp_raw, ltp_raw as f64 / 100.0);
+                eprintln!(
+                    "[DEBUG] token={} ltp={} (₹{:.2})",
+                    token,
+                    ltp_raw,
+                    ltp_raw as f64 / 100.0
+                );
                 eprintln!("[DEBUG] Full packet ({} bytes):", packet_len);
                 // Dump in 20-byte chunks with offset labels
                 for chunk_start in (0..packet_len).step_by(20) {
@@ -398,7 +416,7 @@ fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> 
                     let mut i32_vals = String::new();
                     for i in (0..chunk.len()).step_by(4) {
                         if i + 4 <= chunk.len() {
-                            let val = BigEndian::read_i32(&chunk[i..i+4]);
+                            let val = BigEndian::read_i32(&chunk[i..i + 4]);
                             i32_vals.push_str(&format!("{:>10} ", val));
                         }
                     }
@@ -407,7 +425,13 @@ fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> 
             }
 
             if valid_depth {
-                (best_bid_price, best_ask_price, best_bid_qty, best_ask_qty, true)
+                (
+                    best_bid_price,
+                    best_ask_price,
+                    best_bid_qty,
+                    best_ask_qty,
+                    true,
+                )
             } else {
                 // Fallback: use LTP with synthetic spread
                 let spread = (ltp_raw as i64) / 1000; // 0.1% spread
@@ -484,11 +508,17 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let (api_key, access_token) = authenticate()?;
 
     // Fetch instrument tokens (auto-detects segment: NFO for options, NSE for indices)
-    println!("Fetching instrument tokens for {} symbols...", config.instruments.len());
+    println!(
+        "Fetching instrument tokens for {} symbols...",
+        config.instruments.len()
+    );
     let tokens = fetch_instrument_tokens_auto(&api_key, &access_token, &config.instruments).await?;
 
     if tokens.is_empty() {
-        bail!("No valid instrument tokens found for symbols: {:?}", config.instruments);
+        bail!(
+            "No valid instrument tokens found for symbols: {:?}",
+            config.instruments
+        );
     }
 
     println!("Found {} instrument tokens:", tokens.len());
@@ -560,7 +590,8 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         );
     }
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(config.duration_secs);
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(config.duration_secs);
     let mut total_ticks = 0usize;
 
     // Capture loop
@@ -651,7 +682,9 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let duration_secs = (end_time - start_time).num_milliseconds() as f64 / 1000.0;
 
     // Determine if all certified
-    let all_certified = instrument_stats.values().all(|s| s.has_depth && s.research_ticks == 0);
+    let all_certified = instrument_stats
+        .values()
+        .all(|s| s.has_depth && s.research_ticks == 0);
 
     // Generate session manifest
     let session_manifest = generate_session_manifest(
@@ -662,7 +695,8 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         start_time,
         end_time,
         all_certified,
-    ).await?;
+    )
+    .await?;
 
     let manifest_path = config.out_dir.join("session_manifest.json");
     let json = serde_json::to_string_pretty(&session_manifest)?;
@@ -687,7 +721,11 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     }
     println!(
         "  Status: {}",
-        if all_certified { "CERTIFIED" } else { "RESEARCH" }
+        if all_certified {
+            "CERTIFIED"
+        } else {
+            "RESEARCH"
+        }
     );
 
     Ok(SessionCaptureStats {
@@ -754,8 +792,16 @@ async fn generate_session_manifest(
         session_id: session_id.to_string(),
         watermark,
         family: "india".to_string(),
-        profile: if all_certified { "certified".to_string() } else { "research".to_string() },
-        instruments: config.instruments.iter().map(|s| s.to_uppercase()).collect(),
+        profile: if all_certified {
+            "certified".to_string()
+        } else {
+            "research".to_string()
+        },
+        instruments: config
+            .instruments
+            .iter()
+            .map(|s| s.to_uppercase())
+            .collect(),
         captures,
         determinism: SessionDeterminism {
             certified: all_certified,
@@ -816,7 +862,11 @@ async fn generate_instrument_manifest(
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, json)?;
 
-    println!("  {} manifest written: {:?}", symbol.to_uppercase(), manifest_path);
+    println!(
+        "  {} manifest written: {:?}",
+        symbol.to_uppercase(),
+        manifest_path
+    );
 
     Ok(())
 }

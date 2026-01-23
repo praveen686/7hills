@@ -5,7 +5,7 @@
 //!
 //! Phase 6 deliverable: Prove SANOS remains feasible, stable, and well-conditioned over time.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use clap::Parser;
 use kubera_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
@@ -77,8 +77,8 @@ pub struct StabilityMetrics {
     pub prev_timestamp: Option<DateTime<Utc>>,
 
     // Drift metrics (L1 norms)
-    pub density_drift_l1: f64,    // ||p_{t+Δt} - p_t||_1
-    pub weight_drift_l1: f64,     // ||q_{t+Δt} - q_t||_1
+    pub density_drift_l1: f64,     // ||p_{t+Δt} - p_t||_1
+    pub weight_drift_l1: f64,      // ||q_{t+Δt} - q_t||_1
     pub fitted_call_drift_l1: f64, // ||Ĉ_{t+Δt} - Ĉ_t||_1 - KEY: surface stability
 
     // Conditioning metrics
@@ -119,7 +119,7 @@ pub struct TemporalAnalysis {
     pub mean_density_drift: f64,
     pub max_weight_drift: f64,
     pub mean_weight_drift: f64,
-    pub max_fitted_call_drift: f64,   // KEY: Ĉ drift (surface stability)
+    pub max_fitted_call_drift: f64, // KEY: Ĉ drift (surface stability)
     pub mean_fitted_call_drift: f64,
 
     // Conditioning summary
@@ -132,8 +132,8 @@ pub struct TemporalAnalysis {
     pub max_forward_change_pct: f64,
 
     // Two-tier certification (Lead directive)
-    pub state_certified: bool,   // Based on Ĉ drift (primary)
-    pub param_certified: bool,   // Based on q drift (secondary)
+    pub state_certified: bool, // Based on Ĉ drift (primary)
+    pub param_certified: bool, // Based on q drift (secondary)
     pub certification_notes: Vec<String>,
 
     // Per-snapshot metrics
@@ -282,10 +282,7 @@ fn entropy(weights: &[f64]) -> f64 {
 }
 
 /// Compute stability metrics between current and previous slice
-fn compute_metrics(
-    current: &SanosSlice,
-    previous: Option<&SanosSlice>,
-) -> StabilityMetrics {
+fn compute_metrics(current: &SanosSlice, previous: Option<&SanosSlice>) -> StabilityMetrics {
     let weights = &current.weights;
 
     // Conditioning metrics
@@ -299,22 +296,23 @@ fn compute_metrics(
     let weight_entropy = entropy(weights);
 
     // Drift metrics (only if we have previous)
-    let (density_drift_l1, weight_drift_l1, fitted_call_drift_l1, forward_change_pct, prev_ts) = if let Some(prev) = previous {
-        let w_drift = l1_norm(weights, &prev.weights);
+    let (density_drift_l1, weight_drift_l1, fitted_call_drift_l1, forward_change_pct, prev_ts) =
+        if let Some(prev) = previous {
+            let w_drift = l1_norm(weights, &prev.weights);
 
-        // Density is proportional to weights for same model grid
-        // For proper density, we'd need to compute p(K) = dC/dK, but weights are proxy
-        let d_drift = w_drift; // Simplified: use weight drift as density proxy
+            // Density is proportional to weights for same model grid
+            // For proper density, we'd need to compute p(K) = dC/dK, but weights are proxy
+            let d_drift = w_drift; // Simplified: use weight drift as density proxy
 
-        // KEY: Fitted call price drift - this is what matters for state stability
-        let c_drift = l1_norm(&current.fitted_calls, &prev.fitted_calls);
+            // KEY: Fitted call price drift - this is what matters for state stability
+            let c_drift = l1_norm(&current.fitted_calls, &prev.fitted_calls);
 
-        let fwd_change = (current.forward - prev.forward) / prev.forward * 100.0;
+            let fwd_change = (current.forward - prev.forward) / prev.forward * 100.0;
 
-        (d_drift, w_drift, c_drift, fwd_change, Some(prev.timestamp))
-    } else {
-        (0.0, 0.0, 0.0, 0.0, None)
-    };
+            (d_drift, w_drift, c_drift, fwd_change, Some(prev.timestamp))
+        } else {
+            (0.0, 0.0, 0.0, 0.0, None)
+        };
 
     StabilityMetrics {
         timestamp: current.timestamp,
@@ -323,7 +321,11 @@ fn compute_metrics(
         weight_drift_l1,
         fitted_call_drift_l1,
         active_weights,
-        min_positive_weight: if min_positive_weight == f64::MAX { 0.0 } else { min_positive_weight },
+        min_positive_weight: if min_positive_weight == f64::MAX {
+            0.0
+        } else {
+            min_positive_weight
+        },
         max_weight,
         weight_entropy,
         lp_status: current.diagnostics.lp_status.clone(),
@@ -378,7 +380,10 @@ fn main() -> Result<()> {
     let max_ts = max_ts.ok_or_else(|| anyhow!("No ticks found"))?;
     let session_duration = (max_ts - min_ts).num_seconds();
 
-    info!("Session: {} to {} ({} seconds)", min_ts, max_ts, session_duration);
+    info!(
+        "Session: {} to {} ({} seconds)",
+        min_ts, max_ts, session_duration
+    );
 
     // Time to expiry (simplified: assume 3 days for weekly)
     let time_to_expiry = 3.0 / 365.0;
@@ -431,7 +436,10 @@ fn main() -> Result<()> {
         current_ts += Duration::seconds(args.interval_secs);
     }
 
-    info!("Completed: {} feasible, {} infeasible", num_feasible, num_infeasible);
+    info!(
+        "Completed: {} feasible, {} infeasible",
+        num_feasible, num_infeasible
+    );
 
     // Compute aggregate statistics
     let drift_metrics: Vec<_> = snapshots.iter().skip(1).collect(); // Skip first (no previous)
@@ -441,7 +449,11 @@ fn main() -> Result<()> {
         .map(|m| m.density_drift_l1)
         .fold(0.0, f64::max);
     let mean_density_drift = if !drift_metrics.is_empty() {
-        drift_metrics.iter().map(|m| m.density_drift_l1).sum::<f64>() / drift_metrics.len() as f64
+        drift_metrics
+            .iter()
+            .map(|m| m.density_drift_l1)
+            .sum::<f64>()
+            / drift_metrics.len() as f64
     } else {
         0.0
     };
@@ -462,7 +474,11 @@ fn main() -> Result<()> {
         .min()
         .unwrap_or(0);
     let mean_active_weights = if !snapshots.is_empty() {
-        snapshots.iter().map(|m| m.active_weights as f64).sum::<f64>() / snapshots.len() as f64
+        snapshots
+            .iter()
+            .map(|m| m.active_weights as f64)
+            .sum::<f64>()
+            / snapshots.len() as f64
     } else {
         0.0
     };
@@ -486,7 +502,11 @@ fn main() -> Result<()> {
         .map(|m| m.fitted_call_drift_l1)
         .fold(0.0, f64::max);
     let mean_fitted_call_drift = if !drift_metrics.is_empty() {
-        drift_metrics.iter().map(|m| m.fitted_call_drift_l1).sum::<f64>() / drift_metrics.len() as f64
+        drift_metrics
+            .iter()
+            .map(|m| m.fitted_call_drift_l1)
+            .sum::<f64>()
+            / drift_metrics.len() as f64
     } else {
         0.0
     };
@@ -524,19 +544,28 @@ fn main() -> Result<()> {
     // This is the PRIMARY certification - surface is stable for downstream use
     if max_fitted_call_drift > 0.05 {
         state_certified = false;
-        notes.push(format!("Surface drift: max Ĉ drift {:.4} > 0.05 threshold", max_fitted_call_drift));
+        notes.push(format!(
+            "Surface drift: max Ĉ drift {:.4} > 0.05 threshold",
+            max_fitted_call_drift
+        ));
     }
 
     // PARAM certification: q drift threshold = 0.5 (LP solution jumping)
     // This is SECONDARY - only affects numerical reproducibility
     if max_weight_drift > 0.5 {
         param_certified = false;
-        notes.push(format!("Parameter non-identifiability: max q drift {:.4} > 0.5 threshold", max_weight_drift));
+        notes.push(format!(
+            "Parameter non-identifiability: max q drift {:.4} > 0.5 threshold",
+            max_weight_drift
+        ));
     }
 
     // Informational notes (don't block certification)
     if min_active_weights < 3 {
-        notes.push(format!("Corner solution detected: min {} active weights", min_active_weights));
+        notes.push(format!(
+            "Corner solution detected: min {} active weights",
+            min_active_weights
+        ));
     }
 
     if max_forward_change > 1.0 {
@@ -547,7 +576,9 @@ fn main() -> Result<()> {
     if state_certified && param_certified {
         notes.push("All stability checks passed".to_string());
     } else if state_certified && !param_certified {
-        notes.push("Surface stable (Ĉ), but LP parameters jump (q) - downstream Ĉ use is safe".to_string());
+        notes.push(
+            "Surface stable (Ĉ), but LP parameters jump (q) - downstream Ĉ use is safe".to_string(),
+        );
     }
 
     let analysis = TemporalAnalysis {
@@ -567,7 +598,11 @@ fn main() -> Result<()> {
         mean_fitted_call_drift,
         min_active_weights,
         mean_active_weights,
-        min_weight_observed: if min_weight_observed == f64::MAX { 0.0 } else { min_weight_observed },
+        min_weight_observed: if min_weight_observed == f64::MAX {
+            0.0
+        } else {
+            min_weight_observed
+        },
         forward_range: (forward_min, forward_max),
         max_forward_change_pct: max_forward_change,
         state_certified,
@@ -585,7 +620,10 @@ fn main() -> Result<()> {
     // Generate density evolution data for plotting
     let density_csv_path = args.output_dir.join("density_evolution.csv");
     let mut csv_file = File::create(&density_csv_path)?;
-    writeln!(csv_file, "timestamp,weight_drift,forward,active_weights,entropy")?;
+    writeln!(
+        csv_file,
+        "timestamp,weight_drift,forward,active_weights,entropy"
+    )?;
     for m in &analysis.snapshots {
         writeln!(
             csv_file,
@@ -608,9 +646,15 @@ fn main() -> Result<()> {
     println!("Infeasible: {}", analysis.num_infeasible);
     println!();
     println!("--- Drift Statistics ---");
-    println!("Max q drift (L1):  {:.6} (weight stability)", analysis.max_weight_drift);
+    println!(
+        "Max q drift (L1):  {:.6} (weight stability)",
+        analysis.max_weight_drift
+    );
     println!("Mean q drift (L1): {:.6}", analysis.mean_weight_drift);
-    println!("Max Ĉ drift (L1):  {:.6} (surface stability)", analysis.max_fitted_call_drift);
+    println!(
+        "Max Ĉ drift (L1):  {:.6} (surface stability)",
+        analysis.max_fitted_call_drift
+    );
     println!("Mean Ĉ drift (L1): {:.6}", analysis.mean_fitted_call_drift);
     println!();
     println!("--- Conditioning ---");
@@ -619,20 +663,50 @@ fn main() -> Result<()> {
     println!("Min positive weight: {:.6}", analysis.min_weight_observed);
     println!();
     println!("--- Forward Stability ---");
-    println!("Forward range: {:.2} - {:.2}", analysis.forward_range.0, analysis.forward_range.1);
-    println!("Max forward change: {:.2}%", analysis.max_forward_change_pct);
+    println!(
+        "Forward range: {:.2} - {:.2}",
+        analysis.forward_range.0, analysis.forward_range.1
+    );
+    println!(
+        "Max forward change: {:.2}%",
+        analysis.max_forward_change_pct
+    );
     println!();
     println!("=== TWO-TIER CERTIFICATION ===");
     println!();
-    println!("STATE_CERTIFIED (Ĉ drift < 0.05): {}",
-        if analysis.state_certified { "✓ CERTIFIED" } else { "✗ NOT CERTIFIED" });
-    println!("  → Surface is {} for downstream use",
-        if analysis.state_certified { "STABLE" } else { "UNSTABLE" });
+    println!(
+        "STATE_CERTIFIED (Ĉ drift < 0.05): {}",
+        if analysis.state_certified {
+            "✓ CERTIFIED"
+        } else {
+            "✗ NOT CERTIFIED"
+        }
+    );
+    println!(
+        "  → Surface is {} for downstream use",
+        if analysis.state_certified {
+            "STABLE"
+        } else {
+            "UNSTABLE"
+        }
+    );
     println!();
-    println!("PARAM_CERTIFIED (q drift < 0.5):  {}",
-        if analysis.param_certified { "✓ CERTIFIED" } else { "✗ NOT CERTIFIED" });
-    println!("  → LP parameters are {} between snapshots",
-        if analysis.param_certified { "stable" } else { "jumping (non-identifiable)" });
+    println!(
+        "PARAM_CERTIFIED (q drift < 0.5):  {}",
+        if analysis.param_certified {
+            "✓ CERTIFIED"
+        } else {
+            "✗ NOT CERTIFIED"
+        }
+    );
+    println!(
+        "  → LP parameters are {} between snapshots",
+        if analysis.param_certified {
+            "stable"
+        } else {
+            "jumping (non-identifiable)"
+        }
+    );
     println!();
     println!("Notes:");
     for note in &analysis.certification_notes {

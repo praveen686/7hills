@@ -216,7 +216,18 @@ async fn async_main() -> anyhow::Result<()> {
             out_dir,
             duration_secs,
             price_exponent,
-        } => run_capture_session(instruments.as_deref(), underlying.as_deref(), strike_band, &expiry_policy, &out_dir, duration_secs, price_exponent).await,
+        } => {
+            run_capture_session(
+                instruments.as_deref(),
+                underlying.as_deref(),
+                strike_band,
+                &expiry_policy,
+                &out_dir,
+                duration_secs,
+                price_exponent,
+            )
+            .await
+        }
         Commands::BacktestKitesim {
             qty_scale,
             strategy,
@@ -414,12 +425,7 @@ async fn run_capture_session(
             std::fs::write(&manifest_path, &manifest_json)?;
             println!("   Manifest saved: {:?}", manifest_path);
 
-            all_symbols.extend(
-                manifest
-                    .instruments
-                    .into_iter()
-                    .map(|i| i.tradingsymbol),
-            );
+            all_symbols.extend(manifest.instruments.into_iter().map(|i| i.tradingsymbol));
         }
 
         all_symbols
@@ -435,7 +441,10 @@ async fn run_capture_session(
         ));
     }
 
-    println!("\nStarting capture with {} instruments...", instrument_list.len());
+    println!(
+        "\nStarting capture with {} instruments...",
+        instrument_list.len()
+    );
 
     let config = session_capture::SessionCaptureConfig {
         instruments: instrument_list,
@@ -450,7 +459,10 @@ async fn run_capture_session(
     println!("Session ID: {}", stats.session_id);
     println!("Duration: {:.1}s", stats.duration_secs);
     println!("Total ticks: {}", stats.total_ticks);
-    println!("Certified: {}", if stats.all_certified { "YES" } else { "NO" });
+    println!(
+        "Certified: {}",
+        if stats.all_certified { "YES" } else { "NO" }
+    );
 
     Ok(())
 }

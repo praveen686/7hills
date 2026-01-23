@@ -12,7 +12,9 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use kubera_core::{EventBus, NullObserverStrategy, Portfolio, Strategy};
 use kubera_executor::{CommissionModel, RiskEnvelope, SimulatedExchange};
-use kubera_models::{L2Level, L2Snapshot, MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side};
+use kubera_models::{
+    L2Level, L2Snapshot, MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side,
+};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -137,8 +139,11 @@ fn load_tick_events(path: &PathBuf) -> Result<Vec<TickEvent>> {
         if line.trim().is_empty() {
             continue;
         }
-        let event: TickEvent = serde_json::from_str(&line)
-            .context(format!("Failed to parse line {}: {}", line_num, &line[..line.len().min(100)]))?;
+        let event: TickEvent = serde_json::from_str(&line).context(format!(
+            "Failed to parse line {}: {}",
+            line_num,
+            &line[..line.len().min(100)]
+        ))?;
         events.push(event);
     }
 
@@ -161,7 +166,10 @@ struct FillRecord {
 /// Export fills to CSV for VectorBT Pro analysis
 fn export_fills_csv(fills: &[FillRecord], path: &PathBuf) -> Result<()> {
     let mut file = File::create(path)?;
-    writeln!(file, "timestamp,symbol,side,quantity,price,commission,position_after,unrealized_pnl")?;
+    writeln!(
+        file,
+        "timestamp,symbol,side,quantity,price,commission,position_after,unrealized_pnl"
+    )?;
     for f in fills {
         writeln!(
             file,
@@ -276,7 +284,12 @@ impl BacktestMetrics {
 
     fn profit_factor(&self) -> f64 {
         let gross_profit: f64 = self.trade_pnls.iter().filter(|&&p| p > 0.0).sum();
-        let gross_loss: f64 = self.trade_pnls.iter().filter(|&&p| p < 0.0).map(|p| p.abs()).sum();
+        let gross_loss: f64 = self
+            .trade_pnls
+            .iter()
+            .filter(|&&p| p < 0.0)
+            .map(|p| p.abs())
+            .sum();
         if gross_loss > 0.0 {
             gross_profit / gross_loss
         } else {
@@ -295,7 +308,9 @@ async fn main() -> Result<()> {
         PathBuf::from(&args[2])
     } else {
         eprintln!("Usage: replay_india_session --session <path>");
-        eprintln!("Example: replay_india_session --session data/sessions/nifty_banknifty_20260123_1002");
+        eprintln!(
+            "Example: replay_india_session --session data/sessions/nifty_banknifty_20260123_1002"
+        );
         std::process::exit(1);
     };
 
@@ -318,18 +333,26 @@ async fn main() -> Result<()> {
 
     for capture in &manifest.captures {
         let ticks_path = session_path.join(&capture.ticks_file);
-        info!("Loading {} ({} ticks)...", capture.tradingsymbol, capture.ticks_written);
+        info!(
+            "Loading {} ({} ticks)...",
+            capture.tradingsymbol, capture.ticks_written
+        );
 
         let tick_events = load_tick_events(&ticks_path)?;
         for tick in tick_events {
             let market_event = tick_to_market_event(&tick);
-            event_heap.push(TimestampedEvent { event: market_event });
+            event_heap.push(TimestampedEvent {
+                event: market_event,
+            });
             total_events += 1;
         }
     }
 
-    info!("Loaded {} total tick events across {} instruments",
-          total_events, manifest.instruments.len());
+    info!(
+        "Loaded {} total tick events across {} instruments",
+        total_events,
+        manifest.instruments.len()
+    );
 
     // Initialize backtest components
     // Use INR capital (₹10 lakh = ~$12k USD)
@@ -340,10 +363,12 @@ async fn main() -> Result<()> {
 
     // Create exchange with risk envelope sized for our capital
     let risk_envelope = RiskEnvelope::for_equity(initial_capital);
-    info!("Risk Envelope: max_gross=₹{:.0}, max_symbol=₹{:.0}, max_order=₹{:.0}",
-          risk_envelope.max_gross_notional_usd,
-          risk_envelope.max_symbol_notional_usd,
-          risk_envelope.max_order_notional_usd);
+    info!(
+        "Risk Envelope: max_gross=₹{:.0}, max_symbol=₹{:.0}, max_order=₹{:.0}",
+        risk_envelope.max_gross_notional_usd,
+        risk_envelope.max_symbol_notional_usd,
+        risk_envelope.max_order_notional_usd
+    );
 
     let mut exchange = SimulatedExchange::with_risk_envelope(
         bus.clone(),
@@ -403,15 +428,21 @@ async fn main() -> Result<()> {
         };
 
         if should_sample && !last_prices.is_empty() {
-            let gross_notional: f64 = positions.iter().map(|(sym, pos)| {
-                let price = last_prices.get(sym).copied().unwrap_or(0.0);
-                pos.abs() * price
-            }).sum();
+            let gross_notional: f64 = positions
+                .iter()
+                .map(|(sym, pos)| {
+                    let price = last_prices.get(sym).copied().unwrap_or(0.0);
+                    pos.abs() * price
+                })
+                .sum();
 
-            let unrealized_pnl: f64 = positions.iter().map(|(sym, pos)| {
-                let price = last_prices.get(sym).copied().unwrap_or(0.0);
-                pos * price
-            }).sum();
+            let unrealized_pnl: f64 = positions
+                .iter()
+                .map(|(sym, pos)| {
+                    let price = last_prices.get(sym).copied().unwrap_or(0.0);
+                    pos * price
+                })
+                .sum();
 
             let equity = portfolio.calculate_total_value(&last_prices);
 
@@ -457,7 +488,13 @@ async fn main() -> Result<()> {
         // 4. Process fills
         while let Ok(fill) = fill_rx.try_recv() {
             metrics.fills_executed += 1;
-            portfolio.apply_fill(&fill.symbol, fill.side, fill.quantity, fill.price, fill.commission);
+            portfolio.apply_fill(
+                &fill.symbol,
+                fill.side,
+                fill.quantity,
+                fill.price,
+                fill.commission,
+            );
 
             let pos_delta = match fill.side {
                 Side::Buy => fill.quantity,
@@ -472,7 +509,11 @@ async fn main() -> Result<()> {
             fill_records.push(FillRecord {
                 timestamp: event.exchange_time,
                 symbol: fill.symbol.clone(),
-                side: if fill.side == Side::Buy { "BUY".to_string() } else { "SELL".to_string() },
+                side: if fill.side == Side::Buy {
+                    "BUY".to_string()
+                } else {
+                    "SELL".to_string()
+                },
                 quantity: fill.quantity,
                 price: fill.price,
                 commission: fill.commission,
@@ -529,12 +570,21 @@ async fn main() -> Result<()> {
     println!("{}", "=".repeat(70));
     println!();
     println!("Session: {}", manifest.session_id);
-    println!("Instruments: {} (NIFTY + BANKNIFTY options)", manifest.instruments.len());
+    println!(
+        "Instruments: {} (NIFTY + BANKNIFTY options)",
+        manifest.instruments.len()
+    );
     println!();
     println!("REPLAY STATS:");
     println!("  Market Events:    {:>12}", metrics.market_events);
-    println!("  Signals Generated:{:>12} (expected: 0)", metrics.signals_generated);
-    println!("  Fills Executed:   {:>12} (expected: 0)", metrics.fills_executed);
+    println!(
+        "  Signals Generated:{:>12} (expected: 0)",
+        metrics.signals_generated
+    );
+    println!(
+        "  Fills Executed:   {:>12} (expected: 0)",
+        metrics.fills_executed
+    );
     println!("  Replay Time:      {:>12.2}s", elapsed.as_secs_f64());
     println!(
         "  Throughput:       {:>12.0} events/sec",
@@ -554,7 +604,11 @@ async fn main() -> Result<()> {
     // Export equity curve to CSV for VectorBT Pro analysis
     let equity_csv_path = session_path.join("equity_curve.csv");
     export_equity_csv(&equity_samples, &equity_csv_path)?;
-    println!("Equity curve exported to: {:?} ({} samples at 1s intervals)", equity_csv_path, equity_samples.len());
+    println!(
+        "Equity curve exported to: {:?} ({} samples at 1s intervals)",
+        equity_csv_path,
+        equity_samples.len()
+    );
 
     // Export option chain report to JSON
     let chain_report_path = session_path.join("option_chain_report.json");
@@ -585,7 +639,10 @@ async fn main() -> Result<()> {
         }).collect::<Vec<_>>(),
         "underlying_estimates": chain_report.underlying_estimates
     });
-    std::fs::write(&chain_report_path, serde_json::to_string_pretty(&chain_report_json)?)?;
+    std::fs::write(
+        &chain_report_path,
+        serde_json::to_string_pretty(&chain_report_json)?,
+    )?;
     println!("Option chain report exported to: {:?}", chain_report_path);
 
     println!();

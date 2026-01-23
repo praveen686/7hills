@@ -1709,10 +1709,7 @@ fn select_t1_t2_t3(
             // Build expiries grouped by (year, month)
             let mut by_month: BTreeMap<(i32, u32), Vec<NaiveDate>> = BTreeMap::new();
             for &e in eligible.iter() {
-                by_month
-                    .entry((e.year(), e.month()))
-                    .or_default()
-                    .push(e);
+                by_month.entry((e.year(), e.month())).or_default().push(e);
             }
             for v in by_month.values_mut() {
                 v.sort();
@@ -1856,10 +1853,7 @@ fn resolve_universe_instruments(
 
     for ins in instruments.iter().filter(|i| i.name == underlying) {
         let strike_key = (ins.strike * 100.0).round() as i64;
-        map.insert(
-            (ins.expiry, strike_key, ins.instrument_type.clone()),
-            ins,
-        );
+        map.insert((ins.expiry, strike_key, ins.instrument_type.clone()), ins);
     }
 
     let mut resolved = Vec::new();

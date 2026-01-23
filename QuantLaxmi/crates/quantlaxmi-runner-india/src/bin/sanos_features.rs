@@ -12,13 +12,13 @@
 //! Usage:
 //!   cargo run --bin sanos_features -- --session-dir <path> --underlying NIFTY
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use csv::Writer as CsvWriter;
 use kubera_options::sanos::{
-    ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice, StrikeMeta,
-    ETA, V_MIN, EPSILON_STRIKE, K_N_NORMALIZED,
+    EPSILON_STRIKE, ETA, ExpirySlice, K_N_NORMALIZED, OptionQuote, SanosCalibrator, SanosSlice,
+    StrikeMeta, V_MIN,
 };
 
 /// Expected number of CSV columns (Phase 8.1 integrity)
@@ -141,7 +141,7 @@ struct PolicyConfig {
     eta: f64,
     v_min: f64,
     epsilon_strike: f64,
-    k_n_normalized: f64,  // Phase 8.1: fixed far OTM boundary
+    k_n_normalized: f64, // Phase 8.1: fixed far OTM boundary
     strike_band: u32,
     expiry_policy: String,
 }
@@ -246,7 +246,8 @@ fn expiry_to_date(expiry: &str) -> Option<NaiveDate> {
 /// Calculate time to expiry in years
 fn time_to_expiry(now: DateTime<Utc>, expiry: &str) -> f64 {
     if let Some(exp_date) = expiry_to_date(expiry) {
-        let exp_datetime = exp_date.and_hms_opt(10, 0, 0)
+        let exp_datetime = exp_date
+            .and_hms_opt(10, 0, 0)
             .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
         if let Some(exp_dt) = exp_datetime {
@@ -394,8 +395,8 @@ fn extract_iv(call_price: f64, strike_norm: f64, tty: f64) -> Option<f64> {
     }
 
     // Bisection search for IV
-    let mut vol_low = 0.001;  // 0.1%
-    let mut vol_high = 5.0;   // 500%
+    let mut vol_low = 0.001; // 0.1%
+    let mut vol_high = 5.0; // 500%
     let tolerance = 1e-6;
     let max_iter = 100;
 
@@ -439,12 +440,12 @@ fn bs_call_normalized(k: f64, vol: f64, t: f64) -> f64 {
 /// Standard normal CDF using Abramowitz & Stegun approximation
 fn norm_cdf(x: f64) -> f64 {
     // A&S formula 7.1.26, accurate to 1.5e-7
-    let a1 =  0.254829592;
+    let a1 = 0.254829592;
     let a2 = -0.284496736;
-    let a3 =  1.421413741;
+    let a3 = 1.421413741;
     let a4 = -1.453152027;
-    let a5 =  1.061405429;
-    let p  =  0.3275911;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
 
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
     let x = x.abs();
@@ -476,9 +477,16 @@ fn find_nearest_strike_safe(
         .enumerate()
         .filter(|(_, (_, meta))| meta.is_feature_safe())
         .min_by(|(_, (a, _)), (_, (b, _))| {
-            (**a - target).abs().partial_cmp(&(**b - target).abs()).unwrap()
+            (**a - target)
+                .abs()
+                .partial_cmp(&(**b - target).abs())
+                .unwrap()
         })
-        .map(|(i, (k, meta))| SelectedStrike { index: i, k: *k, meta: *meta })
+        .map(|(i, (k, meta))| SelectedStrike {
+            index: i,
+            k: *k,
+            meta: *meta,
+        })
 }
 
 /// Extract features from calibrated SANOS slices
@@ -508,8 +516,10 @@ fn extract_features(
         .ok_or_else(|| anyhow!("No feature-safe high strike for T1"))?;
 
     // Log selected strike points (Phase 8.1 audit requirement)
-    info!("T1 selected strikes: k_low={:.4} (market={}), k_atm={:.4} (market={}), k_high={:.4} (market={})",
-        low1.k, low1.meta.is_market, atm1.k, atm1.meta.is_market, high1.k, high1.meta.is_market);
+    info!(
+        "T1 selected strikes: k_low={:.4} (market={}), k_atm={:.4} (market={}), k_high={:.4} (market={})",
+        low1.k, low1.meta.is_market, atm1.k, atm1.meta.is_market, high1.k, high1.meta.is_market
+    );
 
     // Extract IVs for T1
     let c_atm1 = s1.fitted_calls[atm1.index];
@@ -539,8 +549,10 @@ fn extract_features(
         let high2 = find_nearest_strike_safe(&s2.fitted_strikes, &s2.strike_meta, 1.03)
             .ok_or_else(|| anyhow!("No feature-safe high strike for T2"))?;
 
-        info!("T2 selected strikes: k_low={:.4} (market={}), k_atm={:.4} (market={}), k_high={:.4} (market={})",
-            low2.k, low2.meta.is_market, atm2.k, atm2.meta.is_market, high2.k, high2.meta.is_market);
+        info!(
+            "T2 selected strikes: k_low={:.4} (market={}), k_atm={:.4} (market={}), k_high={:.4} (market={})",
+            low2.k, low2.meta.is_market, atm2.k, atm2.meta.is_market, high2.k, high2.meta.is_market
+        );
 
         let c_atm2 = s2.fitted_calls[atm2.index];
         let iv2 = extract_iv(c_atm2, atm2.k, tty2).unwrap_or(0.0);
@@ -599,8 +611,10 @@ fn extract_features(
         let high3 = find_nearest_strike_safe(&s3.fitted_strikes, &s3.strike_meta, 1.03)
             .ok_or_else(|| anyhow!("No feature-safe high strike for T3"))?;
 
-        info!("T3 selected strikes: k_low={:.4} (market={}), k_atm={:.4} (market={}), k_high={:.4} (market={})",
-            low3.k, low3.meta.is_market, atm3.k, atm3.meta.is_market, high3.k, high3.meta.is_market);
+        info!(
+            "T3 selected strikes: k_low={:.4} (market={}), k_atm={:.4} (market={}), k_high={:.4} (market={})",
+            low3.k, low3.meta.is_market, atm3.k, atm3.meta.is_market, high3.k, high3.meta.is_market
+        );
 
         let c_atm3 = s3.fitted_calls[atm3.index];
         let iv3 = extract_iv(c_atm3, atm3.k, tty3).unwrap_or(0.0);
@@ -766,7 +780,8 @@ fn main() -> Result<()> {
     }
 
     // Extract session ID from path
-    let session_id = args.session_dir
+    let session_id = args
+        .session_dir
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
@@ -781,12 +796,37 @@ fn main() -> Result<()> {
 
     // Header (strictly defined column order)
     let header = [
-        "ts", "underlying", "session_id", "t1", "t2", "t3",
-        "f1", "f2", "f3", "tty1", "tty2", "tty3",
-        "iv1", "iv2", "iv3", "ts12", "ts23", "ts_curv",
-        "cal12", "cal23", "sk1", "sk2", "sk3", "roll12", "rollc12"
+        "ts",
+        "underlying",
+        "session_id",
+        "t1",
+        "t2",
+        "t3",
+        "f1",
+        "f2",
+        "f3",
+        "tty1",
+        "tty2",
+        "tty3",
+        "iv1",
+        "iv2",
+        "iv3",
+        "ts12",
+        "ts23",
+        "ts_curv",
+        "cal12",
+        "cal23",
+        "sk1",
+        "sk2",
+        "sk3",
+        "roll12",
+        "rollc12",
     ];
-    debug_assert_eq!(header.len(), CSV_COLUMN_COUNT, "Header column count mismatch");
+    debug_assert_eq!(
+        header.len(),
+        CSV_COLUMN_COUNT,
+        "Header column count mismatch"
+    );
     wtr.write_record(header)?;
 
     // Data row
@@ -801,21 +841,63 @@ fn main() -> Result<()> {
         features.f2.map(|v| format!("{:.2}", v)).unwrap_or_default(),
         features.f3.map(|v| format!("{:.2}", v)).unwrap_or_default(),
         format!("{:.6}", features.tty1),
-        features.tty2.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.tty3.map(|v| format!("{:.6}", v)).unwrap_or_default(),
+        features
+            .tty2
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .tty3
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
         format!("{:.4}", features.iv1),
-        features.iv2.map(|v| format!("{:.4}", v)).unwrap_or_default(),
-        features.iv3.map(|v| format!("{:.4}", v)).unwrap_or_default(),
-        features.ts12.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.ts23.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.ts_curv.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.cal12.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.cal23.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.sk1.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.sk2.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.sk3.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.roll12.map(|v| format!("{:.6}", v)).unwrap_or_default(),
-        features.rollc12.map(|v| format!("{:.6}", v)).unwrap_or_default(),
+        features
+            .iv2
+            .map(|v| format!("{:.4}", v))
+            .unwrap_or_default(),
+        features
+            .iv3
+            .map(|v| format!("{:.4}", v))
+            .unwrap_or_default(),
+        features
+            .ts12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .ts23
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .ts_curv
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .cal12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .cal23
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .sk1
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .sk2
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .sk3
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .roll12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
+        features
+            .rollc12
+            .map(|v| format!("{:.6}", v))
+            .unwrap_or_default(),
     ];
 
     // Phase 8.1 integrity assertion: row column count must match header
@@ -823,7 +905,10 @@ fn main() -> Result<()> {
     wtr.write_record(&row)?;
     wtr.flush()?;
 
-    info!("Wrote features to {:?} ({} columns)", args.output, CSV_COLUMN_COUNT);
+    info!(
+        "Wrote features to {:?} ({} columns)",
+        args.output, CSV_COLUMN_COUNT
+    );
 
     // Write manifest
     let manifest = FeatureManifest {
@@ -867,13 +952,34 @@ fn main() -> Result<()> {
 
     println!("--- Term Structure ---");
     println!("Expiry     Forward      TTY(d)    ATM IV");
-    println!("{:<10} {:>10.2} {:>8.1}    {:.2}%",
-        features.t1, features.f1, features.tty1 * 365.0, features.iv1 * 100.0);
-    if let (Some(t2), Some(f2), Some(tty2), Some(iv2)) = (&features.t2, features.f2, features.tty2, features.iv2) {
-        println!("{:<10} {:>10.2} {:>8.1}    {:.2}%", t2, f2, tty2 * 365.0, iv2 * 100.0);
+    println!(
+        "{:<10} {:>10.2} {:>8.1}    {:.2}%",
+        features.t1,
+        features.f1,
+        features.tty1 * 365.0,
+        features.iv1 * 100.0
+    );
+    if let (Some(t2), Some(f2), Some(tty2), Some(iv2)) =
+        (&features.t2, features.f2, features.tty2, features.iv2)
+    {
+        println!(
+            "{:<10} {:>10.2} {:>8.1}    {:.2}%",
+            t2,
+            f2,
+            tty2 * 365.0,
+            iv2 * 100.0
+        );
     }
-    if let (Some(t3), Some(f3), Some(tty3), Some(iv3)) = (&features.t3, features.f3, features.tty3, features.iv3) {
-        println!("{:<10} {:>10.2} {:>8.1}    {:.2}%", t3, f3, tty3 * 365.0, iv3 * 100.0);
+    if let (Some(t3), Some(f3), Some(tty3), Some(iv3)) =
+        (&features.t3, features.f3, features.tty3, features.iv3)
+    {
+        println!(
+            "{:<10} {:>10.2} {:>8.1}    {:.2}%",
+            t3,
+            f3,
+            tty3 * 365.0,
+            iv3 * 100.0
+        );
     }
     println!();
 

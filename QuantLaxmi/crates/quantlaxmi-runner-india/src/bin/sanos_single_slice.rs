@@ -6,7 +6,7 @@
 //! Usage:
 //!   cargo run --bin sanos_single_slice -- --session-dir <path> --underlying NIFTY --expiry 26JAN
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use clap::Parser;
 use kubera_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator};
@@ -192,9 +192,10 @@ fn build_slice(
 fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive(
-            tracing::level_filters::LevelFilter::INFO.into(),
-        ))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::level_filters::LevelFilter::INFO.into()),
+        )
         .init();
 
     let args = Args::parse();

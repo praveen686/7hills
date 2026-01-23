@@ -8,7 +8,7 @@
 //! Usage:
 //!   cargo run --bin sanos_multi_expiry -- --session-dir <path> --underlying NIFTY
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, NaiveDate, Utc};
 use clap::Parser;
 use kubera_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
@@ -73,7 +73,7 @@ struct CalendarViolation {
     far_expiry: String,
     near_call_price: f64,
     far_call_price: f64,
-    violation_amount: f64,  // near - far (should be ≤ 0)
+    violation_amount: f64, // near - far (should be ≤ 0)
 }
 
 /// Multi-expiry calibration result
@@ -94,7 +94,7 @@ struct MultiExpiryResult {
     calendar_arbitrage_free: bool,
 
     // Term structure summary
-    forwards: Vec<(String, f64)>,       // expiry -> forward
+    forwards: Vec<(String, f64)>,         // expiry -> forward
     time_to_expiries: Vec<(String, f64)>, // expiry -> TTY in years
 
     // Certification
@@ -185,12 +185,13 @@ fn expiry_to_date(expiry: &str) -> Option<NaiveDate> {
 fn time_to_expiry(now: DateTime<Utc>, expiry: &str) -> f64 {
     if let Some(exp_date) = expiry_to_date(expiry) {
         // Assume expiry at 15:30 IST (10:00 UTC)
-        let exp_datetime = exp_date.and_hms_opt(10, 0, 0)
+        let exp_datetime = exp_date
+            .and_hms_opt(10, 0, 0)
             .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
         if let Some(exp_dt) = exp_datetime {
             let days = (exp_dt - now).num_seconds() as f64 / 86400.0;
-            return (days / 365.0).max(1.0 / 365.0);  // Minimum 1 day
+            return (days / 365.0).max(1.0 / 365.0); // Minimum 1 day
         }
     }
 
@@ -328,7 +329,8 @@ fn check_calendar_arbitrage(
     let mut violations = Vec::new();
 
     // Build strike -> fitted_call map for far expiry
-    let far_map: HashMap<u64, f64> = far.model_strikes
+    let far_map: HashMap<u64, f64> = far
+        .model_strikes
         .iter()
         .zip(far.fitted_calls.iter())
         .map(|(&k, &c)| ((k * 1000.0) as u64, c))
@@ -443,7 +445,7 @@ fn main() -> Result<()> {
 
     // Check calendar arbitrage between consecutive expiries
     let mut all_violations: Vec<CalendarViolation> = Vec::new();
-    let tolerance = 0.0001;  // Tolerance for numerical noise
+    let tolerance = 0.0001; // Tolerance for numerical noise
 
     for i in 0..slices.len() - 1 {
         let near = &slices[i];
@@ -453,7 +455,9 @@ fn main() -> Result<()> {
         if !violations.is_empty() {
             info!(
                 "Calendar violations between {} and {}: {}",
-                near.expiry, far.expiry, violations.len()
+                near.expiry,
+                far.expiry,
+                violations.len()
             );
         }
         all_violations.extend(violations);
@@ -485,7 +489,8 @@ fn main() -> Result<()> {
         state_certified = false;
         notes.push(format!(
             "{} calendar arbitrage violations (max: {:.6})",
-            all_violations.len(), max_violation
+            all_violations.len(),
+            max_violation
         ));
     }
 
@@ -550,7 +555,11 @@ fn main() -> Result<()> {
     println!("=== CERTIFICATION ===");
     println!(
         "STATE_CERTIFIED: {}",
-        if result.state_certified { "✓ CERTIFIED" } else { "✗ NOT CERTIFIED" }
+        if result.state_certified {
+            "✓ CERTIFIED"
+        } else {
+            "✗ NOT CERTIFIED"
+        }
     );
     for note in &result.certification_notes {
         println!("  - {}", note);

@@ -6,15 +6,13 @@
 //! Usage:
 //!   cargo run --bin run_calendar_carry -- --session-dir <path> --underlying NIFTY
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use clap::Parser;
-use kubera_options::sanos::{
-    ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice,
-};
+use kubera_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
 use kubera_options::strategies::{
-    CalendarCarryStrategy, StrategyContext, StrategyDecision, GateCheckResult,
-    QuoteSnapshot, StraddleQuotes, Phase8Features, SessionMeta, AuditRecord,
+    AuditRecord, CalendarCarryStrategy, GateCheckResult, Phase8Features, QuoteSnapshot,
+    SessionMeta, StraddleQuotes, StrategyContext, StrategyDecision,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -120,7 +118,7 @@ struct Q1LegValidation {
     ask_qty_zero: bool,
     quote_stale: bool,
     quote_age_ms: i64,
-    spread_invalid: bool,  // spread <= 0 or ask < bid
+    spread_invalid: bool, // spread <= 0 or ask < bid
     passed: bool,
     fail_reason: Option<String>,
 }
@@ -151,7 +149,7 @@ struct GateCounters {
     e2_friction_dominance_fail: u32,
     // Phase 9.2: Friction floor
     e3_friction_floor_fail: u32,
-    e3_floor_binding_count: u32,  // How often floor > observed
+    e3_floor_binding_count: u32, // How often floor > observed
     // Phase 9.3: Q1-lite audit
     q1_front_fail: u32,
     q1_back_fail: u32,
@@ -249,69 +247,199 @@ impl DistributionStats {
         sorted[idx.min(sorted.len() - 1)]
     }
 
-    fn p50(&self) -> f64 { self.percentile(50.0) }
-    fn p90(&self) -> f64 { self.percentile(90.0) }
-    fn p99(&self) -> f64 { self.percentile(99.0) }
-    fn count(&self) -> usize { self.values.len() }
+    fn p50(&self) -> f64 {
+        self.percentile(50.0)
+    }
+    fn p90(&self) -> f64 {
+        self.percentile(90.0)
+    }
+    fn p99(&self) -> f64 {
+        self.percentile(99.0)
+    }
+    fn count(&self) -> usize {
+        self.values.len()
+    }
 }
 
 impl GateCounters {
     fn update(&mut self, gates: &GateCheckResult) {
         self.total_decisions += 1;
-        if !gates.h1_surface.passed { self.h1_surface_fail += 1; }
-        if !gates.h2_calendar.passed { self.h2_calendar_fail += 1; }
-        if !gates.h3_quote_front.passed { self.h3_quote_front_fail += 1; }
-        if !gates.h3_quote_back.passed { self.h3_quote_back_fail += 1; }
-        if !gates.h4_liquidity_front.passed { self.h4_liquidity_front_fail += 1; }
-        if !gates.h4_liquidity_back.passed { self.h4_liquidity_back_fail += 1; }
-        if !gates.carry.passed { self.carry_fail += 1; }
-        if !gates.r1_inversion.passed { self.r1_inversion_fail += 1; }
-        if !gates.r2_skew.passed { self.r2_skew_fail += 1; }
-        if !gates.e1_premium_gap.passed { self.e1_premium_gap_fail += 1; }
-        if !gates.e2_friction_dominance.passed { self.e2_friction_dominance_fail += 1; }
-        if !gates.e3_friction_floor.passed { self.e3_friction_floor_fail += 1; }
+        if !gates.h1_surface.passed {
+            self.h1_surface_fail += 1;
+        }
+        if !gates.h2_calendar.passed {
+            self.h2_calendar_fail += 1;
+        }
+        if !gates.h3_quote_front.passed {
+            self.h3_quote_front_fail += 1;
+        }
+        if !gates.h3_quote_back.passed {
+            self.h3_quote_back_fail += 1;
+        }
+        if !gates.h4_liquidity_front.passed {
+            self.h4_liquidity_front_fail += 1;
+        }
+        if !gates.h4_liquidity_back.passed {
+            self.h4_liquidity_back_fail += 1;
+        }
+        if !gates.carry.passed {
+            self.carry_fail += 1;
+        }
+        if !gates.r1_inversion.passed {
+            self.r1_inversion_fail += 1;
+        }
+        if !gates.r2_skew.passed {
+            self.r2_skew_fail += 1;
+        }
+        if !gates.e1_premium_gap.passed {
+            self.e1_premium_gap_fail += 1;
+        }
+        if !gates.e2_friction_dominance.passed {
+            self.e2_friction_dominance_fail += 1;
+        }
+        if !gates.e3_friction_floor.passed {
+            self.e3_friction_floor_fail += 1;
+        }
         // Track floor binding: check if E3 reason contains "FLOOR_BINDING"
         if let Some(ref reason) = gates.e3_friction_floor.reason
             && reason.contains("FLOOR_BINDING")
         {
             self.e3_floor_binding_count += 1;
         }
-        if gates.all_passed() { self.all_gates_pass += 1; }
+        if gates.all_passed() {
+            self.all_gates_pass += 1;
+        }
     }
 
     fn pct(&self, n: u32) -> f64 {
-        if self.total_decisions == 0 { 0.0 } else { 100.0 * n as f64 / self.total_decisions as f64 }
+        if self.total_decisions == 0 {
+            0.0
+        } else {
+            100.0 * n as f64 / self.total_decisions as f64
+        }
     }
 
     fn print_report(&self) {
         info!("=== Gate Hit Counts ===");
         info!("Total decisions:      {}", self.total_decisions);
-        info!("H1 surface fail:      {} ({:.1}%)", self.h1_surface_fail, self.pct(self.h1_surface_fail));
-        info!("H2 calendar fail:     {} ({:.1}%)", self.h2_calendar_fail, self.pct(self.h2_calendar_fail));
-        info!("H3 quote_front fail:  {} ({:.1}%)", self.h3_quote_front_fail, self.pct(self.h3_quote_front_fail));
-        info!("H3 quote_back fail:   {} ({:.1}%)", self.h3_quote_back_fail, self.pct(self.h3_quote_back_fail));
-        info!("H4 liq_front fail:    {} ({:.1}%)", self.h4_liquidity_front_fail, self.pct(self.h4_liquidity_front_fail));
-        info!("H4 liq_back fail:     {} ({:.1}%)", self.h4_liquidity_back_fail, self.pct(self.h4_liquidity_back_fail));
-        info!("Carry fail:           {} ({:.1}%)", self.carry_fail, self.pct(self.carry_fail));
-        info!("R1 inversion fail:    {} ({:.1}%)", self.r1_inversion_fail, self.pct(self.r1_inversion_fail));
-        info!("R2 skew fail:         {} ({:.1}%)", self.r2_skew_fail, self.pct(self.r2_skew_fail));
-        info!("E1 premium_gap fail:  {} ({:.1}%)", self.e1_premium_gap_fail, self.pct(self.e1_premium_gap_fail));
-        info!("E2 friction_dom fail: {} ({:.1}%)", self.e2_friction_dominance_fail, self.pct(self.e2_friction_dominance_fail));
-        info!("E3 fric_floor fail:   {} ({:.1}%)", self.e3_friction_floor_fail, self.pct(self.e3_friction_floor_fail));
-        info!("E3 floor binding:     {} ({:.1}%)", self.e3_floor_binding_count, self.pct(self.e3_floor_binding_count));
+        info!(
+            "H1 surface fail:      {} ({:.1}%)",
+            self.h1_surface_fail,
+            self.pct(self.h1_surface_fail)
+        );
+        info!(
+            "H2 calendar fail:     {} ({:.1}%)",
+            self.h2_calendar_fail,
+            self.pct(self.h2_calendar_fail)
+        );
+        info!(
+            "H3 quote_front fail:  {} ({:.1}%)",
+            self.h3_quote_front_fail,
+            self.pct(self.h3_quote_front_fail)
+        );
+        info!(
+            "H3 quote_back fail:   {} ({:.1}%)",
+            self.h3_quote_back_fail,
+            self.pct(self.h3_quote_back_fail)
+        );
+        info!(
+            "H4 liq_front fail:    {} ({:.1}%)",
+            self.h4_liquidity_front_fail,
+            self.pct(self.h4_liquidity_front_fail)
+        );
+        info!(
+            "H4 liq_back fail:     {} ({:.1}%)",
+            self.h4_liquidity_back_fail,
+            self.pct(self.h4_liquidity_back_fail)
+        );
+        info!(
+            "Carry fail:           {} ({:.1}%)",
+            self.carry_fail,
+            self.pct(self.carry_fail)
+        );
+        info!(
+            "R1 inversion fail:    {} ({:.1}%)",
+            self.r1_inversion_fail,
+            self.pct(self.r1_inversion_fail)
+        );
+        info!(
+            "R2 skew fail:         {} ({:.1}%)",
+            self.r2_skew_fail,
+            self.pct(self.r2_skew_fail)
+        );
+        info!(
+            "E1 premium_gap fail:  {} ({:.1}%)",
+            self.e1_premium_gap_fail,
+            self.pct(self.e1_premium_gap_fail)
+        );
+        info!(
+            "E2 friction_dom fail: {} ({:.1}%)",
+            self.e2_friction_dominance_fail,
+            self.pct(self.e2_friction_dominance_fail)
+        );
+        info!(
+            "E3 fric_floor fail:   {} ({:.1}%)",
+            self.e3_friction_floor_fail,
+            self.pct(self.e3_friction_floor_fail)
+        );
+        info!(
+            "E3 floor binding:     {} ({:.1}%)",
+            self.e3_floor_binding_count,
+            self.pct(self.e3_floor_binding_count)
+        );
         info!("--- Q1-lite Audit (Phase 9.3) ---");
-        info!("Q1 front fail:        {} ({:.1}%)", self.q1_front_fail, self.pct(self.q1_front_fail));
-        info!("Q1 back fail:         {} ({:.1}%)", self.q1_back_fail, self.pct(self.q1_back_fail));
-        info!("Q1 bid_qty=0:         {} ({:.1}%)", self.q1_bid_qty_zero, self.pct(self.q1_bid_qty_zero));
-        info!("Q1 ask_qty=0:         {} ({:.1}%)", self.q1_ask_qty_zero, self.pct(self.q1_ask_qty_zero));
-        info!("Q1 quote stale:       {} ({:.1}%)", self.q1_quote_stale, self.pct(self.q1_quote_stale));
-        info!("Q1 spread invalid:    {} ({:.1}%)", self.q1_spread_invalid, self.pct(self.q1_spread_invalid));
+        info!(
+            "Q1 front fail:        {} ({:.1}%)",
+            self.q1_front_fail,
+            self.pct(self.q1_front_fail)
+        );
+        info!(
+            "Q1 back fail:         {} ({:.1}%)",
+            self.q1_back_fail,
+            self.pct(self.q1_back_fail)
+        );
+        info!(
+            "Q1 bid_qty=0:         {} ({:.1}%)",
+            self.q1_bid_qty_zero,
+            self.pct(self.q1_bid_qty_zero)
+        );
+        info!(
+            "Q1 ask_qty=0:         {} ({:.1}%)",
+            self.q1_ask_qty_zero,
+            self.pct(self.q1_ask_qty_zero)
+        );
+        info!(
+            "Q1 quote stale:       {} ({:.1}%)",
+            self.q1_quote_stale,
+            self.pct(self.q1_quote_stale)
+        );
+        info!(
+            "Q1 spread invalid:    {} ({:.1}%)",
+            self.q1_spread_invalid,
+            self.pct(self.q1_spread_invalid)
+        );
         info!("--- Market Hours ---");
-        info!("Inside market hours:  {} ({:.1}%)", self.inside_market_hours, self.pct(self.inside_market_hours));
-        info!("Outside market hours: {} ({:.1}%)", self.outside_market_hours, self.pct(self.outside_market_hours));
+        info!(
+            "Inside market hours:  {} ({:.1}%)",
+            self.inside_market_hours,
+            self.pct(self.inside_market_hours)
+        );
+        info!(
+            "Outside market hours: {} ({:.1}%)",
+            self.outside_market_hours,
+            self.pct(self.outside_market_hours)
+        );
         info!("--- Summary ---");
-        info!("ALL GATES PASS:       {} ({:.1}%)", self.all_gates_pass, self.pct(self.all_gates_pass));
-        info!("Cooldown blocked:     {} ({:.1}%)", self.cooldown_blocked, self.pct(self.cooldown_blocked));
+        info!(
+            "ALL GATES PASS:       {} ({:.1}%)",
+            self.all_gates_pass,
+            self.pct(self.all_gates_pass)
+        );
+        info!(
+            "Cooldown blocked:     {} ({:.1}%)",
+            self.cooldown_blocked,
+            self.pct(self.cooldown_blocked)
+        );
         info!("ENTER after cooldown: {}", self.enter_after_cooldown);
     }
 }
@@ -325,12 +453,12 @@ fn compute_conservative_fill(
     // SHORT front straddle: we SELL, so we receive bid prices
     let front_bid = front_straddle.ce.bid + front_straddle.pe.bid;
     let front_ask = front_straddle.ce.ask + front_straddle.pe.ask;
-    let entry_front_credit = front_bid;  // We receive bid
+    let entry_front_credit = front_bid; // We receive bid
 
     // LONG back straddle: we BUY, so we pay ask prices
     let back_bid = back_straddle.ce.bid + back_straddle.pe.bid;
     let back_ask = back_straddle.ce.ask + back_straddle.pe.ask;
-    let entry_back_debit = h * back_ask;  // We pay ask, scaled by hedge ratio
+    let entry_back_debit = h * back_ask; // We pay ask, scaled by hedge ratio
 
     // Net entry cost (positive = net debit)
     let net_entry_cost = entry_back_debit - entry_front_credit;
@@ -369,8 +497,8 @@ fn compute_exit_pnl(
     // Exit fills (conservative):
     // - Close SHORT front leg: we BUY back, pay ASK
     // - Close LONG back leg: we SELL, receive BID
-    let exit_front_debit = exit_front.ce.ask + exit_front.pe.ask;  // Buy at ask
-    let exit_back_credit = h * (exit_back.ce.bid + exit_back.pe.bid);  // Sell at bid
+    let exit_front_debit = exit_front.ce.ask + exit_front.pe.ask; // Buy at ask
+    let exit_back_credit = h * (exit_back.ce.bid + exit_back.pe.bid); // Sell at bid
 
     // Entry fills were:
     // - SHORT front: received bid (credit)
@@ -414,17 +542,18 @@ fn compute_exit_pnl(
 
 /// Build quote truth audit record (Phase 9.2 Q1)
 #[allow(dead_code)]
-fn build_quote_truth_audit(
-    tick: &TickEvent,
-    symbol: &str,
-) -> QuoteTruthAudit {
+fn build_quote_truth_audit(tick: &TickEvent, symbol: &str) -> QuoteTruthAudit {
     let price_mult = 10f64.powi(tick.price_exponent);
     let bid = tick.bid_price as f64 * price_mult;
     let ask = tick.ask_price as f64 * price_mult;
     let ltp = tick.ltp as f64 * price_mult;
     let spread = ask - bid;
     let mid = (bid + ask) / 2.0;
-    let spread_bps = if mid > 0.0 { 10000.0 * spread / mid } else { 0.0 };
+    let spread_bps = if mid > 0.0 {
+        10000.0 * spread / mid
+    } else {
+        0.0
+    };
 
     QuoteTruthAudit {
         symbol: symbol.to_string(),
@@ -441,11 +570,7 @@ fn build_quote_truth_audit(
 }
 
 /// Phase 9.3: Q1-lite validation for a single option leg
-fn validate_q1_leg(
-    tick: &TickEvent,
-    symbol: &str,
-    decision_ts: DateTime<Utc>,
-) -> Q1LegValidation {
+fn validate_q1_leg(tick: &TickEvent, symbol: &str, decision_ts: DateTime<Utc>) -> Q1LegValidation {
     let price_mult = 10f64.powi(tick.price_exponent);
     let bid = tick.bid_price as f64 * price_mult;
     let ask = tick.ask_price as f64 * price_mult;
@@ -457,13 +582,25 @@ fn validate_q1_leg(
     let spread_invalid = ask <= bid || (ask - bid) <= 0.0;
 
     let mut fail_reasons = Vec::new();
-    if bid_qty_zero { fail_reasons.push("bid_qty=0"); }
-    if ask_qty_zero { fail_reasons.push("ask_qty=0"); }
-    if quote_stale { fail_reasons.push(format!("stale({}ms)", quote_age_ms).leak()); }
-    if spread_invalid { fail_reasons.push("spread<=0"); }
+    if bid_qty_zero {
+        fail_reasons.push("bid_qty=0");
+    }
+    if ask_qty_zero {
+        fail_reasons.push("ask_qty=0");
+    }
+    if quote_stale {
+        fail_reasons.push(format!("stale({}ms)", quote_age_ms).leak());
+    }
+    if spread_invalid {
+        fail_reasons.push("spread<=0");
+    }
 
     let passed = !bid_qty_zero && !ask_qty_zero && !quote_stale && !spread_invalid;
-    let fail_reason = if fail_reasons.is_empty() { None } else { Some(fail_reasons.join("|")) };
+    let fail_reason = if fail_reasons.is_empty() {
+        None
+    } else {
+        Some(fail_reasons.join("|"))
+    };
 
     Q1LegValidation {
         symbol: symbol.to_string(),
@@ -505,9 +642,17 @@ fn validate_q1_straddle(
 }
 
 /// Update Q1 counters based on validation results
-fn update_q1_counters(counters: &mut GateCounters, front: &Q1StraddleValidation, back: &Q1StraddleValidation) {
-    if front.any_failed { counters.q1_front_fail += 1; }
-    if back.any_failed { counters.q1_back_fail += 1; }
+fn update_q1_counters(
+    counters: &mut GateCounters,
+    front: &Q1StraddleValidation,
+    back: &Q1StraddleValidation,
+) {
+    if front.any_failed {
+        counters.q1_front_fail += 1;
+    }
+    if back.any_failed {
+        counters.q1_back_fail += 1;
+    }
 
     // Count individual failure reasons and log each failure
     for leg in [&front.ce, &front.pe, &back.ce, &back.pe] {
@@ -522,10 +667,18 @@ fn update_q1_counters(counters: &mut GateCounters, front: &Q1StraddleValidation,
                 );
             }
         }
-        if leg.bid_qty_zero { counters.q1_bid_qty_zero += 1; }
-        if leg.ask_qty_zero { counters.q1_ask_qty_zero += 1; }
-        if leg.quote_stale { counters.q1_quote_stale += 1; }
-        if leg.spread_invalid { counters.q1_spread_invalid += 1; }
+        if leg.bid_qty_zero {
+            counters.q1_bid_qty_zero += 1;
+        }
+        if leg.ask_qty_zero {
+            counters.q1_ask_qty_zero += 1;
+        }
+        if leg.quote_stale {
+            counters.q1_quote_stale += 1;
+        }
+        if leg.spread_invalid {
+            counters.q1_spread_invalid += 1;
+        }
     }
 }
 
@@ -627,7 +780,8 @@ fn expiry_to_date(expiry: &str) -> Option<NaiveDate> {
 /// Calculate time to expiry in years
 fn time_to_expiry(now: DateTime<Utc>, expiry: &str) -> f64 {
     if let Some(exp_date) = expiry_to_date(expiry) {
-        let exp_datetime = exp_date.and_hms_opt(10, 0, 0)
+        let exp_datetime = exp_date
+            .and_hms_opt(10, 0, 0)
             .map(|dt| DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
 
         if let Some(exp_dt) = exp_datetime {
@@ -839,12 +993,11 @@ fn find_closest_tick<'a>(
 /// Extract IV from SANOS slice at ATM
 fn extract_atm_iv(slice: &SanosSlice) -> Option<f64> {
     // Find ATM strike (k ≈ 1.0)
-    let atm_idx = slice.fitted_strikes
+    let atm_idx = slice
+        .fitted_strikes
         .iter()
         .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            (**a - 1.0).abs().partial_cmp(&(**b - 1.0).abs()).unwrap()
-        })?
+        .min_by(|(_, a), (_, b)| (**a - 1.0).abs().partial_cmp(&(**b - 1.0).abs()).unwrap())?
         .0;
 
     let call_price = slice.fitted_calls[atm_idx];
@@ -907,12 +1060,12 @@ fn bs_call_normalized(k: f64, vol: f64, t: f64) -> f64 {
 }
 
 fn norm_cdf(x: f64) -> f64 {
-    let a1 =  0.254829592;
+    let a1 = 0.254829592;
     let a2 = -0.284496736;
-    let a3 =  1.421413741;
+    let a3 = 1.421413741;
     let a4 = -1.453152027;
-    let a5 =  1.061405429;
-    let p  =  0.3275911;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
 
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
     let x = x.abs();
@@ -926,17 +1079,27 @@ fn norm_cdf(x: f64) -> f64 {
 /// Find ATM strike from SANOS slice forward
 fn find_atm_strike(slice: &SanosSlice, underlying: &str) -> f64 {
     let forward = slice.forward;
-    let tick_size = if underlying == "BANKNIFTY" { 100.0 } else { 50.0 };
+    let tick_size = if underlying == "BANKNIFTY" {
+        100.0
+    } else {
+        50.0
+    };
     (forward / tick_size).round() * tick_size
 }
 
 /// Extract calendar gap from SANOS slices
 fn extract_calendar_gap(s1: &SanosSlice, s2: &SanosSlice) -> Option<f64> {
     // Find ATM indices
-    let atm1_idx = s1.fitted_strikes.iter().enumerate()
+    let atm1_idx = s1
+        .fitted_strikes
+        .iter()
+        .enumerate()
         .min_by(|(_, a), (_, b)| (**a - 1.0).abs().partial_cmp(&(**b - 1.0).abs()).unwrap())?
         .0;
-    let atm2_idx = s2.fitted_strikes.iter().enumerate()
+    let atm2_idx = s2
+        .fitted_strikes
+        .iter()
+        .enumerate()
         .min_by(|(_, a), (_, b)| (**a - 1.0).abs().partial_cmp(&(**b - 1.0).abs()).unwrap())?
         .0;
 
@@ -950,16 +1113,28 @@ fn extract_skew(slice: &SanosSlice) -> Option<f64> {
     const K_HIGH_TARGET: f64 = 1.03;
 
     // Find nearest strike to k_low
-    let low_idx = slice.fitted_strikes.iter().enumerate()
+    let low_idx = slice
+        .fitted_strikes
+        .iter()
+        .enumerate()
         .min_by(|(_, a), (_, b)| {
-            (**a - K_LOW_TARGET).abs().partial_cmp(&(**b - K_LOW_TARGET).abs()).unwrap()
+            (**a - K_LOW_TARGET)
+                .abs()
+                .partial_cmp(&(**b - K_LOW_TARGET).abs())
+                .unwrap()
         })?
         .0;
 
     // Find nearest strike to k_high
-    let high_idx = slice.fitted_strikes.iter().enumerate()
+    let high_idx = slice
+        .fitted_strikes
+        .iter()
+        .enumerate()
         .min_by(|(_, a), (_, b)| {
-            (**a - K_HIGH_TARGET).abs().partial_cmp(&(**b - K_HIGH_TARGET).abs()).unwrap()
+            (**a - K_HIGH_TARGET)
+                .abs()
+                .partial_cmp(&(**b - K_HIGH_TARGET).abs())
+                .unwrap()
         })?
         .0;
 
@@ -979,9 +1154,7 @@ fn extract_skew(slice: &SanosSlice) -> Option<f64> {
 }
 
 /// Build Phase8Features from SANOS slices
-fn build_features(
-    slices: &[SanosSlice],
-) -> Result<Phase8Features> {
+fn build_features(slices: &[SanosSlice]) -> Result<Phase8Features> {
     if slices.is_empty() {
         return Err(anyhow!("No slices provided"));
     }
@@ -1004,7 +1177,15 @@ fn build_features(
             }
         };
         let sk2_val = extract_skew(s2);
-        (Some(iv2_val), cal12_val, ts12_val, sk2_val, Some(s2.forward), Some(s2.time_to_expiry), Some(1.0))
+        (
+            Some(iv2_val),
+            cal12_val,
+            ts12_val,
+            sk2_val,
+            Some(s2.forward),
+            Some(s2.time_to_expiry),
+            Some(1.0),
+        )
     } else {
         (None, None, None, None, None, None, None)
     };
@@ -1033,7 +1214,16 @@ fn build_features(
             _ => None,
         };
         let sk3_val = extract_skew(s3);
-        (Some(iv3_val), cal23_val, ts23_val, ts_curv, sk3_val, Some(s3.forward), Some(s3.time_to_expiry), Some(1.0))
+        (
+            Some(iv3_val),
+            cal23_val,
+            ts23_val,
+            ts_curv,
+            sk3_val,
+            Some(s3.forward),
+            Some(s3.time_to_expiry),
+            Some(1.0),
+        )
     } else {
         (None, None, None, None, None, None, None, None)
     };
@@ -1082,7 +1272,10 @@ fn main() -> Result<()> {
     info!("Found {} expiries: {:?}", expiries.len(), expiries);
 
     if expiries.len() < 2 {
-        return Err(anyhow!("Need at least 2 expiries for calendar strategy, found {}", expiries.len()));
+        return Err(anyhow!(
+            "Need at least 2 expiries for calendar strategy, found {}",
+            expiries.len()
+        ));
     }
 
     // Load all ticks
@@ -1125,7 +1318,7 @@ fn main() -> Result<()> {
     let mut dist_friction_round = DistributionStats::default();
     let mut dist_friction_ratio = DistributionStats::default();
     let mut dist_entry_friction = DistributionStats::default();
-    let mut dist_pnl_at_entry = DistributionStats::default();  // PnL implied at entry (conservative)
+    let mut dist_pnl_at_entry = DistributionStats::default(); // PnL implied at entry (conservative)
 
     // Phase 9.2: Effective friction and 10-minute exit stats
     let mut dist_friction_round_obs = DistributionStats::default();
@@ -1233,8 +1426,20 @@ fn main() -> Result<()> {
         };
 
         // Phase 9.3: Q1-lite quote validation
-        let q1_front = validate_q1_straddle(&all_ticks, &args.underlying, &expiries[0], front_atm, current_ts);
-        let q1_back = validate_q1_straddle(&all_ticks, &args.underlying, &expiries[1], back_atm, current_ts);
+        let q1_front = validate_q1_straddle(
+            &all_ticks,
+            &args.underlying,
+            &expiries[0],
+            front_atm,
+            current_ts,
+        );
+        let q1_back = validate_q1_straddle(
+            &all_ticks,
+            &args.underlying,
+            &expiries[1],
+            back_atm,
+            current_ts,
+        );
 
         // Track Q1 stats if validation succeeded
         if let (Some(front_q1), Some(back_q1)) = (&q1_front, &q1_back) {
@@ -1252,7 +1457,11 @@ fn main() -> Result<()> {
             t1_expiry: expiries[0].clone(),
             t2_expiry: expiries.get(1).cloned(),
             t3_expiry: expiries.get(2).cloned(),
-            lot_size: if args.underlying == "BANKNIFTY" { 15 } else { 25 },
+            lot_size: if args.underlying == "BANKNIFTY" {
+                15
+            } else {
+                25
+            },
             multiplier: 1.0,
             lp_status_t1: slices[0].diagnostics.lp_status.clone(),
             lp_status_t2: slices.get(1).map(|s| s.diagnostics.lp_status.clone()),
@@ -1282,19 +1491,15 @@ fn main() -> Result<()> {
         let k_norm_t2 = back_atm / slices[1].forward;
 
         // Phase 9.2: Check for 10-minute exits on active trades
-        let exit_threshold_secs = 600;  // 10 minutes
+        let exit_threshold_secs = 600; // 10 minutes
         let mut trades_to_remove = Vec::new();
 
         for (idx, trade) in active_trades.iter().enumerate() {
             let hold_secs = (current_ts - trade.entry_ts).num_seconds();
             if hold_secs >= exit_threshold_secs {
                 // Compute exit PnL with current quotes (from ctx)
-                let exit_result = compute_exit_pnl(
-                    trade,
-                    &ctx.front_straddle,
-                    &ctx.back_straddle,
-                    current_ts,
-                );
+                let exit_result =
+                    compute_exit_pnl(trade, &ctx.front_straddle, &ctx.back_straddle, current_ts);
 
                 // Track stats
                 completed_exits += 1;
@@ -1308,8 +1513,12 @@ fn main() -> Result<()> {
 
                 info!(
                     "[EXIT] entry_ts={} exit_ts={} hold={}s pnl_cons={:.2}₹ pnl_mid={:.2}₹ pnl/fric={:.2}",
-                    trade.entry_ts, current_ts, exit_result.hold_seconds,
-                    exit_result.pnl_conservative, exit_result.pnl_mid, exit_result.pnl_per_friction
+                    trade.entry_ts,
+                    current_ts,
+                    exit_result.hold_seconds,
+                    exit_result.pnl_conservative,
+                    exit_result.pnl_mid,
+                    exit_result.pnl_per_friction
                 );
 
                 trades_to_remove.push(idx);
@@ -1342,7 +1551,11 @@ fn main() -> Result<()> {
         if let Some(gap_premium) = audit.gates.as_ref().and_then(|g| g.e1_premium_gap.value) {
             dist_gap_premium.add(gap_premium);
         }
-        if let Some(ratio) = audit.gates.as_ref().and_then(|g| g.e2_friction_dominance.value) {
+        if let Some(ratio) = audit
+            .gates
+            .as_ref()
+            .and_then(|g| g.e2_friction_dominance.value)
+        {
             dist_friction_ratio.add(ratio);
         }
 
@@ -1369,9 +1582,8 @@ fn main() -> Result<()> {
                 counters.update(gates);
 
                 // Check cooldown (Phase 9: S2)
-                let in_cooldown = last_entry_ts.is_some_and(|last| {
-                    (current_ts - last).num_seconds() < COOLDOWN_SECS
-                });
+                let in_cooldown = last_entry_ts
+                    .is_some_and(|last| (current_ts - last).num_seconds() < COOLDOWN_SECS);
 
                 if in_cooldown {
                     counters.cooldown_blocked += 1;
@@ -1395,12 +1607,12 @@ fn main() -> Result<()> {
                     // Track fill statistics
                     total_entries += 1;
                     total_entry_friction += fill.entry_friction;
-                    total_pnl_at_entry += -fill.net_entry_cost;  // Negative cost = positive PnL
+                    total_pnl_at_entry += -fill.net_entry_cost; // Negative cost = positive PnL
 
                     // Compute observed and effective round-trip friction (Phase 9.2)
                     let friction_round_obs = 2.0 * fill.entry_friction;
                     let is_nifty = ctx.meta.underlying == "NIFTY";
-                    let friction_floor = if is_nifty { 10.0 } else { 25.0 };  // FROZEN_PARAMS.floor_friction_round_*
+                    let friction_floor = if is_nifty { 10.0 } else { 25.0 }; // FROZEN_PARAMS.floor_friction_round_*
                     let friction_round_eff = friction_round_obs.max(friction_floor);
 
                     dist_friction_round.add(friction_round_obs);
@@ -1427,16 +1639,25 @@ fn main() -> Result<()> {
                     );
                     info!(
                         "[FILL] front_credit={:.2} back_debit={:.2} net_cost={:.2} fric_entry={:.2} mark_mid={:.2} fric_eff={:.2}",
-                        fill.entry_front_credit, fill.entry_back_debit, fill.net_entry_cost,
-                        fill.entry_friction, fill.mark_to_mid, friction_round_eff
+                        fill.entry_front_credit,
+                        fill.entry_back_debit,
+                        fill.net_entry_cost,
+                        fill.entry_friction,
+                        fill.mark_to_mid,
+                        friction_round_eff
                     );
                     info!(
                         "[QUOTES] ce_f={:.2}/{:.2} pe_f={:.2}/{:.2} ce_b={:.2}/{:.2} pe_b={:.2}/{:.2} sprd_f={:.2} sprd_b={:.2}",
-                        quote_val.ce_front_bid, quote_val.ce_front_ask,
-                        quote_val.pe_front_bid, quote_val.pe_front_ask,
-                        quote_val.ce_back_bid, quote_val.ce_back_ask,
-                        quote_val.pe_back_bid, quote_val.pe_back_ask,
-                        quote_val.straddle_spread_front, quote_val.straddle_spread_back
+                        quote_val.ce_front_bid,
+                        quote_val.ce_front_ask,
+                        quote_val.pe_front_bid,
+                        quote_val.pe_front_ask,
+                        quote_val.ce_back_bid,
+                        quote_val.ce_back_ask,
+                        quote_val.pe_back_bid,
+                        quote_val.pe_back_ask,
+                        quote_val.straddle_spread_front,
+                        quote_val.straddle_spread_back
                     );
                 }
             }
@@ -1453,17 +1674,65 @@ fn main() -> Result<()> {
 
     // Print distribution stats (Phase 9)
     info!("=== Distribution Stats (price units) ===");
-    info!("cal (price):     p50={:.2} p90={:.2} p99={:.2} n={}", dist_cal.p50(), dist_cal.p90(), dist_cal.p99(), dist_cal.count());
-    info!("cal_min (price): p50={:.2} p90={:.2} p99={:.2} n={}", dist_cal_min.p50(), dist_cal_min.p90(), dist_cal_min.p99(), dist_cal_min.count());
-    info!("edge (cal-cal_min): p50={:.2} p90={:.2} p99={:.2} n={}", dist_edge.p50(), dist_edge.p90(), dist_edge.p99(), dist_edge.count());
-    info!("spread_front:    p50={:.2} p90={:.2} p99={:.2} n={}", dist_spread_front.p50(), dist_spread_front.p90(), dist_spread_front.p99(), dist_spread_front.count());
-    info!("spread_back:     p50={:.2} p90={:.2} p99={:.2} n={}", dist_spread_back.p50(), dist_spread_back.p90(), dist_spread_back.p99(), dist_spread_back.count());
-    info!("iv1-iv(back):    p50={:.4} p90={:.4} p99={:.4} n={}", dist_iv_term.p50(), dist_iv_term.p90(), dist_iv_term.p99(), dist_iv_term.count());
+    info!(
+        "cal (price):     p50={:.2} p90={:.2} p99={:.2} n={}",
+        dist_cal.p50(),
+        dist_cal.p90(),
+        dist_cal.p99(),
+        dist_cal.count()
+    );
+    info!(
+        "cal_min (price): p50={:.2} p90={:.2} p99={:.2} n={}",
+        dist_cal_min.p50(),
+        dist_cal_min.p90(),
+        dist_cal_min.p99(),
+        dist_cal_min.count()
+    );
+    info!(
+        "edge (cal-cal_min): p50={:.2} p90={:.2} p99={:.2} n={}",
+        dist_edge.p50(),
+        dist_edge.p90(),
+        dist_edge.p99(),
+        dist_edge.count()
+    );
+    info!(
+        "spread_front:    p50={:.2} p90={:.2} p99={:.2} n={}",
+        dist_spread_front.p50(),
+        dist_spread_front.p90(),
+        dist_spread_front.p99(),
+        dist_spread_front.count()
+    );
+    info!(
+        "spread_back:     p50={:.2} p90={:.2} p99={:.2} n={}",
+        dist_spread_back.p50(),
+        dist_spread_back.p90(),
+        dist_spread_back.p99(),
+        dist_spread_back.count()
+    );
+    info!(
+        "iv1-iv(back):    p50={:.4} p90={:.4} p99={:.4} n={}",
+        dist_iv_term.p50(),
+        dist_iv_term.p90(),
+        dist_iv_term.p99(),
+        dist_iv_term.count()
+    );
 
     // Phase 9 Completion: Economic gate stats
     info!("=== Economic Gate Stats (Phase 9) ===");
-    info!("gap_premium:     p50={:.2} p90={:.2} p99={:.2} n={}", dist_gap_premium.p50(), dist_gap_premium.p90(), dist_gap_premium.p99(), dist_gap_premium.count());
-    info!("friction_ratio:  p50={:.2} p90={:.2} p99={:.2} n={}", dist_friction_ratio.p50(), dist_friction_ratio.p90(), dist_friction_ratio.p99(), dist_friction_ratio.count());
+    info!(
+        "gap_premium:     p50={:.2} p90={:.2} p99={:.2} n={}",
+        dist_gap_premium.p50(),
+        dist_gap_premium.p90(),
+        dist_gap_premium.p99(),
+        dist_gap_premium.count()
+    );
+    info!(
+        "friction_ratio:  p50={:.2} p90={:.2} p99={:.2} n={}",
+        dist_friction_ratio.p50(),
+        dist_friction_ratio.p90(),
+        dist_friction_ratio.p99(),
+        dist_friction_ratio.count()
+    );
 
     // Conservative fill summary
     info!("=== Conservative Fill Summary (entries only) ===");
@@ -1474,19 +1743,40 @@ fn main() -> Result<()> {
         let avg_pnl_at_entry = total_pnl_at_entry / total_entries as f64;
         info!("avg entry_friction:  {:.2} ₹", avg_entry_friction);
         info!("avg friction_round:  {:.2} ₹", avg_friction_round);
-        info!("avg pnl_at_entry:    {:.2} ₹ (negative = net debit)", avg_pnl_at_entry);
+        info!(
+            "avg pnl_at_entry:    {:.2} ₹ (negative = net debit)",
+            avg_pnl_at_entry
+        );
         info!("total pnl_at_entry:  {:.2} ₹", total_pnl_at_entry);
 
         // Distribution of per-entry values
-        info!("entry_friction:  p50={:.2} p90={:.2} n={}", dist_entry_friction.p50(), dist_entry_friction.p90(), dist_entry_friction.count());
-        info!("friction_round:  p50={:.2} p90={:.2} n={}", dist_friction_round.p50(), dist_friction_round.p90(), dist_friction_round.count());
-        info!("pnl_at_entry:    p50={:.2} p90={:.2} n={}", dist_pnl_at_entry.p50(), dist_pnl_at_entry.p90(), dist_pnl_at_entry.count());
+        info!(
+            "entry_friction:  p50={:.2} p90={:.2} n={}",
+            dist_entry_friction.p50(),
+            dist_entry_friction.p90(),
+            dist_entry_friction.count()
+        );
+        info!(
+            "friction_round:  p50={:.2} p90={:.2} n={}",
+            dist_friction_round.p50(),
+            dist_friction_round.p90(),
+            dist_friction_round.count()
+        );
+        info!(
+            "pnl_at_entry:    p50={:.2} p90={:.2} n={}",
+            dist_pnl_at_entry.p50(),
+            dist_pnl_at_entry.p90(),
+            dist_pnl_at_entry.count()
+        );
 
         // Key ratio: median gap_premium / median friction_round
         let median_gap_premium = dist_gap_premium.p50();
         let median_friction_round = dist_friction_round.p50();
         if median_friction_round > 0.0 {
-            info!("median gap/friction_round: {:.2}", median_gap_premium / median_friction_round);
+            info!(
+                "median gap/friction_round: {:.2}",
+                median_gap_premium / median_friction_round
+            );
         }
     }
 
@@ -1502,27 +1792,62 @@ fn main() -> Result<()> {
         info!("Winning trades:      {} ({:.1}%)", winning_exits, win_rate);
 
         // Friction distributions (observed vs effective)
-        info!("friction_round_obs:  p50={:.2} p90={:.2} n={}", dist_friction_round_obs.p50(), dist_friction_round_obs.p90(), dist_friction_round_obs.count());
-        info!("friction_round_eff:  p50={:.2} p90={:.2} n={}", dist_friction_round_eff.p50(), dist_friction_round_eff.p90(), dist_friction_round_eff.count());
+        info!(
+            "friction_round_obs:  p50={:.2} p90={:.2} n={}",
+            dist_friction_round_obs.p50(),
+            dist_friction_round_obs.p90(),
+            dist_friction_round_obs.count()
+        );
+        info!(
+            "friction_round_eff:  p50={:.2} p90={:.2} n={}",
+            dist_friction_round_eff.p50(),
+            dist_friction_round_eff.p90(),
+            dist_friction_round_eff.count()
+        );
 
         // PnL distributions
-        info!("pnl_10m_cons:        p50={:.2} p90={:.2} n={}", dist_pnl_10m_conservative.p50(), dist_pnl_10m_conservative.p90(), dist_pnl_10m_conservative.count());
-        info!("pnl_10m_mid:         p50={:.2} p90={:.2} n={}", dist_pnl_10m_mid.p50(), dist_pnl_10m_mid.p90(), dist_pnl_10m_mid.count());
-        info!("pnl_per_friction:    p50={:.2} p90={:.2} n={}", dist_pnl_per_friction.p50(), dist_pnl_per_friction.p90(), dist_pnl_per_friction.count());
+        info!(
+            "pnl_10m_cons:        p50={:.2} p90={:.2} n={}",
+            dist_pnl_10m_conservative.p50(),
+            dist_pnl_10m_conservative.p90(),
+            dist_pnl_10m_conservative.count()
+        );
+        info!(
+            "pnl_10m_mid:         p50={:.2} p90={:.2} n={}",
+            dist_pnl_10m_mid.p50(),
+            dist_pnl_10m_mid.p90(),
+            dist_pnl_10m_mid.count()
+        );
+        info!(
+            "pnl_per_friction:    p50={:.2} p90={:.2} n={}",
+            dist_pnl_per_friction.p50(),
+            dist_pnl_per_friction.p90(),
+            dist_pnl_per_friction.count()
+        );
 
         // Key metric: PnL per effective friction
         let median_pnl_per_fric = dist_pnl_per_friction.p50();
-        info!("Median PnL/friction: {:.2} (>1 = profitable after friction)", median_pnl_per_fric);
+        info!(
+            "Median PnL/friction: {:.2} (>1 = profitable after friction)",
+            median_pnl_per_fric
+        );
     }
 
     // Phase 9.3: Q1-lite quote audit summary
     info!("=== Phase 9.3: Q1-lite Quote Audit ===");
-    info!("quote_age_ms:        p50={:.0} p90={:.0} p99={:.0} n={}",
-        dist_quote_age_ms.p50(), dist_quote_age_ms.p90(), dist_quote_age_ms.p99(), dist_quote_age_ms.count());
+    info!(
+        "quote_age_ms:        p50={:.0} p90={:.0} p99={:.0} n={}",
+        dist_quote_age_ms.p50(),
+        dist_quote_age_ms.p90(),
+        dist_quote_age_ms.p99(),
+        dist_quote_age_ms.count()
+    );
     let total_q1_failures = counters.q1_front_fail + counters.q1_back_fail;
     let q1_fail_pct = if counters.total_decisions > 0 {
-        100.0 * (total_q1_failures as f64) / (counters.total_decisions as f64 * 2.0)  // 2 straddles per decision
-    } else { 0.0 };
+        100.0 * (total_q1_failures as f64) / (counters.total_decisions as f64 * 2.0) // 2 straddles per decision
+    } else {
+        0.0
+    };
     info!("Q1 failure rate:     {:.1}% (target <5-10%)", q1_fail_pct);
 
     // Write audit records
@@ -1531,7 +1856,11 @@ fn main() -> Result<()> {
         let json = serde_json::to_string(record)?;
         writeln!(output_file, "{}", json)?;
     }
-    info!("Wrote {} audit records to {:?}", audit_records.len(), args.output);
+    info!(
+        "Wrote {} audit records to {:?}",
+        audit_records.len(),
+        args.output
+    );
 
     Ok(())
 }
