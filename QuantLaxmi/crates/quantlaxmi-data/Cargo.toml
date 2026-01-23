@@ -2,7 +2,17 @@
 name = "quantlaxmi-data"
 version = "0.1.0"
 edition = "2021"
+description = "Market data processing for QuantLaxmi (tick aggregation, orderbook, VPIN)"
 publish = false
 
 [dependencies]
-kubera-data = { path = "../kubera-data" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+tokio = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+ordered-float = "4.2"
+parquet = "53.0"
+arrow = "53.0"

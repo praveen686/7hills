@@ -20,8 +20,8 @@
 use arrow::array::{Float64Array, StringArray, TimestampNanosecondArray};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-use kubera_models::{MarketEvent, MarketPayload};
 use parquet::arrow::arrow_writer::ArrowWriter;
+use quantlaxmi_models::{MarketEvent, MarketPayload};
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
