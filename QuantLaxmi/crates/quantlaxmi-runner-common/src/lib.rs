@@ -21,6 +21,7 @@ pub mod circuit_breakers;
 pub mod config;
 pub mod manifest_io;
 pub mod report;
+pub mod run_manifest;
 pub mod session_manifest;
 pub mod tui;
 pub mod vectorbt;
@@ -30,6 +31,10 @@ pub use circuit_breakers::{
     CircuitBreakerStatus, LatencyCircuitBreaker, RateLimiter, TradingCircuitBreakers,
 };
 pub use config::{ExecutionInfo, ModeInfo, RiskInfo, RunnerConfig, StrategyConfig};
+pub use run_manifest::{
+    InputBinding, OutputBinding, RunManifest, bind_json_file, config_hash, git_commit_string,
+    hash_file, persist_run_manifest_atomic,
+};
 pub use session_manifest::{
     IntegritySummary, SESSION_MANIFEST_SCHEMA_VERSION, SessionManifest, TickOutputEntry,
     UnderlyingEntry, load_session_manifest, load_universe_manifest_bytes,

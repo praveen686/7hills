@@ -10,7 +10,7 @@
 //! Usage:
 //!   cargo run --bin run_calendar_carry -- --session-dir <path> --underlying NIFTY
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use clap::Parser;
 use quantlaxmi_options::sanos::{ExpirySlice, OptionQuote, SanosCalibrator, SanosSlice};
@@ -18,13 +18,18 @@ use quantlaxmi_options::strategies::{
     AuditRecord, CalendarCarryStrategy, GateCheckResult, Phase8Features, QuoteSnapshot,
     SessionMeta, StraddleQuotes, StrategyContext, StrategyDecision,
 };
+use quantlaxmi_runner_common::manifest_io::{sha256_hex, write_atomic};
+use quantlaxmi_runner_common::run_manifest::{
+    InputBinding, OutputBinding, RunManifest, config_hash, git_commit_string, hash_file,
+    persist_run_manifest_atomic,
+};
 use quantlaxmi_runner_india::sanos_io::{
     SanosUnderlyingInventory, log_legacy_mode, log_manifest_mode, try_load_sanos_inventory,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write as IoWrite};
+use std::io::{BufRead, BufReader, BufWriter, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use tracing::info;
 
@@ -73,6 +78,35 @@ struct Args {
     /// SANOS smoothness parameter η
     #[arg(long, default_value = "0.25")]
     eta: f64,
+}
+
+/// Minimal deterministic run config used for RunManifest hashing.
+#[derive(Debug, Clone, Serialize)]
+struct RunConfigHash {
+    underlying: String,
+    interval_secs: u64,
+    eta: f64,
+}
+
+/// Canonical signal event emitted when strategy generates an Enter intent.
+///
+/// This is intentionally small and stable so downstream backtests can remain generic.
+#[derive(Debug, Clone, Serialize)]
+struct SignalEvent {
+    schema_version: u32,
+    ts: DateTime<Utc>,
+    underlying: String,
+    front_expiry: String,
+    back_expiry: String,
+    front_strike: f64,
+    back_strike: f64,
+    front_lots: i32,
+    back_lots: i32,
+    hedge_ratio: f64,
+    cal_value: f64,
+    cal_min: f64,
+    friction_estimate: f64,
+    reason_codes: Vec<String>,
 }
 
 /// Tick event from captured session
@@ -1442,10 +1476,62 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    // ---------------------------------------------------------------------
+    // Deterministic Run ID + Run Directory
+    // ---------------------------------------------------------------------
+    let cfg = RunConfigHash {
+        underlying: args.underlying.clone(),
+        interval_secs: args.interval_secs,
+        eta: args.eta,
+    };
+    let cfg_sha256 = config_hash(&cfg)?;
+
+    let session_manifest_path = args.session_dir.join("session_manifest.json");
+    let session_sha256 = if session_manifest_path.exists() {
+        let (sha, _) = hash_file(&session_manifest_path)?;
+        sha
+    } else {
+        // Legacy fallback: bind to session_dir string
+        sha256_hex(args.session_dir.to_string_lossy().as_bytes())
+    };
+
+    // Deterministic run ID derived from (session_sha256 + cfg_sha256)
+    let run_id_full = sha256_hex(format!("{}{}", session_sha256, cfg_sha256).as_bytes());
+    let run_id = run_id_full.chars().take(16).collect::<String>();
+    let run_dir = args
+        .session_dir
+        .join("runs")
+        .join("run_calendar_carry")
+        .join(&run_id);
+    std::fs::create_dir_all(&run_dir)
+        .with_context(|| format!("Failed to create run_dir: {}", run_dir.display()))?;
+
+    // Resolve audit output path (default: inside run_dir)
+    let audit_path = if args.output.is_absolute() {
+        args.output.clone()
+    } else {
+        run_dir.join(&args.output)
+    };
+    let signals_path = run_dir.join("signals.jsonl");
+    let gates_path = run_dir.join("gate_counters.json");
+
+    let mut audit_writer = BufWriter::new(
+        File::create(&audit_path)
+            .with_context(|| format!("Failed to create audit output: {}", audit_path.display()))?,
+    );
+    let mut signals_writer = BufWriter::new(File::create(&signals_path).with_context(|| {
+        format!(
+            "Failed to create signals output: {}",
+            signals_path.display()
+        )
+    })?);
+
     info!("Strategy v0: SANOS-Gated Calendar Carry Runner");
     info!("Session: {:?}", args.session_dir);
     info!("Underlying: {}", args.underlying);
     info!("Decision interval: {}s", args.interval_secs);
+    info!("Run ID: {}", run_id);
+    info!("Run dir: {}", run_dir.display());
 
     // Try manifest-driven mode (Commit D)
     let manifest_inventory = try_load_sanos_inventory(&args.session_dir)?;
@@ -1890,6 +1976,27 @@ fn main() -> Result<()> {
                     counters.enter_after_cooldown += 1;
                     last_entry_ts = Some(current_ts);
 
+                    // Emit alpha signal (Enter intent) - deterministic JSONL
+                    let signal = SignalEvent {
+                        schema_version: 1,
+                        ts: current_ts,
+                        underlying: intent.underlying.clone(),
+                        front_expiry: intent.front_expiry.clone(),
+                        back_expiry: intent.back_expiry.clone(),
+                        front_strike: intent.front_strike,
+                        back_strike: intent.back_strike,
+                        front_lots: intent.front_lots,
+                        back_lots: intent.back_lots,
+                        hedge_ratio: intent.hedge_ratio,
+                        cal_value: intent.cal_value,
+                        cal_min: intent.cal_min,
+                        friction_estimate: intent.friction_estimate,
+                        reason_codes: vec!["ENTER".to_string()],
+                    };
+                    let line = serde_json::to_string(&signal)
+                        .context("Failed to serialize SignalEvent")?;
+                    writeln!(signals_writer, "{}", line).context("Failed to write SignalEvent")?;
+
                     // Phase 9 Completion: Conservative fill calculation
                     let fill = compute_conservative_fill(
                         &ctx.front_straddle,
@@ -2143,16 +2250,104 @@ fn main() -> Result<()> {
     };
     info!("Q1 failure rate:     {:.1}% (target <5-10%)", q1_fail_pct);
 
-    // Write audit records
-    let mut output_file = File::create(&args.output)?;
+    // ---------------------------------------------------------------------
+    // Persist outputs (audit + gates + signals) and write RunManifest
+    // ---------------------------------------------------------------------
     for record in &audit_records {
-        let json = serde_json::to_string(record)?;
-        writeln!(output_file, "{}", json)?;
+        let json = serde_json::to_string(record).context("Failed to serialize AuditRecord")?;
+        writeln!(audit_writer, "{}", json).context("Failed to write audit JSONL")?;
     }
+    audit_writer
+        .flush()
+        .context("Failed to flush audit output")?;
+    signals_writer
+        .flush()
+        .context("Failed to flush signals output")?;
+
+    // Gate counters JSON (small, deterministic)
+    let gates_bytes =
+        serde_json::to_vec_pretty(&counters).context("Failed to serialize gate counters")?;
+    write_atomic(&gates_path, &gates_bytes)
+        .with_context(|| format!("Failed to write gate counters: {}", gates_path.display()))?;
+
     info!(
-        "Wrote {} audit records to {:?}",
+        "Wrote audit records: {} -> {}",
         audit_records.len(),
-        args.output
+        audit_path.display()
+    );
+    info!("Wrote signals -> {}", signals_path.display());
+    info!("Wrote gate counters -> {}", gates_path.display());
+
+    // Build RunManifest bindings
+    let git_commit = git_commit_string();
+
+    // Session manifest binding (if present)
+    let session_binding = InputBinding {
+        label: "session_manifest".to_string(),
+        rel_path: "session_manifest.json".to_string(),
+        sha256: session_sha256.clone(),
+    };
+
+    // Universe manifest binding for the requested underlying (manifest mode) if available
+    let mut universe_bindings: Vec<InputBinding> = Vec::new();
+    if let Some(u_inv) = manifest_underlying {
+        let sub = u_inv.underlying_subdir.trim_end_matches('/');
+        let rel = format!("{}/universe_manifest.json", sub);
+        let (sha, _) = hash_file(&args.session_dir.join(&rel))?;
+        universe_bindings.push(InputBinding {
+            label: format!("universe_manifest:{}", u_inv.underlying.to_uppercase()),
+            rel_path: rel,
+            sha256: sha,
+        });
+    }
+
+    // Output bindings (relative to run_dir)
+    let (audit_sha, audit_len) = hash_file(&audit_path)?;
+    let (signals_sha, signals_len) = hash_file(&signals_path)?;
+    let (gates_sha, gates_len) = hash_file(&gates_path)?;
+
+    let outputs = vec![
+        OutputBinding {
+            label: "audit_jsonl".to_string(),
+            rel_path: audit_path
+                .strip_prefix(&run_dir)
+                .unwrap_or(&audit_path)
+                .to_string_lossy()
+                .to_string(),
+            sha256: audit_sha,
+            bytes_len: audit_len,
+        },
+        OutputBinding {
+            label: "signals_jsonl".to_string(),
+            rel_path: "signals.jsonl".to_string(),
+            sha256: signals_sha,
+            bytes_len: signals_len,
+        },
+        OutputBinding {
+            label: "gate_counters".to_string(),
+            rel_path: "gate_counters.json".to_string(),
+            sha256: gates_sha,
+            bytes_len: gates_len,
+        },
+    ];
+
+    let rm = RunManifest {
+        schema_version: 1,
+        binary_name: "run_calendar_carry".to_string(),
+        git_commit,
+        run_id: run_id.clone(),
+        session_dir: args.session_dir.to_string_lossy().to_string(),
+        session_manifest: session_binding,
+        universe_manifests: universe_bindings,
+        config_sha256: cfg_sha256,
+        outputs,
+    };
+
+    let run_manifest_sha = persist_run_manifest_atomic(&run_dir, &rm)?;
+    info!(
+        "RunManifest written -> {}/run_manifest.json (sha256={})",
+        run_dir.display(),
+        run_manifest_sha
     );
 
     Ok(())
