@@ -535,7 +535,7 @@ async fn run_capture_session(
             stats.session_id.clone(),
             "india_capture".to_string(),
             out_dir.to_string(),
-            duration_secs,
+            duration_secs as f64,
             price_exponent,
         );
 

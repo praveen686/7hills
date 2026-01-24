@@ -36,7 +36,7 @@ pub struct SessionManifest {
     /// Root output directory
     pub out_dir: String,
     /// Capture duration in seconds
-    pub duration_secs: u64,
+    pub duration_secs: f64,
     /// Price exponent for mantissa conversion
     pub price_exponent: i8,
     /// Per-underlying entries
@@ -101,7 +101,7 @@ impl SessionManifest {
         session_id: String,
         capture_mode: String,
         out_dir: String,
-        duration_secs: u64,
+        duration_secs: f64,
         price_exponent: i8,
     ) -> Self {
         Self {
@@ -231,7 +231,7 @@ mod tests {
             "test-session-123".to_string(),
             "india_capture".to_string(),
             "/data/sessions/test".to_string(),
-            300,
+            300.0,
             -2,
         );
 
@@ -273,7 +273,7 @@ mod tests {
             "test-session".to_string(),
             "india_capture".to_string(),
             dir.path().to_string_lossy().to_string(),
-            60,
+            60.0,
             -2,
         );
 
