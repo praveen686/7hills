@@ -160,7 +160,7 @@ jobs:
       - name: Verify CLI commands exist (release binaries)
         run: |
           ./target/release/quantlaxmi-india --help | grep -q "discover-zerodha"
-          ./target/release/quantlaxmi-india --help | grep -q "capture-zerodha"
+          ./target/release/quantlaxmi-india --help | grep -q "capture-session"
           ./target/release/quantlaxmi-india --help | grep -q "backtest-kitesim"
           ./target/release/quantlaxmi-crypto --help | grep -q "capture-binance"
           ./target/release/quantlaxmi-crypto --help | grep -q "capture-sbe-depth"
