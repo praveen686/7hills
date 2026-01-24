@@ -32,6 +32,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 use quantlaxmi_runner_crypto::binance_funding_capture::FundingEvent;
+use quantlaxmi_runner_crypto::quote::QuoteEvent;
 
 /// Type alias for symbol quote cache (spot quotes, perp quotes, funding events).
 type SymbolQuoteCache = HashMap<String, (Vec<QuoteEvent>, Vec<QuoteEvent>, Vec<FundingEvent>)>;
@@ -129,38 +130,6 @@ pub struct FundingArbSignal {
     pub exit_time_stop_secs: Option<u64>,
     pub exit_basis_revert_bps: Option<f64>,
     pub reason_codes: Vec<String>,
-}
-
-/// Quote event from spot or perp bookTicker stream.
-#[derive(Debug, Clone, Deserialize)]
-struct QuoteEvent {
-    ts: DateTime<Utc>,
-    #[allow(dead_code)]
-    symbol: String,
-    bid_price_mantissa: i64,
-    ask_price_mantissa: i64,
-    #[allow(dead_code)]
-    bid_qty_mantissa: i64,
-    #[allow(dead_code)]
-    ask_qty_mantissa: i64,
-    price_exponent: i8,
-    #[serde(default)]
-    #[allow(dead_code)]
-    qty_exponent: i8,
-}
-
-impl QuoteEvent {
-    fn bid_f64(&self) -> f64 {
-        self.bid_price_mantissa as f64 * 10f64.powi(self.price_exponent as i32)
-    }
-
-    fn ask_f64(&self) -> f64 {
-        self.ask_price_mantissa as f64 * 10f64.powi(self.price_exponent as i32)
-    }
-
-    fn mid_f64(&self) -> f64 {
-        (self.bid_f64() + self.ask_f64()) / 2.0
-    }
 }
 
 /// Quote lookup result.

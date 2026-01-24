@@ -33,7 +33,9 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+
 use clap::Parser;
+use quantlaxmi_runner_crypto::quote::QuoteEvent;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -97,47 +99,6 @@ struct Args {
 // =============================================================================
 // Data Structures
 // =============================================================================
-
-/// Quote event from spot or perp bookTicker stream.
-#[derive(Debug, Clone, Deserialize)]
-struct QuoteEvent {
-    ts: DateTime<Utc>,
-    #[allow(dead_code)]
-    symbol: String,
-    bid_price_mantissa: i64,
-    ask_price_mantissa: i64,
-    #[allow(dead_code)]
-    bid_qty_mantissa: i64,
-    #[allow(dead_code)]
-    ask_qty_mantissa: i64,
-    price_exponent: i8,
-    #[serde(default)]
-    #[allow(dead_code)]
-    qty_exponent: i8,
-}
-
-impl QuoteEvent {
-    fn bid_f64(&self) -> f64 {
-        self.bid_price_mantissa as f64 * 10f64.powi(self.price_exponent as i32)
-    }
-
-    fn ask_f64(&self) -> f64 {
-        self.ask_price_mantissa as f64 * 10f64.powi(self.price_exponent as i32)
-    }
-
-    fn mid_f64(&self) -> f64 {
-        (self.bid_f64() + self.ask_f64()) / 2.0
-    }
-
-    fn spread_bps(&self) -> f64 {
-        let mid = self.mid_f64();
-        if mid > 0.0 {
-            (self.ask_f64() - self.bid_f64()) / mid * 10000.0
-        } else {
-            f64::MAX
-        }
-    }
-}
 
 /// Signal intent for funding arbitrage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

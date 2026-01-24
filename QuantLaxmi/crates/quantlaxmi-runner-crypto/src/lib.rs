@@ -23,7 +23,9 @@ pub mod binance_perp_capture;
 pub mod binance_perp_session;
 pub mod binance_sbe_depth_capture;
 pub mod binance_trades_capture;
+pub mod fixed_point;
 pub mod paper_trading;
+pub mod quote;
 pub mod session_capture;
 
 use anyhow::Context;

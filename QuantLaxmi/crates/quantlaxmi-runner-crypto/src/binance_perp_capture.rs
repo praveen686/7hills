@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use quantlaxmi_options::replay::QuoteEvent;
+use crate::fixed_point::parse_to_mantissa_pure;
+use crate::quote::QuoteEvent;
 
 /// Perp depth event (L2 order book update).
 /// Uses the same structure as spot DepthEvent for compatibility.
@@ -125,22 +126,9 @@ struct FuturesBookTicker {
     ask_qty: String,
 }
 
-fn parse_f64(s: &str) -> Result<f64> {
-    s.parse::<f64>()
-        .with_context(|| format!("parse f64: {}", s))
-}
-
-fn parse_u32_qty(s: &str) -> Result<u32> {
-    let x = parse_f64(s)?;
-    Ok(x.max(0.0).round().min(u32::MAX as f64) as u32)
-}
-
-/// Parse string to mantissa (integer representation).
-/// E.g., "90000.12" with exponent -2 -> 9000012
+/// Parse string to mantissa using deterministic fixed-point (no float intermediates).
 pub fn parse_to_mantissa(s: &str, exponent: i8) -> Result<i64> {
-    let f = parse_f64(s)?;
-    let scale = 10f64.powi(-exponent as i32);
-    Ok((f * scale).round() as i64)
+    parse_to_mantissa_pure(s, exponent)
 }
 
 fn ms_to_dt(ms: i64) -> DateTime<Utc> {
@@ -176,7 +164,7 @@ impl std::fmt::Display for PerpCaptureStats {
     }
 }
 
-/// Capture perp bookTicker stream to QuoteEvent JSONL.
+/// Capture perp bookTicker stream to canonical QuoteEvent JSONL.
 /// This is the simplest capture mode - just best bid/ask.
 pub async fn capture_perp_bookticker_jsonl(
     symbol: &str,
@@ -203,6 +191,9 @@ pub async fn capture_perp_bookticker_jsonl(
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
     let mut stats = PerpCaptureStats::default();
 
+    const BINANCE_PRICE_EXP: i8 = -2; // cents
+    const BINANCE_QTY_EXP: i8 = -8; // base size precision
+
     while tokio::time::Instant::now() < deadline {
         let msg = tokio::time::timeout(std::time::Duration::from_secs(5), read.next()).await;
         let item = match msg {
@@ -222,26 +213,23 @@ pub async fn capture_perp_bookticker_jsonl(
             _ => continue,
         };
 
-        let bid = parse_f64(&ev.bid_price)?;
-        let ask = parse_f64(&ev.ask_price)?;
+        let bid_m = parse_to_mantissa(&ev.bid_price, BINANCE_PRICE_EXP)?;
+        let ask_m = parse_to_mantissa(&ev.ask_price, BINANCE_PRICE_EXP)?;
 
-        stats.last_bid = bid;
-        stats.last_ask = ask;
+        stats.last_bid = bid_m as f64 * 10f64.powi(BINANCE_PRICE_EXP as i32);
+        stats.last_ask = ask_m as f64 * 10f64.powi(BINANCE_PRICE_EXP as i32);
         stats.last_update_id = ev.update_id;
         stats.bookticker_updates += 1;
 
-        const BINANCE_PRICE_EXP: i8 = -2; // 2 decimal places
-
-        // Output as QuoteEvent for compatibility with spot replay infrastructure
-        // Market field distinguishes perp from spot
         let quote = QuoteEvent {
             ts: ms_to_dt(ev.event_time_ms),
-            tradingsymbol: format!("{}_PERP", ev.symbol), // Suffix to distinguish from spot
-            bid: parse_to_mantissa(&ev.bid_price, BINANCE_PRICE_EXP)?,
-            ask: parse_to_mantissa(&ev.ask_price, BINANCE_PRICE_EXP)?,
-            bid_qty: parse_u32_qty(&ev.bid_qty)?,
-            ask_qty: parse_u32_qty(&ev.ask_qty)?,
+            symbol: ev.symbol,
+            bid_price_mantissa: bid_m,
+            ask_price_mantissa: ask_m,
+            bid_qty_mantissa: parse_to_mantissa(&ev.bid_qty, BINANCE_QTY_EXP)?,
+            ask_qty_mantissa: parse_to_mantissa(&ev.ask_qty, BINANCE_QTY_EXP)?,
             price_exponent: BINANCE_PRICE_EXP,
+            qty_exponent: BINANCE_QTY_EXP,
         };
 
         let line = serde_json::to_string(&quote)?;

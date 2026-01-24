@@ -1,11 +1,11 @@
-//! Binance capture (Spot) -> QuoteEvent JSONL for KiteSim replay.
+//! Binance Spot capture -> canonical QuoteEvent JSONL.
 //!
-//! Uses Binance bookTicker stream: best bid/ask updates.
-//! Output format matches quantlaxmi-options::replay::QuoteEvent (one JSON per line).
+//! Uses Binance Spot bookTicker stream: best bid/ask updates.
+//! Output format matches `quantlaxmi_runner_crypto::quote::QuoteEvent`.
 //!
 //! Notes:
-//! - This is for TESTING and replay generation. No trading, no API keys required.
-//! - Binance Spot is 24x7 so you can generate replay packs any time.
+//! - Public stream (no API keys required)
+//! - Deterministic fixed-point parsing (no float intermediates)
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
@@ -13,7 +13,8 @@ use futures_util::StreamExt;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use quantlaxmi_options::replay::QuoteEvent;
+use crate::fixed_point::parse_to_mantissa_pure;
+use crate::quote::QuoteEvent;
 
 #[derive(Debug, serde::Deserialize)]
 struct BookTickerEvent {
@@ -35,25 +36,6 @@ struct BookTickerEvent {
     /// Best ask qty
     #[serde(rename = "A")]
     ask_qty: String,
-}
-
-fn parse_f64(s: &str) -> Result<f64> {
-    s.parse::<f64>()
-        .with_context(|| format!("parse f64: {}", s))
-}
-
-/// Parse string to mantissa (integer representation).
-/// E.g., "90000.12" with exponent -2 -> 9000012
-fn parse_to_mantissa(s: &str, exponent: i8) -> Result<i64> {
-    let f = parse_f64(s)?;
-    let scale = 10f64.powi(-exponent as i32);
-    Ok((f * scale).round() as i64)
-}
-
-fn parse_u32_qty(s: &str) -> Result<u32> {
-    // Binance quantities are decimal; bucket to u32 for L1 visibility.
-    let x = parse_f64(s)?;
-    Ok(x.max(0.0).round().min(u32::MAX as f64) as u32)
 }
 
 fn ms_to_dt(ms: i64) -> DateTime<Utc> {
@@ -99,6 +81,9 @@ pub async fn capture_book_ticker_jsonl(
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
     let mut stats = CaptureStats::default();
 
+    const BINANCE_PRICE_EXP: i8 = -2; // cents
+    const BINANCE_QTY_EXP: i8 = -8; // base size precision (sufficient for BTC/ETH; canonical)
+
     while tokio::time::Instant::now() < deadline {
         let msg = tokio::time::timeout(std::time::Duration::from_secs(5), read.next()).await;
         let item = match msg {
@@ -112,28 +97,27 @@ pub async fn capture_book_ticker_jsonl(
             continue;
         }
         let txt = msg.into_text()?;
-        // Skip messages that don't match bookTicker format (e.g., subscription confirmations)
+
+        // Skip non-bookTicker payloads
         let ev: BookTickerEvent = match serde_json::from_str(&txt) {
             Ok(e) => e,
             Err(_) => continue,
         };
 
-        // Use event time if provided, otherwise use local time
         let ts = match ev.event_time_ms {
             Some(ms) => ms_to_dt(ms),
             None => Utc::now(),
         };
 
-        const BINANCE_PRICE_EXP: i8 = -2; // 2 decimal places
-
         let q = QuoteEvent {
             ts,
-            tradingsymbol: ev.symbol,
-            bid: parse_to_mantissa(&ev.bid_price, BINANCE_PRICE_EXP)?,
-            ask: parse_to_mantissa(&ev.ask_price, BINANCE_PRICE_EXP)?,
-            bid_qty: parse_u32_qty(&ev.bid_qty)?,
-            ask_qty: parse_u32_qty(&ev.ask_qty)?,
+            symbol: ev.symbol,
+            bid_price_mantissa: parse_to_mantissa_pure(&ev.bid_price, BINANCE_PRICE_EXP)?,
+            ask_price_mantissa: parse_to_mantissa_pure(&ev.ask_price, BINANCE_PRICE_EXP)?,
+            bid_qty_mantissa: parse_to_mantissa_pure(&ev.bid_qty, BINANCE_QTY_EXP)?,
+            ask_qty_mantissa: parse_to_mantissa_pure(&ev.ask_qty, BINANCE_QTY_EXP)?,
             price_exponent: BINANCE_PRICE_EXP,
+            qty_exponent: BINANCE_QTY_EXP,
         };
 
         let line = serde_json::to_string(&q)?;
