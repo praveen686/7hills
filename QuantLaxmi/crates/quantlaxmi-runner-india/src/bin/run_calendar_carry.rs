@@ -1709,7 +1709,10 @@ fn main() -> Result<()> {
         }
 
         // Extract aligned slices for feature building
-        let slices: Vec<SanosSlice> = successful_slices.iter().map(|(_, _, s)| s.clone()).collect();
+        let slices: Vec<SanosSlice> = successful_slices
+            .iter()
+            .map(|(_, _, s)| s.clone())
+            .collect();
 
         // Build features
         let features = match build_features(&slices) {
