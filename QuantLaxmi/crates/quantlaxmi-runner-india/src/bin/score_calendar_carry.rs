@@ -78,6 +78,12 @@ struct Args {
     /// Use mid-price for fills (debug mode). Default: false (use bid/ask).
     #[arg(long, default_value_t = false)]
     use_mid: bool,
+
+    /// Allow L1-only (synthetic) quotes. Default: false (L1Only quotes are REJECTED).
+    /// By default, quotes with integrity_tier=L1Only are rejected to prevent
+    /// illusory fills from manufactured liquidity. Set this flag to allow them.
+    #[arg(long, default_value_t = false)]
+    allow_l1only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +96,8 @@ struct ScoreConfigHash {
     holding_secs: u64,
     max_quote_age_ms: u64,
     use_mid: bool,
+    /// If true, L1Only quotes are allowed (less strict). If false (default), L1Only rejected.
+    allow_l1only: bool,
 }
 
 #[allow(dead_code)]
@@ -111,6 +119,12 @@ struct SignalEvent {
     reason_codes: Vec<String>,
 }
 
+/// Default integrity tier for backwards compatibility with old captures.
+/// Old captures without integrity_tier field are assumed L2Present.
+fn default_integrity_tier() -> String {
+    "L2Present".to_string()
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct TickEvent {
     ts: DateTime<Utc>,
@@ -119,6 +133,10 @@ struct TickEvent {
     bid_qty: u32,
     ask_qty: u32,
     price_exponent: i32,
+    /// Integrity tier: "L2Present" (real depth) or "L1Only" (synthetic spread).
+    /// Synthetic quotes are rejected when --require-l2 is enabled (default).
+    #[serde(default = "default_integrity_tier")]
+    integrity_tier: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,6 +182,8 @@ struct DropReasons {
     stale_exit_quote: usize,
     /// Bad quote (zero bid/ask/qty)
     bad_quote: usize,
+    /// L1-only quote rejected (synthetic spread, no real depth)
+    l1only_rejected: usize,
     /// Maximum stale quote age observed (ms) - diagnostic for tuning max_quote_age_ms
     max_stale_age_ms: i64,
 }
@@ -270,6 +290,8 @@ enum QuoteLookup {
     BadQuote,
     /// Found valid tick but it was beyond max_quote_age_ms window
     Stale { first_valid_age_ms: i64 },
+    /// Quote rejected because it was L1Only (synthetic spread, no real depth)
+    L1Only,
 }
 
 /// Find a valid quote at or after timestamp, respecting max_quote_age_ms constraint.
@@ -280,13 +302,19 @@ enum QuoteLookup {
 /// - Returns first valid quote if its age <= max_quote_age_ms
 /// - If first valid quote is beyond the window, returns Stale with the age
 /// - Only returns Missing/BadQuote if no valid quotes found at all
+///
+/// P0 Research Integrity (Phase Alpha-1.4):
+/// - When reject_l1only=true (default), rejects L1Only quotes (synthetic spread, no real depth)
+/// - This prevents illusory fills from manufactured liquidity
 fn find_quote_at_or_after(
     ticks: &[TickEvent],
     ts: DateTime<Utc>,
     max_quote_age_ms: u64,
+    reject_l1only: bool,
 ) -> QuoteLookup {
     let mut found_any_tick = false;
     let mut found_bad_quote = false;
+    let mut found_l1only = false;
 
     for t in ticks {
         if t.ts < ts {
@@ -298,6 +326,12 @@ fn find_quote_at_or_after(
         if t.bid_price <= 0 || t.ask_price <= 0 || t.bid_qty == 0 || t.ask_qty == 0 {
             found_bad_quote = true;
             continue; // Keep scanning for a valid quote
+        }
+
+        // P0: Check integrity tier - reject L1Only (synthetic) quotes when reject_l1only is enabled
+        if reject_l1only && t.integrity_tier == "L1Only" {
+            found_l1only = true;
+            continue; // Keep scanning for an L2Present quote
         }
 
         // Valid quote found - check if within staleness window
@@ -325,8 +359,11 @@ fn find_quote_at_or_after(
     }
 
     // Exhausted all ticks without finding a valid quote within window
+    // Priority: L1Only > BadQuote > Missing (most specific rejection reason first)
     if !found_any_tick {
         QuoteLookup::Missing
+    } else if found_l1only {
+        QuoteLookup::L1Only
     } else if found_bad_quote {
         QuoteLookup::BadQuote
     } else {
@@ -564,6 +601,7 @@ fn main() -> Result<()> {
         holding_secs: args.holding_secs,
         max_quote_age_ms: args.max_quote_age_ms,
         use_mid: args.use_mid,
+        allow_l1only: args.allow_l1only,
     };
     let cfg_sha = config_hash(&cfg)?;
     let run_id = cfg_sha.chars().take(16).collect::<String>();
@@ -625,6 +663,10 @@ fn main() -> Result<()> {
                 if *first_valid_age_ms > reasons.max_stale_age_ms {
                     reasons.max_stale_age_ms = *first_valid_age_ms;
                 }
+            }
+            QuoteLookup::L1Only => {
+                // P0: Synthetic quote rejected (no real L2 depth)
+                reasons.l1only_rejected += 1;
             }
         }
     }
@@ -692,15 +734,25 @@ fn main() -> Result<()> {
         let bpe = tick_cache.get(&b_pe).unwrap().as_slice();
 
         // Get quotes with staleness constraint (returns QuoteLookup)
-        let ql_fce_entry = find_quote_at_or_after(fce, entry_ts, args.max_quote_age_ms);
-        let ql_fpe_entry = find_quote_at_or_after(fpe, entry_ts, args.max_quote_age_ms);
-        let ql_bce_entry = find_quote_at_or_after(bce, entry_ts, args.max_quote_age_ms);
-        let ql_bpe_entry = find_quote_at_or_after(bpe, entry_ts, args.max_quote_age_ms);
+        // P0: reject_l1only=!allow_l1only enforces rejection of L1Only (synthetic) quotes
+        let reject_l1only = !args.allow_l1only;
+        let ql_fce_entry =
+            find_quote_at_or_after(fce, entry_ts, args.max_quote_age_ms, reject_l1only);
+        let ql_fpe_entry =
+            find_quote_at_or_after(fpe, entry_ts, args.max_quote_age_ms, reject_l1only);
+        let ql_bce_entry =
+            find_quote_at_or_after(bce, entry_ts, args.max_quote_age_ms, reject_l1only);
+        let ql_bpe_entry =
+            find_quote_at_or_after(bpe, entry_ts, args.max_quote_age_ms, reject_l1only);
 
-        let ql_fce_exit = find_quote_at_or_after(fce, exit_ts, args.max_quote_age_ms);
-        let ql_fpe_exit = find_quote_at_or_after(fpe, exit_ts, args.max_quote_age_ms);
-        let ql_bce_exit = find_quote_at_or_after(bce, exit_ts, args.max_quote_age_ms);
-        let ql_bpe_exit = find_quote_at_or_after(bpe, exit_ts, args.max_quote_age_ms);
+        let ql_fce_exit =
+            find_quote_at_or_after(fce, exit_ts, args.max_quote_age_ms, reject_l1only);
+        let ql_fpe_exit =
+            find_quote_at_or_after(fpe, exit_ts, args.max_quote_age_ms, reject_l1only);
+        let ql_bce_exit =
+            find_quote_at_or_after(bce, exit_ts, args.max_quote_age_ms, reject_l1only);
+        let ql_bpe_exit =
+            find_quote_at_or_after(bpe, exit_ts, args.max_quote_age_ms, reject_l1only);
 
         // Extract QuoteResult or classify drop reason
         let q_fce_e = match ql_fce_entry {
