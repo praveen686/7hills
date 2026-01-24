@@ -350,8 +350,8 @@ impl KiteSim {
             q.tradingsymbol.clone(),
             Quote {
                 ts: q.ts,
-                bid: q.bid,
-                ask: q.ask,
+                bid: q.bid_f64(),
+                ask: q.ask_f64(),
                 bid_qty: q.bid_qty,
                 ask_qty: q.ask_qty,
             },
@@ -940,22 +940,25 @@ mod tests {
         };
 
         // Feed: first leg has enough size, second leg has only 10 contracts available.
+        // With price_exponent = -2: 100.0 -> 10000, 101.0 -> 10100, etc.
         let events = vec![
             ReplayEvent::Quote(QuoteEvent {
                 ts: t0 + Duration::milliseconds(10),
                 tradingsymbol: "NIFTY25JAN20000CE".to_string(),
-                bid: 100.0,
-                ask: 101.0,
+                bid: 10000,  // 100.00
+                ask: 10100,  // 101.00
                 bid_qty: 500,
                 ask_qty: 500,
+                price_exponent: -2,
             }),
             ReplayEvent::Quote(QuoteEvent {
                 ts: t0 + Duration::milliseconds(20),
                 tradingsymbol: "NIFTY25JAN20100CE".to_string(),
-                bid: 80.0,
-                ask: 81.0,
+                bid: 8000,   // 80.00
+                ask: 8100,   // 81.00
                 bid_qty: 10,
                 ask_qty: 10,
+                price_exponent: -2,
             }),
         ];
         let mut feed = ReplayFeed::new(events);

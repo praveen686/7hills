@@ -23,7 +23,7 @@ pub mod zerodha_capture;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub use quantlaxmi_runner_common::{
     AppState, IntegritySummary, RunnerConfig, SessionManifest, SymbolState, TickOutputEntry,
@@ -58,7 +58,12 @@ pub enum Commands {
         strikes: u32,
     },
 
-    /// Capture Zerodha quotes from Kite WebSocket into QuoteEvent JSONL
+    /// [DEPRECATED] Legacy capture - use `capture-session` instead.
+    ///
+    /// WARNING: This command generates QuoteEvent with f64 prices and synthetic
+    /// spreads when depth is unavailable. This corrupts research integrity.
+    /// Use `capture-session` for audit-grade data with integrity_tier tracking.
+    #[command(hide = true)] // Hide from --help, but still functional for migration
     CaptureZerodha {
         /// Comma-separated symbols, e.g. BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE
         #[arg(long)]
@@ -73,7 +78,15 @@ pub enum Commands {
         duration_secs: u64,
     },
 
-    /// Capture multi-instrument session with TickEvent JSONL (mantissa-based pricing)
+    /// [RECOMMENDED] Capture multi-instrument session with TickEvent JSONL.
+    ///
+    /// This is the canonical India capture command for research-grade data:
+    /// - Mantissa-based pricing (no float drift)
+    /// - IntegrityTier tracking (L2Present vs L1Only)
+    /// - Multi-expiry auto-discovery (t1/t2/t3)
+    /// - Session manifest for audit trail
+    ///
+    /// Synthetic quotes (L1Only) are labeled and rejected by default in scoring.
     CaptureSession {
         /// Comma-separated instruments, e.g. BANKNIFTY26JAN48000CE,BANKNIFTY26JAN48000PE
         /// If not provided, use --underlying and --strike-band for auto-discovery
@@ -638,8 +651,15 @@ async fn run_paper_mode(
     tokio::signal::ctrl_c().await?;
 
     // Log final state before shutdown
-    let state = app_state.lock().unwrap();
-    info!("Final equity: ${:.2}", state.equity);
+    // P3: Handle potential mutex poison gracefully on shutdown path
+    match app_state.lock() {
+        Ok(state) => info!("Final equity: ${:.2}", state.equity),
+        Err(poisoned) => {
+            warn!("Mutex was poisoned, recovering state for final log");
+            let state = poisoned.into_inner();
+            info!("Final equity: ${:.2}", state.equity);
+        }
+    }
     info!("Shutting down...");
 
     Ok(())

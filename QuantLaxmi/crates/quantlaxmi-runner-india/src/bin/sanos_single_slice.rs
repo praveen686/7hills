@@ -120,7 +120,9 @@ fn load_ticks(
             continue;
         }
 
-        let symbol = path.file_name().unwrap().to_string_lossy().to_string();
+        // P3: Handle missing file_name gracefully
+        let Some(fname) = path.file_name() else { continue; };
+        let symbol = fname.to_string_lossy().to_string();
 
         // Parse and filter
         if let Some((und, exp, _strike, _is_call)) = parse_symbol(&symbol) {
@@ -169,7 +171,10 @@ fn build_slice(
             .min_by_key(|t| (t.ts - target_ts).num_milliseconds().abs());
 
         if let Some(tick) = closest_tick {
-            let (_und, _exp, strike, is_call) = parse_symbol(symbol).unwrap();
+            // P3: Skip symbols that don't parse (shouldn't happen, but be defensive)
+            let Some((_und, _exp, strike, is_call)) = parse_symbol(symbol) else {
+                continue;
+            };
 
             // Convert price with exponent (price_exponent=-2 means divide by 100)
             let price_mult = 10f64.powi(tick.price_exponent);

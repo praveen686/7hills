@@ -230,15 +230,18 @@ pub async fn capture_perp_bookticker_jsonl(
         stats.last_update_id = ev.update_id;
         stats.bookticker_updates += 1;
 
+        const BINANCE_PRICE_EXP: i8 = -2; // 2 decimal places
+
         // Output as QuoteEvent for compatibility with spot replay infrastructure
         // Market field distinguishes perp from spot
         let quote = QuoteEvent {
             ts: ms_to_dt(ev.event_time_ms),
             tradingsymbol: format!("{}_PERP", ev.symbol), // Suffix to distinguish from spot
-            bid,
-            ask,
+            bid: parse_to_mantissa(&ev.bid_price, BINANCE_PRICE_EXP)?,
+            ask: parse_to_mantissa(&ev.ask_price, BINANCE_PRICE_EXP)?,
             bid_qty: parse_u32_qty(&ev.bid_qty)?,
             ask_qty: parse_u32_qty(&ev.ask_qty)?,
+            price_exponent: BINANCE_PRICE_EXP,
         };
 
         let line = serde_json::to_string(&quote)?;

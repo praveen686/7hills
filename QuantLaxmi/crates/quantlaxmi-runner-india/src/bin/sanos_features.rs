@@ -275,7 +275,9 @@ fn discover_expiries(session_dir: &Path, underlying: &str) -> Result<Vec<String>
             continue;
         }
 
-        let symbol = path.file_name().unwrap().to_string_lossy().to_string();
+        // P3: Handle missing file_name gracefully
+        let Some(fname) = path.file_name() else { continue; };
+        let symbol = fname.to_string_lossy().to_string();
 
         if let Some((und, exp, _, _)) = parse_symbol(&symbol)
             && und == underlying
@@ -306,7 +308,9 @@ fn load_ticks(
             continue;
         }
 
-        let symbol = path.file_name().unwrap().to_string_lossy().to_string();
+        // P3: Handle missing file_name gracefully
+        let Some(fname) = path.file_name() else { continue; };
+        let symbol = fname.to_string_lossy().to_string();
 
         if let Some((und, exp, _strike, _is_call)) = parse_symbol(&symbol) {
             if und != underlying || exp != expiry {
@@ -356,7 +360,10 @@ fn build_slice(
                 continue;
             }
 
-            let (_und, _exp, strike, is_call) = parse_symbol(symbol).unwrap();
+            // P3: Skip symbols that don't parse (shouldn't happen, but be defensive)
+            let Some((_und, _exp, strike, is_call)) = parse_symbol(symbol) else {
+                continue;
+            };
 
             let price_mult = 10f64.powi(tick.price_exponent);
             let bid = tick.bid_price as f64 * price_mult;

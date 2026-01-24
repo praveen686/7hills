@@ -39,6 +39,83 @@ use std::time::Duration;
 use tokio::time::{Instant, sleep};
 use tracing::{debug, error, info, instrument, warn};
 
+// =============================================================================
+// P3 Audit: Instruments Master Parsing Statistics
+// =============================================================================
+// Tracks rejected/malformed rows during instruments master CSV parsing.
+// Used for audit trail and optional strict-mode failure.
+// =============================================================================
+
+/// Statistics from instruments master parsing for audit trail.
+#[derive(Debug, Default, Clone)]
+pub struct InstrumentsParseStats {
+    /// Total lines processed (excluding header)
+    pub lines_total: usize,
+    /// Lines with insufficient columns (< 10)
+    pub rejected_short_row: usize,
+    /// Lines with unparseable instrument_token
+    pub rejected_bad_token: usize,
+    /// Lines with unparseable strike price
+    pub rejected_bad_strike: usize,
+    /// Lines with unparseable lot_size
+    pub rejected_bad_lot_size: usize,
+    /// Lines with unparseable expiry date
+    pub rejected_bad_expiry: usize,
+    /// Lines successfully parsed as options
+    pub parsed_options: usize,
+    /// Lines skipped (not CE/PE)
+    pub skipped_non_option: usize,
+}
+
+impl InstrumentsParseStats {
+    /// Total rejected rows due to parse errors
+    pub fn total_rejected(&self) -> usize {
+        self.rejected_short_row
+            + self.rejected_bad_token
+            + self.rejected_bad_strike
+            + self.rejected_bad_lot_size
+            + self.rejected_bad_expiry
+    }
+
+    /// Log summary at appropriate level based on rejection rate
+    pub fn log_summary(&self) {
+        let rejection_rate = if self.lines_total > 0 {
+            (self.total_rejected() as f64 / self.lines_total as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        if self.total_rejected() == 0 {
+            info!(
+                "[INSTRUMENTS] Parsed {} options from {} lines (0 rejections)",
+                self.parsed_options, self.lines_total
+            );
+        } else if rejection_rate < 1.0 {
+            info!(
+                "[INSTRUMENTS] Parsed {} options from {} lines ({} rejected, {:.2}%)",
+                self.parsed_options,
+                self.lines_total,
+                self.total_rejected(),
+                rejection_rate
+            );
+        } else {
+            warn!(
+                "[INSTRUMENTS] Parsed {} options from {} lines ({} rejected, {:.2}%) - \
+                short_row={}, bad_token={}, bad_strike={}, bad_lot={}, bad_expiry={}",
+                self.parsed_options,
+                self.lines_total,
+                self.total_rejected(),
+                rejection_rate,
+                self.rejected_short_row,
+                self.rejected_bad_token,
+                self.rejected_bad_strike,
+                self.rejected_bad_lot_size,
+                self.rejected_bad_expiry
+            );
+        }
+    }
+}
+
 /// Base URL for Kite Connect REST API.
 const KITE_API_URL: &str = "https://api.kite.trade";
 
@@ -1211,11 +1288,15 @@ impl ZerodhaAutoDiscovery {
             .await?;
 
         let mut instruments = Vec::new();
+        let mut stats = InstrumentsParseStats::default();
 
         // CSV format: instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
         for line in response.lines().skip(1) {
+            stats.lines_total += 1;
+
             let parts: Vec<&str> = line.split(',').collect();
             if parts.len() < 10 {
+                stats.rejected_short_row += 1;
                 continue;
             }
 
@@ -1223,22 +1304,49 @@ impl ZerodhaAutoDiscovery {
 
             // Only keep options (CE/PE)
             if instrument_type != "CE" && instrument_type != "PE" {
+                stats.skipped_non_option += 1;
                 continue;
             }
 
-            let instrument_token: u32 = parts[0].parse().unwrap_or(0);
+            // P3: Track parse errors instead of silently defaulting to 0
+            let instrument_token: u32 = match parts[0].parse() {
+                Ok(t) => t,
+                Err(_) => {
+                    stats.rejected_bad_token += 1;
+                    continue;
+                }
+            };
+
             let tradingsymbol = parts[2].trim_matches('"').to_string();
             let name = parts[3].trim_matches('"').to_string();
             let expiry_str = parts[5].trim_matches('"');
-            let strike: f64 = parts[6].parse().unwrap_or(0.0);
-            let lot_size: u32 = parts[8].parse().unwrap_or(1);
+
+            let strike: f64 = match parts[6].parse() {
+                Ok(s) => s,
+                Err(_) => {
+                    stats.rejected_bad_strike += 1;
+                    continue;
+                }
+            };
+
+            let lot_size: u32 = match parts[8].parse() {
+                Ok(l) => l,
+                Err(_) => {
+                    stats.rejected_bad_lot_size += 1;
+                    continue;
+                }
+            };
 
             // Parse expiry date (format: YYYY-MM-DD)
             let expiry = match NaiveDate::parse_from_str(expiry_str, "%Y-%m-%d") {
                 Ok(d) => d,
-                Err(_) => continue,
+                Err(_) => {
+                    stats.rejected_bad_expiry += 1;
+                    continue;
+                }
             };
 
+            stats.parsed_options += 1;
             instruments.push(NfoInstrument {
                 instrument_token,
                 tradingsymbol,
@@ -1250,10 +1358,9 @@ impl ZerodhaAutoDiscovery {
             });
         }
 
-        info!(
-            "[AUTO-DISCOVERY] Loaded {} NFO option instruments",
-            instruments.len()
-        );
+        // P3: Log parsing statistics for audit trail
+        stats.log_summary();
+
         Ok(instruments)
     }
 
@@ -1804,7 +1911,8 @@ fn compute_strike_step(
         .map(|i| i.strike)
         .collect();
 
-    strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // P3: Use total_cmp to avoid panic on NaN (though strikes should never be NaN)
+    strikes.sort_by(|a, b| a.total_cmp(b));
     strikes.dedup();
 
     anyhow::ensure!(

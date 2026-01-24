@@ -42,6 +42,14 @@ fn parse_f64(s: &str) -> Result<f64> {
         .with_context(|| format!("parse f64: {}", s))
 }
 
+/// Parse string to mantissa (integer representation).
+/// E.g., "90000.12" with exponent -2 -> 9000012
+fn parse_to_mantissa(s: &str, exponent: i8) -> Result<i64> {
+    let f = parse_f64(s)?;
+    let scale = 10f64.powi(-exponent as i32);
+    Ok((f * scale).round() as i64)
+}
+
 fn parse_u32_qty(s: &str) -> Result<u32> {
     // Binance quantities are decimal; bucket to u32 for L1 visibility.
     let x = parse_f64(s)?;
@@ -116,13 +124,16 @@ pub async fn capture_book_ticker_jsonl(
             None => Utc::now(),
         };
 
+        const BINANCE_PRICE_EXP: i8 = -2; // 2 decimal places
+
         let q = QuoteEvent {
             ts,
             tradingsymbol: ev.symbol,
-            bid: parse_f64(&ev.bid_price)?,
-            ask: parse_f64(&ev.ask_price)?,
+            bid: parse_to_mantissa(&ev.bid_price, BINANCE_PRICE_EXP)?,
+            ask: parse_to_mantissa(&ev.ask_price, BINANCE_PRICE_EXP)?,
             bid_qty: parse_u32_qty(&ev.bid_qty)?,
             ask_qty: parse_u32_qty(&ev.ask_qty)?,
+            price_exponent: BINANCE_PRICE_EXP,
         };
 
         let line = serde_json::to_string(&q)?;

@@ -67,14 +67,23 @@ bash scripts/check_isolation.sh
 ### quantlaxmi-india
 ```bash
 # Discover NSE F&O universe
-quantlaxmi-india discover-zerodha
+quantlaxmi-india discover-zerodha --underlying BANKNIFTY --strikes 5
 
-# Capture live quotes
-quantlaxmi-india capture-zerodha --symbols BANKNIFTY26JAN48000CE --duration-secs 300
+# Capture session (RECOMMENDED - audit-grade data with integrity tracking)
+quantlaxmi-india capture-session \
+    --underlying NIFTY,BANKNIFTY \
+    --strike-band 20 \
+    --expiry-policy t1t2t3 \
+    --out-dir data/sessions/session_20260124 \
+    --duration-secs 7200
 
 # Run KiteSim backtest
-quantlaxmi-india backtest-kitesim --replay-file data/quotes.jsonl
+quantlaxmi-india backtest-kitesim --replay data/quotes.jsonl --orders orders.json
 ```
+
+> **Note**: The legacy `capture-zerodha` command is deprecated. Use `capture-session` for
+> research-grade data with mantissa pricing and integrity_tier tracking (L2Present vs L1Only).
+> Synthetic quotes are rejected by default in scoring to prevent illusory fills.
 
 ### quantlaxmi-crypto
 ```bash

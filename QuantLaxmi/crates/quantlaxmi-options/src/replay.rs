@@ -21,16 +21,43 @@ pub use quantlaxmi_models::{DepthEvent, DepthLevel};
 
 /// Best bid/ask quote snapshot for an individual instrument (L1).
 ///
-/// All prices are in quote currency (e.g., rupees, USDT) and quantities are
-/// in base units. This is the legacy format for backward compatibility.
+/// All prices are stored as integer mantissas for deterministic replay.
+/// Use `bid_f64()` / `ask_f64()` helpers to convert to float prices.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuoteEvent {
     pub ts: DateTime<Utc>,
     pub tradingsymbol: String,
-    pub bid: f64,
-    pub ask: f64,
+    /// Bid price mantissa (divide by 10^|price_exponent| to get actual price)
+    pub bid: i64,
+    /// Ask price mantissa
+    pub ask: i64,
     pub bid_qty: u32,
     pub ask_qty: u32,
+    /// Price exponent: actual_price = mantissa * 10^price_exponent
+    /// Default -2 for backward compat (crypto/forex standard)
+    #[serde(default = "default_price_exponent")]
+    pub price_exponent: i8,
+}
+
+fn default_price_exponent() -> i8 {
+    -2
+}
+
+impl QuoteEvent {
+    /// Convert bid mantissa to f64 price.
+    pub fn bid_f64(&self) -> f64 {
+        self.bid as f64 * 10f64.powi(self.price_exponent as i32)
+    }
+
+    /// Convert ask mantissa to f64 price.
+    pub fn ask_f64(&self) -> f64 {
+        self.ask as f64 * 10f64.powi(self.price_exponent as i32)
+    }
+
+    /// Calculate mid price as f64.
+    pub fn mid_f64(&self) -> f64 {
+        (self.bid_f64() + self.ask_f64()) * 0.5
+    }
 }
 
 /// Replay event stream.

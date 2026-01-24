@@ -1112,3 +1112,154 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+// =============================================================================
+// P2 Audit: CI Tests for L1Only Rejection (Research Integrity)
+// =============================================================================
+// These tests ensure that synthetic quotes (L1Only) are rejected by default
+// in the scoring pipeline, preventing illusory fills from manufactured liquidity.
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, TimeZone, Utc};
+
+    fn make_tick(ts: DateTime<Utc>, bid: i64, ask: i64, qty: u32, tier: &str) -> TickEvent {
+        TickEvent {
+            ts,
+            bid_price: bid,
+            ask_price: ask,
+            bid_qty: qty,
+            ask_qty: qty,
+            price_exponent: -2,
+            integrity_tier: tier.to_string(),
+        }
+    }
+
+    /// P2 CI Test: L1Only quotes are REJECTED when reject_l1only=true (default behavior)
+    #[test]
+    fn test_l1only_rejected_by_default() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
+        let ticks = vec![make_tick(now, 10000, 10100, 100, "L1Only")];
+
+        let result = find_quote_at_or_after(&ticks, now, 1000, true); // reject_l1only=true
+        assert!(
+            matches!(result, QuoteLookup::L1Only),
+            "L1Only tick should be rejected when reject_l1only=true, got {:?}",
+            result
+        );
+    }
+
+    /// P2 CI Test: L1Only quotes are ACCEPTED when reject_l1only=false (debug mode)
+    #[test]
+    fn test_l1only_accepted_when_flag_disabled() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
+        let ticks = vec![make_tick(now, 10000, 10100, 100, "L1Only")];
+
+        let result = find_quote_at_or_after(&ticks, now, 1000, false); // reject_l1only=false
+        assert!(
+            matches!(result, QuoteLookup::Found(_)),
+            "L1Only tick should be accepted when reject_l1only=false, got {:?}",
+            result
+        );
+    }
+
+    /// P2 CI Test: L2Present quotes are found even when L1Only comes first
+    #[test]
+    fn test_l2present_found_after_l1only() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
+        let ticks = vec![
+            make_tick(now, 10000, 10100, 100, "L1Only"),
+            make_tick(now + Duration::milliseconds(50), 10000, 10100, 100, "L2Present"),
+        ];
+
+        let result = find_quote_at_or_after(&ticks, now, 1000, true); // reject_l1only=true
+        assert!(
+            matches!(result, QuoteLookup::Found(_)),
+            "Should find L2Present quote after skipping L1Only, got {:?}",
+            result
+        );
+
+        if let QuoteLookup::Found(qr) = result {
+            assert_eq!(qr.quote_age_ms, 50, "Quote age should be 50ms");
+        }
+    }
+
+    /// P2 CI Test: L1Only rejection takes priority over BadQuote
+    #[test]
+    fn test_l1only_priority_over_badquote() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
+        let ticks = vec![
+            make_tick(now, 0, 0, 0, "L2Present"), // BadQuote (zero prices)
+            make_tick(now + Duration::milliseconds(10), 10000, 10100, 100, "L1Only"),
+        ];
+
+        let result = find_quote_at_or_after(&ticks, now, 1000, true);
+        assert!(
+            matches!(result, QuoteLookup::L1Only),
+            "L1Only should take priority over BadQuote, got {:?}",
+            result
+        );
+    }
+
+    /// P2 CI Test: Stale L2Present is reported as Stale, not L1Only
+    #[test]
+    fn test_stale_l2present_not_masked_by_l1only() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
+        let ticks = vec![
+            make_tick(now, 10000, 10100, 100, "L1Only"),
+            // L2Present beyond staleness window (1500ms > 1000ms)
+            make_tick(now + Duration::milliseconds(1500), 10000, 10100, 100, "L2Present"),
+        ];
+
+        let result = find_quote_at_or_after(&ticks, now, 1000, true); // max_age=1000ms
+        assert!(
+            matches!(result, QuoteLookup::Stale { .. }),
+            "Should report Stale for L2Present beyond window, got {:?}",
+            result
+        );
+    }
+
+    /// P2 CI Test: Default integrity tier is L2Present for backward compatibility
+    #[test]
+    fn test_default_integrity_tier_is_l2present() {
+        let tier = default_integrity_tier();
+        assert_eq!(
+            tier, "L2Present",
+            "Default integrity tier must be L2Present for backward compatibility"
+        );
+    }
+
+    /// P2 CI Test: All-L1Only sequence returns L1Only rejection
+    #[test]
+    fn test_all_l1only_sequence_rejected() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
+        let ticks = vec![
+            make_tick(now, 10000, 10100, 100, "L1Only"),
+            make_tick(now + Duration::milliseconds(100), 10000, 10100, 100, "L1Only"),
+            make_tick(now + Duration::milliseconds(200), 10000, 10100, 100, "L1Only"),
+        ];
+
+        let result = find_quote_at_or_after(&ticks, now, 1000, true);
+        assert!(
+            matches!(result, QuoteLookup::L1Only),
+            "All-L1Only sequence should be rejected, got {:?}",
+            result
+        );
+    }
+
+    /// P2 CI Test: Empty ticks returns Missing, not L1Only
+    #[test]
+    fn test_empty_ticks_returns_missing() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
+        let ticks: Vec<TickEvent> = vec![];
+
+        let result = find_quote_at_or_after(&ticks, now, 1000, true);
+        assert!(
+            matches!(result, QuoteLookup::Missing),
+            "Empty ticks should return Missing, got {:?}",
+            result
+        );
+    }
+}

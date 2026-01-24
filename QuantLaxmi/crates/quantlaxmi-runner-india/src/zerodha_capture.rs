@@ -33,6 +33,15 @@ const KITE_API_URL: &str = "https://api.kite.trade";
 /// Tick data: (token, best_bid, best_ask, bid_qty, ask_qty)
 type TickData = (u32, f64, f64, u32, u32);
 
+/// NSE price exponent: prices have 2 decimal places (rupees.paise)
+const NSE_PRICE_EXPONENT: i8 = -2;
+
+/// Convert f64 price to mantissa representation.
+fn f64_to_mantissa(price: f64, exponent: i8) -> i64 {
+    let scale = 10f64.powi(-exponent as i32);
+    (price * scale).round() as i64
+}
+
 /// Authentication response from Python sidecar.
 #[derive(Deserialize)]
 struct AuthOutput {
@@ -445,10 +454,11 @@ pub async fn capture_zerodha_quotes(
                             let event = QuoteEvent {
                                 ts: Utc::now(),
                                 tradingsymbol: symbol.clone(),
-                                bid,
-                                ask,
+                                bid: f64_to_mantissa(bid, NSE_PRICE_EXPONENT),
+                                ask: f64_to_mantissa(ask, NSE_PRICE_EXPONENT),
                                 bid_qty,
                                 ask_qty,
+                                price_exponent: NSE_PRICE_EXPONENT,
                             };
 
                             let line = serde_json::to_string(&event)?;

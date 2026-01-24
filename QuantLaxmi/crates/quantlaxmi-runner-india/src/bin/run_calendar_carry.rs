@@ -283,7 +283,8 @@ impl DistributionStats {
             return f64::NAN;
         }
         let mut sorted = self.values.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // P3: Use total_cmp to avoid panic on NaN (add() already filters non-finite values)
+        sorted.sort_by(|a, b| a.total_cmp(b));
         let idx = ((p / 100.0) * (sorted.len() - 1) as f64).round() as usize;
         sorted[idx.min(sorted.len() - 1)]
     }
@@ -859,7 +860,11 @@ fn discover_expiries(session_dir: &Path, underlying: &str) -> Result<Vec<String>
             continue;
         }
 
-        let symbol = path.file_name().unwrap().to_string_lossy().to_string();
+        // P3: Handle missing file_name gracefully (shouldn't happen with read_dir)
+        let Some(fname) = path.file_name() else {
+            continue;
+        };
+        let symbol = fname.to_string_lossy().to_string();
 
         if let Some((und, exp, _, _)) = parse_symbol(&symbol)
             && und == underlying
@@ -886,7 +891,11 @@ fn load_all_ticks(session_dir: &Path, underlying: &str) -> Result<HashMap<String
             continue;
         }
 
-        let symbol = path.file_name().unwrap().to_string_lossy().to_string();
+        // P3: Handle missing file_name gracefully (shouldn't happen with read_dir)
+        let Some(fname) = path.file_name() else {
+            continue;
+        };
+        let symbol = fname.to_string_lossy().to_string();
 
         if let Some((und, _exp, _strike, _is_call)) = parse_symbol(&symbol) {
             if und != underlying {
@@ -1204,15 +1213,23 @@ fn find_closest_tick<'a>(
     None
 }
 
+/// P3: Find index of strike nearest to target (using total_cmp to avoid panic on NaN)
+fn find_nearest_strike_idx(strikes: &[f64], target: f64) -> Option<usize> {
+    strikes
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| {
+            let diff_a = (**a - target).abs();
+            let diff_b = (**b - target).abs();
+            diff_a.total_cmp(&diff_b)
+        })
+        .map(|(idx, _)| idx)
+}
+
 /// Extract IV from SANOS slice at ATM
 fn extract_atm_iv(slice: &SanosSlice) -> Option<f64> {
     // Find ATM strike (k ≈ 1.0)
-    let atm_idx = slice
-        .fitted_strikes
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| (**a - 1.0).abs().partial_cmp(&(**b - 1.0).abs()).unwrap())?
-        .0;
+    let atm_idx = find_nearest_strike_idx(&slice.fitted_strikes, 1.0)?;
 
     let call_price = slice.fitted_calls[atm_idx];
     let k = slice.fitted_strikes[atm_idx];
@@ -1303,19 +1320,9 @@ fn find_atm_strike(slice: &SanosSlice, underlying: &str) -> f64 {
 
 /// Extract calendar gap from SANOS slices
 fn extract_calendar_gap(s1: &SanosSlice, s2: &SanosSlice) -> Option<f64> {
-    // Find ATM indices
-    let atm1_idx = s1
-        .fitted_strikes
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| (**a - 1.0).abs().partial_cmp(&(**b - 1.0).abs()).unwrap())?
-        .0;
-    let atm2_idx = s2
-        .fitted_strikes
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| (**a - 1.0).abs().partial_cmp(&(**b - 1.0).abs()).unwrap())?
-        .0;
+    // Find ATM indices using P3-safe helper
+    let atm1_idx = find_nearest_strike_idx(&s1.fitted_strikes, 1.0)?;
+    let atm2_idx = find_nearest_strike_idx(&s2.fitted_strikes, 1.0)?;
 
     Some(s2.fitted_calls[atm2_idx] - s1.fitted_calls[atm1_idx])
 }
