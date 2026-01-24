@@ -149,12 +149,31 @@ struct EquityPoint {
     equity: f64,
 }
 
+/// Detailed drop reason counters for audit (Phase Alpha-1.3)
+#[derive(Debug, Clone, Default, Serialize)]
+struct DropReasons {
+    /// Symbol not found in tick index
+    symbol_not_found: usize,
+    /// Entry quote missing (no ticks after entry_ts)
+    missing_entry_quote: usize,
+    /// Exit quote missing (no ticks after exit_ts)
+    missing_exit_quote: usize,
+    /// Entry quote found but too stale (age > max_quote_age_ms)
+    stale_entry_quote: usize,
+    /// Exit quote found but too stale
+    stale_exit_quote: usize,
+    /// Bad quote (zero bid/ask/qty)
+    bad_quote: usize,
+    /// Maximum stale quote age observed (ms) - diagnostic for tuning max_quote_age_ms
+    max_stale_age_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct Metrics {
     schema_version: u32,
     num_signals: usize,
     num_trades: usize,
-    num_no_fill: usize, // Trades skipped due to quote staleness
+    num_dropped: usize,
     gross_pnl: f64,
     net_pnl: f64,
     hit_rate: f64,
@@ -163,6 +182,54 @@ struct Metrics {
     // Quote staleness diagnostics
     avg_quote_age_ms: f64,
     max_quote_age_ms: i64,
+    // Detailed drop reasons
+    drop_reasons: DropReasons,
+}
+
+/// Audit-grade fill record (Phase Alpha-1.3: fills.jsonl)
+#[derive(Debug, Clone, Serialize)]
+struct FillRecord {
+    schema_version: u32,
+    signal_index: usize,
+    entry_ts: DateTime<Utc>,
+    exit_ts: DateTime<Utc>,
+    underlying: String,
+    front_expiry: String,
+    back_expiry: String,
+    front_strike: f64,
+    back_strike: f64,
+    // Entry leg quotes (front CE, front PE, back CE, back PE)
+    entry_fce: LegFill,
+    entry_fpe: LegFill,
+    entry_bce: LegFill,
+    entry_bpe: LegFill,
+    // Exit leg quotes
+    exit_fce: LegFill,
+    exit_fpe: LegFill,
+    exit_bce: LegFill,
+    exit_bpe: LegFill,
+    // Computed values
+    front_straddle_entry: f64,
+    back_straddle_entry: f64,
+    front_straddle_exit: f64,
+    back_straddle_exit: f64,
+    pnl_front: f64,
+    pnl_back: f64,
+    pnl_gross: f64,
+    friction_cost: f64,
+    pnl_net: f64,
+}
+
+/// Per-leg fill details for audit
+#[derive(Debug, Clone, Serialize)]
+struct LegFill {
+    symbol: String,
+    bid: f64,
+    ask: f64,
+    mid: f64,
+    spread: f64,
+    quote_age_ms: i64,
+    fill_price: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -192,42 +259,79 @@ struct QuoteResult {
     quote_age_ms: i64,
 }
 
+/// Detailed quote lookup result for audit
+#[derive(Debug, Clone, Copy)]
+enum QuoteLookup {
+    /// Valid quote found within staleness window
+    Found(QuoteResult),
+    /// No ticks at or after the target timestamp
+    Missing,
+    /// Found tick(s) but all had zero bid/ask/qty
+    BadQuote,
+    /// Found valid tick but it was beyond max_quote_age_ms window
+    Stale { first_valid_age_ms: i64 },
+}
+
 /// Find a valid quote at or after timestamp, respecting max_quote_age_ms constraint.
-/// Returns None if no valid quote found within the age window.
+///
+/// Corrected semantics (Phase Alpha-1.3):
+/// - Scans all ticks at or after ts
+/// - Skips bad quotes (zero bid/ask/qty) and continues scanning
+/// - Returns first valid quote if its age <= max_quote_age_ms
+/// - If first valid quote is beyond the window, returns Stale with the age
+/// - Only returns Missing/BadQuote if no valid quotes found at all
 fn find_quote_at_or_after(
     ticks: &[TickEvent],
     ts: DateTime<Utc>,
     max_quote_age_ms: u64,
-) -> Option<QuoteResult> {
+) -> QuoteLookup {
+    let mut found_any_tick = false;
+    let mut found_bad_quote = false;
+
     for t in ticks {
         if t.ts < ts {
             continue;
         }
-        // Check quote validity
+        found_any_tick = true;
+
+        // Check quote validity first
         if t.bid_price <= 0 || t.ask_price <= 0 || t.bid_qty == 0 || t.ask_qty == 0 {
-            continue;
+            found_bad_quote = true;
+            continue; // Keep scanning for a valid quote
         }
 
+        // Valid quote found - check if within staleness window
         let quote_age_ms = (t.ts - ts).num_milliseconds();
 
-        // If max_quote_age_ms > 0, enforce staleness constraint
         if max_quote_age_ms > 0 && quote_age_ms > max_quote_age_ms as i64 {
-            return None; // Quote too stale, strict no-fill
+            // First valid quote is beyond staleness window
+            return QuoteLookup::Stale {
+                first_valid_age_ms: quote_age_ms,
+            };
         }
 
+        // Valid quote within window - return it
         let scale = pow10_i32(t.price_exponent);
         let bid = t.bid_price as f64 * scale;
         let ask = t.ask_price as f64 * scale;
         let mid = (bid + ask) / 2.0;
 
-        return Some(QuoteResult {
+        return QuoteLookup::Found(QuoteResult {
             bid,
             ask,
             mid,
             quote_age_ms,
         });
     }
-    None
+
+    // Exhausted all ticks without finding a valid quote within window
+    if !found_any_tick {
+        QuoteLookup::Missing
+    } else if found_bad_quote {
+        QuoteLookup::BadQuote
+    } else {
+        QuoteLookup::Missing
+    }
 }
 
 fn parse_expiry_iso(s: &str) -> Result<NaiveDate> {
@@ -474,12 +578,15 @@ fn main() -> Result<()> {
 
     let trades_path = run_dir.join("trades.jsonl");
     let equity_path = run_dir.join("equity_curve.jsonl");
+    let fills_path = run_dir.join("fills.jsonl");
     let metrics_path = run_dir.join("metrics.json");
 
     let mut trades_w =
         BufWriter::new(File::create(&trades_path).context("Failed to create trades.jsonl")?);
     let mut equity_w =
         BufWriter::new(File::create(&equity_path).context("Failed to create equity_curve.jsonl")?);
+    let mut fills_w =
+        BufWriter::new(File::create(&fills_path).context("Failed to create fills.jsonl")?);
 
     let latency = chrono::Duration::milliseconds(args.latency_ms as i64);
 
@@ -492,7 +599,35 @@ fn main() -> Result<()> {
 
     // Quote age tracking for diagnostics
     let mut quote_ages: Vec<i64> = Vec::new();
-    let mut num_no_fill: usize = 0;
+    let mut drop_reasons = DropReasons::default();
+
+    // Helper to classify drop reason from QuoteLookup
+    fn classify_drop(lookup: &QuoteLookup, is_entry: bool, reasons: &mut DropReasons) {
+        match lookup {
+            QuoteLookup::Found(_) => {} // Not a drop
+            QuoteLookup::Missing => {
+                if is_entry {
+                    reasons.missing_entry_quote += 1;
+                } else {
+                    reasons.missing_exit_quote += 1;
+                }
+            }
+            QuoteLookup::BadQuote => {
+                reasons.bad_quote += 1;
+            }
+            QuoteLookup::Stale { first_valid_age_ms } => {
+                if is_entry {
+                    reasons.stale_entry_quote += 1;
+                } else {
+                    reasons.stale_exit_quote += 1;
+                }
+                // Track max stale age for diagnostic tuning
+                if *first_valid_age_ms > reasons.max_stale_age_ms {
+                    reasons.max_stale_age_ms = *first_valid_age_ms;
+                }
+            }
+        }
+    }
 
     for (i, sig) in signals.iter().enumerate() {
         let under = sig.underlying.to_uppercase();
@@ -507,19 +642,31 @@ fn main() -> Result<()> {
 
         let f_ce = match symbol_for(&under, fexp, sig.front_strike, OptType::Call) {
             Some(s) => s,
-            None => continue,
+            None => {
+                drop_reasons.symbol_not_found += 1;
+                continue;
+            }
         };
         let f_pe = match symbol_for(&under, fexp, sig.front_strike, OptType::Put) {
             Some(s) => s,
-            None => continue,
+            None => {
+                drop_reasons.symbol_not_found += 1;
+                continue;
+            }
         };
         let b_ce = match symbol_for(&under, bexp, sig.back_strike, OptType::Call) {
             Some(s) => s,
-            None => continue,
+            None => {
+                drop_reasons.symbol_not_found += 1;
+                continue;
+            }
         };
         let b_pe = match symbol_for(&under, bexp, sig.back_strike, OptType::Put) {
             Some(s) => s,
-            None => continue,
+            None => {
+                drop_reasons.symbol_not_found += 1;
+                continue;
+            }
         };
 
         let entry_ts = sig.ts + latency + chrono::Duration::milliseconds(args.entry_shift_ms);
@@ -544,34 +691,75 @@ fn main() -> Result<()> {
         let bce = tick_cache.get(&b_ce).unwrap().as_slice();
         let bpe = tick_cache.get(&b_pe).unwrap().as_slice();
 
-        // Get quotes with staleness constraint
-        let q_fce_entry = find_quote_at_or_after(fce, entry_ts, args.max_quote_age_ms);
-        let q_fpe_entry = find_quote_at_or_after(fpe, entry_ts, args.max_quote_age_ms);
-        let q_bce_entry = find_quote_at_or_after(bce, entry_ts, args.max_quote_age_ms);
-        let q_bpe_entry = find_quote_at_or_after(bpe, entry_ts, args.max_quote_age_ms);
+        // Get quotes with staleness constraint (returns QuoteLookup)
+        let ql_fce_entry = find_quote_at_or_after(fce, entry_ts, args.max_quote_age_ms);
+        let ql_fpe_entry = find_quote_at_or_after(fpe, entry_ts, args.max_quote_age_ms);
+        let ql_bce_entry = find_quote_at_or_after(bce, entry_ts, args.max_quote_age_ms);
+        let ql_bpe_entry = find_quote_at_or_after(bpe, entry_ts, args.max_quote_age_ms);
 
-        let q_fce_exit = find_quote_at_or_after(fce, exit_ts, args.max_quote_age_ms);
-        let q_fpe_exit = find_quote_at_or_after(fpe, exit_ts, args.max_quote_age_ms);
-        let q_bce_exit = find_quote_at_or_after(bce, exit_ts, args.max_quote_age_ms);
-        let q_bpe_exit = find_quote_at_or_after(bpe, exit_ts, args.max_quote_age_ms);
+        let ql_fce_exit = find_quote_at_or_after(fce, exit_ts, args.max_quote_age_ms);
+        let ql_fpe_exit = find_quote_at_or_after(fpe, exit_ts, args.max_quote_age_ms);
+        let ql_bce_exit = find_quote_at_or_after(bce, exit_ts, args.max_quote_age_ms);
+        let ql_bpe_exit = find_quote_at_or_after(bpe, exit_ts, args.max_quote_age_ms);
 
-        // Strict no-fill: if any leg missing, skip trade
-        let (q_fce_e, q_fpe_e, q_bce_e, q_bpe_e) =
-            match (q_fce_entry, q_fpe_entry, q_bce_entry, q_bpe_entry) {
-                (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-                _ => {
-                    num_no_fill += 1;
-                    continue; // No fill - quote missing or too stale
-                }
-            };
-        let (q_fce_x, q_fpe_x, q_bce_x, q_bpe_x) =
-            match (q_fce_exit, q_fpe_exit, q_bce_exit, q_bpe_exit) {
-                (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-                _ => {
-                    num_no_fill += 1;
-                    continue; // No fill - quote missing or too stale
-                }
-            };
+        // Extract QuoteResult or classify drop reason
+        let q_fce_e = match ql_fce_entry {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, true, &mut drop_reasons);
+                continue;
+            }
+        };
+        let q_fpe_e = match ql_fpe_entry {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, true, &mut drop_reasons);
+                continue;
+            }
+        };
+        let q_bce_e = match ql_bce_entry {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, true, &mut drop_reasons);
+                continue;
+            }
+        };
+        let q_bpe_e = match ql_bpe_entry {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, true, &mut drop_reasons);
+                continue;
+            }
+        };
+
+        let q_fce_x = match ql_fce_exit {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, false, &mut drop_reasons);
+                continue;
+            }
+        };
+        let q_fpe_x = match ql_fpe_exit {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, false, &mut drop_reasons);
+                continue;
+            }
+        };
+        let q_bce_x = match ql_bce_exit {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, false, &mut drop_reasons);
+                continue;
+            }
+        };
+        let q_bpe_x = match ql_bpe_exit {
+            QuoteLookup::Found(q) => q,
+            ref other => {
+                classify_drop(other, false, &mut drop_reasons);
+                continue;
+            }
+        };
 
         // Track quote ages for diagnostics (all 8 legs per trade)
         quote_ages.push(q_fce_e.quote_age_ms);
@@ -583,37 +771,88 @@ fn main() -> Result<()> {
         quote_ages.push(q_bce_x.quote_age_ms);
         quote_ages.push(q_bpe_x.quote_age_ms);
 
-        // Entry fills: short front (sell at bid), long back (buy at ask)
-        // Exit fills: cover front (buy at ask), close back (sell at bid)
-        let (entry_front, entry_back, exit_front, exit_back) = if args.use_mid {
-            // Debug mode: use mid prices
-            (
-                q_fce_e.mid + q_fpe_e.mid,
-                q_bce_e.mid + q_bpe_e.mid,
-                q_fce_x.mid + q_fpe_x.mid,
-                q_bce_x.mid + q_bpe_x.mid,
-            )
-        } else {
-            // Market-realistic: short uses bid, long uses ask
-            (
-                q_fce_e.bid + q_fpe_e.bid, // Entry front: SELL at bid
-                q_bce_e.ask + q_bpe_e.ask, // Entry back: BUY at ask
-                q_fce_x.ask + q_fpe_x.ask, // Exit front: BUY at ask
-                q_bce_x.bid + q_bpe_x.bid, // Exit back: SELL at bid
-            )
+        // Compute fill prices based on mode
+        let make_leg_fill = |sym: &str, q: QuoteResult, is_buy: bool| -> LegFill {
+            let fill_price = if args.use_mid {
+                q.mid
+            } else if is_buy {
+                q.ask
+            } else {
+                q.bid
+            };
+            LegFill {
+                symbol: sym.to_string(),
+                bid: q.bid,
+                ask: q.ask,
+                mid: q.mid,
+                spread: q.ask - q.bid,
+                quote_age_ms: q.quote_age_ms,
+                fill_price,
+            }
         };
+
+        // Entry: short front (sell), long back (buy)
+        // Exit: cover front (buy), close back (sell)
+        let entry_fce_fill = make_leg_fill(&f_ce, q_fce_e, false); // sell
+        let entry_fpe_fill = make_leg_fill(&f_pe, q_fpe_e, false); // sell
+        let entry_bce_fill = make_leg_fill(&b_ce, q_bce_e, true); // buy
+        let entry_bpe_fill = make_leg_fill(&b_pe, q_bpe_e, true); // buy
+        let exit_fce_fill = make_leg_fill(&f_ce, q_fce_x, true); // buy (cover)
+        let exit_fpe_fill = make_leg_fill(&f_pe, q_fpe_x, true); // buy (cover)
+        let exit_bce_fill = make_leg_fill(&b_ce, q_bce_x, false); // sell (close)
+        let exit_bpe_fill = make_leg_fill(&b_pe, q_bpe_x, false); // sell (close)
+
+        let entry_front = entry_fce_fill.fill_price + entry_fpe_fill.fill_price;
+        let entry_back = entry_bce_fill.fill_price + entry_bpe_fill.fill_price;
+        let exit_front = exit_fce_fill.fill_price + exit_fpe_fill.fill_price;
+        let exit_back = exit_bce_fill.fill_price + exit_bpe_fill.fill_price;
 
         // PnL: short front, long back
         let fl = sig.front_lots as f64;
         let bl = sig.back_lots as f64;
-        let pnl_gross = -(exit_front - entry_front) * fl + (exit_back - entry_back) * bl;
+        let pnl_front = -(exit_front - entry_front) * fl;
+        let pnl_back = (exit_back - entry_back) * bl;
+        let pnl_gross = pnl_front + pnl_back;
 
         // Friction costs (bps) on notional at entry + exit
         let bps = args.friction_bps / 10000.0;
         let notional_entry = entry_front.abs() * fl.abs() + entry_back.abs() * bl.abs();
         let notional_exit = exit_front.abs() * fl.abs() + exit_back.abs() * bl.abs();
-        let cost = (notional_entry + notional_exit) * bps;
-        let pnl_net = pnl_gross - cost;
+        let friction_cost = (notional_entry + notional_exit) * bps;
+        let pnl_net = pnl_gross - friction_cost;
+
+        // Write audit-grade fill record
+        let fill_record = FillRecord {
+            schema_version: 1,
+            signal_index: i,
+            entry_ts,
+            exit_ts,
+            underlying: under.clone(),
+            front_expiry: sig.front_expiry.clone(),
+            back_expiry: sig.back_expiry.clone(),
+            front_strike: sig.front_strike,
+            back_strike: sig.back_strike,
+            entry_fce: entry_fce_fill,
+            entry_fpe: entry_fpe_fill,
+            entry_bce: entry_bce_fill,
+            entry_bpe: entry_bpe_fill,
+            exit_fce: exit_fce_fill,
+            exit_fpe: exit_fpe_fill,
+            exit_bce: exit_bce_fill,
+            exit_bpe: exit_bpe_fill,
+            front_straddle_entry: entry_front,
+            back_straddle_entry: entry_back,
+            front_straddle_exit: exit_front,
+            back_straddle_exit: exit_back,
+            pnl_front,
+            pnl_back,
+            pnl_gross,
+            friction_cost,
+            pnl_net,
+        };
+        let fill_json =
+            serde_json::to_string(&fill_record).context("Failed to serialize FillRecord")?;
+        writeln!(fills_w, "{}", fill_json).context("Failed to write fill")?;
 
         let tr = TradeRecord {
             schema_version: 1,
@@ -656,10 +895,18 @@ fn main() -> Result<()> {
 
     trades_w.flush().context("Failed to flush trades")?;
     equity_w.flush().context("Failed to flush equity")?;
+    fills_w.flush().context("Failed to flush fills")?;
 
     // Metrics
     let num_signals = signals.len();
     let num_trades = trades.len();
+    let num_dropped = drop_reasons.symbol_not_found
+        + drop_reasons.missing_entry_quote
+        + drop_reasons.missing_exit_quote
+        + drop_reasons.stale_entry_quote
+        + drop_reasons.stale_exit_quote
+        + drop_reasons.bad_quote;
+
     let gross_pnl: f64 = trades.iter().map(|t| t.pnl_gross).sum();
     let net_pnl: f64 = trades.iter().map(|t| t.pnl_net).sum();
     let wins = trades.iter().filter(|t| t.pnl_net > 0.0).count();
@@ -700,7 +947,7 @@ fn main() -> Result<()> {
         schema_version: 1,
         num_signals,
         num_trades,
-        num_no_fill,
+        num_dropped,
         gross_pnl,
         net_pnl,
         hit_rate,
@@ -708,6 +955,7 @@ fn main() -> Result<()> {
         avg_pnl,
         avg_quote_age_ms,
         max_quote_age_ms,
+        drop_reasons,
     };
     let metrics_bytes =
         serde_json::to_vec_pretty(&metrics).context("Failed to serialize metrics")?;
@@ -763,6 +1011,7 @@ fn main() -> Result<()> {
     // Output hashes
     let (tr_sha, tr_len) = hash_file(&trades_path)?;
     let (eq_sha, eq_len) = hash_file(&equity_path)?;
+    let (fi_sha, fi_len) = hash_file(&fills_path)?;
     let (m_sha, m_len) = hash_file(&metrics_path)?;
 
     let outputs = vec![
@@ -777,6 +1026,12 @@ fn main() -> Result<()> {
             rel_path: "equity_curve.jsonl".to_string(),
             sha256: eq_sha,
             bytes_len: eq_len,
+        },
+        OutputBinding {
+            label: "fills_jsonl".to_string(),
+            rel_path: "fills.jsonl".to_string(),
+            sha256: fi_sha,
+            bytes_len: fi_len,
         },
         OutputBinding {
             label: "metrics_json".to_string(),
