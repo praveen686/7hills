@@ -220,7 +220,9 @@ fn discover_expiries(session_dir: &Path, underlying: &str) -> Result<Vec<String>
         }
 
         // P3: Handle missing file_name gracefully
-        let Some(fname) = path.file_name() else { continue; };
+        let Some(fname) = path.file_name() else {
+            continue;
+        };
         let symbol = fname.to_string_lossy().to_string();
 
         if let Some((und, exp, _, _)) = parse_symbol(&symbol)
@@ -254,7 +256,9 @@ fn load_ticks(
         }
 
         // P3: Handle missing file_name gracefully
-        let Some(fname) = path.file_name() else { continue; };
+        let Some(fname) = path.file_name() else {
+            continue;
+        };
         let symbol = fname.to_string_lossy().to_string();
 
         if let Some((und, exp, _strike, _is_call)) = parse_symbol(&symbol) {

@@ -121,7 +121,9 @@ fn load_ticks(
         }
 
         // P3: Handle missing file_name gracefully
-        let Some(fname) = path.file_name() else { continue; };
+        let Some(fname) = path.file_name() else {
+            continue;
+        };
         let symbol = fname.to_string_lossy().to_string();
 
         // Parse and filter

@@ -1171,7 +1171,13 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
         let ticks = vec![
             make_tick(now, 10000, 10100, 100, "L1Only"),
-            make_tick(now + Duration::milliseconds(50), 10000, 10100, 100, "L2Present"),
+            make_tick(
+                now + Duration::milliseconds(50),
+                10000,
+                10100,
+                100,
+                "L2Present",
+            ),
         ];
 
         let result = find_quote_at_or_after(&ticks, now, 1000, true); // reject_l1only=true
@@ -1192,7 +1198,13 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
         let ticks = vec![
             make_tick(now, 0, 0, 0, "L2Present"), // BadQuote (zero prices)
-            make_tick(now + Duration::milliseconds(10), 10000, 10100, 100, "L1Only"),
+            make_tick(
+                now + Duration::milliseconds(10),
+                10000,
+                10100,
+                100,
+                "L1Only",
+            ),
         ];
 
         let result = find_quote_at_or_after(&ticks, now, 1000, true);
@@ -1210,7 +1222,13 @@ mod tests {
         let ticks = vec![
             make_tick(now, 10000, 10100, 100, "L1Only"),
             // L2Present beyond staleness window (1500ms > 1000ms)
-            make_tick(now + Duration::milliseconds(1500), 10000, 10100, 100, "L2Present"),
+            make_tick(
+                now + Duration::milliseconds(1500),
+                10000,
+                10100,
+                100,
+                "L2Present",
+            ),
         ];
 
         let result = find_quote_at_or_after(&ticks, now, 1000, true); // max_age=1000ms
@@ -1237,8 +1255,20 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 1, 24, 10, 0, 0).unwrap();
         let ticks = vec![
             make_tick(now, 10000, 10100, 100, "L1Only"),
-            make_tick(now + Duration::milliseconds(100), 10000, 10100, 100, "L1Only"),
-            make_tick(now + Duration::milliseconds(200), 10000, 10100, 100, "L1Only"),
+            make_tick(
+                now + Duration::milliseconds(100),
+                10000,
+                10100,
+                100,
+                "L1Only",
+            ),
+            make_tick(
+                now + Duration::milliseconds(200),
+                10000,
+                10100,
+                100,
+                "L1Only",
+            ),
         ];
 
         let result = find_quote_at_or_after(&ticks, now, 1000, true);
