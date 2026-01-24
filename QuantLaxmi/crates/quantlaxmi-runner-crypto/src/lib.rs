@@ -18,6 +18,9 @@
 
 pub mod binance_capture;
 pub mod binance_exchange_info;
+pub mod binance_funding_capture;
+pub mod binance_perp_capture;
+pub mod binance_perp_session;
 pub mod binance_sbe_depth_capture;
 pub mod binance_trades_capture;
 pub mod paper_trading;
@@ -144,6 +147,90 @@ pub enum Commands {
         /// Strict sequencing mode (default: true). Fails capture if sequence gaps detected.
         #[arg(long, default_value_t = true)]
         strict: bool,
+    },
+
+    /// Capture Binance Futures perp bookTicker stream
+    CapturePerpTicker {
+        /// Symbol, e.g. BTCUSDT
+        #[arg(long)]
+        symbol: String,
+
+        /// Output path, e.g. data/replay/binance/BTCUSDT_perp.jsonl
+        #[arg(long)]
+        out: String,
+
+        /// Capture duration in seconds
+        #[arg(long, default_value_t = 300)]
+        duration_secs: u64,
+    },
+
+    /// Capture Binance Futures perp depth stream (L2 order book)
+    CapturePerpDepth {
+        /// Symbol, e.g. BTCUSDT
+        #[arg(long)]
+        symbol: String,
+
+        /// Output path, e.g. data/replay/binance/BTCUSDT_perp_depth.jsonl
+        #[arg(long)]
+        out: String,
+
+        /// Capture duration in seconds
+        #[arg(long, default_value_t = 300)]
+        duration_secs: u64,
+
+        /// Price exponent for scaled integers (e.g., -2 for 2 decimal places)
+        #[arg(long, default_value_t = -2)]
+        price_exponent: i8,
+
+        /// Quantity exponent for scaled integers (e.g., -8 for 8 decimal places)
+        #[arg(long, default_value_t = -8)]
+        qty_exponent: i8,
+    },
+
+    /// Capture Binance Futures funding rate stream (markPrice)
+    CaptureFunding {
+        /// Symbol, e.g. BTCUSDT
+        #[arg(long)]
+        symbol: String,
+
+        /// Output path, e.g. data/replay/binance/BTCUSDT_funding.jsonl
+        #[arg(long)]
+        out: String,
+
+        /// Capture duration in seconds
+        #[arg(long, default_value_t = 300)]
+        duration_secs: u64,
+    },
+
+    /// Capture combined perp session (Spot + Perp + Funding) for funding arbitrage
+    CapturePerpSession {
+        /// Comma-separated symbols, e.g. BTCUSDT,ETHUSDT
+        #[arg(long)]
+        symbols: String,
+
+        /// Output directory for session data
+        #[arg(long, default_value = "data/perp_sessions")]
+        out_dir: String,
+
+        /// Capture duration in seconds
+        #[arg(long, default_value_t = 3600)]
+        duration_secs: u64,
+
+        /// Include spot capture for basis calculation
+        #[arg(long, default_value_t = true)]
+        include_spot: bool,
+
+        /// Include perp depth (L2) instead of just bookTicker
+        #[arg(long, default_value_t = false)]
+        include_depth: bool,
+
+        /// Price exponent for depth capture
+        #[arg(long, default_value_t = -2)]
+        price_exponent: i8,
+
+        /// Quantity exponent for depth capture
+        #[arg(long, default_value_t = -8)]
+        qty_exponent: i8,
     },
 
     /// Fetch exchange info for symbols
@@ -278,6 +365,45 @@ async fn async_main() -> anyhow::Result<()> {
             config,
             initial_capital,
         } => run_live_mode(&config, initial_capital).await,
+        Commands::CapturePerpTicker {
+            symbol,
+            out,
+            duration_secs,
+        } => run_capture_perp_ticker(&symbol, &out, duration_secs).await,
+        Commands::CapturePerpDepth {
+            symbol,
+            out,
+            duration_secs,
+            price_exponent,
+            qty_exponent,
+        } => {
+            run_capture_perp_depth(&symbol, &out, duration_secs, price_exponent, qty_exponent).await
+        }
+        Commands::CaptureFunding {
+            symbol,
+            out,
+            duration_secs,
+        } => run_capture_funding(&symbol, &out, duration_secs).await,
+        Commands::CapturePerpSession {
+            symbols,
+            out_dir,
+            duration_secs,
+            include_spot,
+            include_depth,
+            price_exponent,
+            qty_exponent,
+        } => {
+            run_capture_perp_session(
+                &symbols,
+                &out_dir,
+                duration_secs,
+                include_spot,
+                include_depth,
+                price_exponent,
+                qty_exponent,
+            )
+            .await
+        }
     }
 }
 
@@ -914,6 +1040,149 @@ async fn run_live_mode(config_path: &str, initial_capital: f64) -> anyhow::Resul
 
     tokio::signal::ctrl_c().await?;
     info!("Shutting down...");
+
+    Ok(())
+}
+
+// ============================================================================
+// Perp Capture Functions (Phase 1: Crypto Calendar-Carry)
+// ============================================================================
+
+async fn run_capture_perp_ticker(
+    symbol: &str,
+    out: &str,
+    duration_secs: u64,
+) -> anyhow::Result<()> {
+    let out_path = std::path::Path::new(out);
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    println!(
+        "Capturing Binance Futures {} bookTicker for {} seconds...",
+        symbol, duration_secs
+    );
+
+    let stats =
+        binance_perp_capture::capture_perp_bookticker_jsonl(symbol, out_path, duration_secs)
+            .await?;
+
+    println!("Capture complete: {} ({})", out, stats);
+    Ok(())
+}
+
+async fn run_capture_perp_depth(
+    symbol: &str,
+    out: &str,
+    duration_secs: u64,
+    price_exponent: i8,
+    qty_exponent: i8,
+) -> anyhow::Result<()> {
+    let out_path = std::path::Path::new(out);
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    println!(
+        "Capturing Binance Futures {} depth for {} seconds (price_exp={}, qty_exp={})...",
+        symbol, duration_secs, price_exponent, qty_exponent
+    );
+
+    let stats = binance_perp_capture::capture_perp_depth_jsonl(
+        symbol,
+        out_path,
+        duration_secs,
+        price_exponent,
+        qty_exponent,
+    )
+    .await?;
+
+    println!("Capture complete: {} ({})", out, stats);
+
+    if stats.sequence_gaps > 0 {
+        println!(
+            "⚠️  Warning: {} sequence gaps detected. Replay may have issues.",
+            stats.sequence_gaps
+        );
+    }
+
+    Ok(())
+}
+
+async fn run_capture_funding(symbol: &str, out: &str, duration_secs: u64) -> anyhow::Result<()> {
+    let out_path = std::path::Path::new(out);
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    println!(
+        "Capturing Binance Futures {} funding rate for {} seconds...",
+        symbol, duration_secs
+    );
+
+    let stats =
+        binance_funding_capture::capture_funding_jsonl(symbol, out_path, duration_secs).await?;
+
+    println!("Capture complete: {} ({})", out, stats);
+    Ok(())
+}
+
+async fn run_capture_perp_session(
+    symbols: &str,
+    out_dir: &str,
+    duration_secs: u64,
+    include_spot: bool,
+    include_depth: bool,
+    price_exponent: i8,
+    qty_exponent: i8,
+) -> anyhow::Result<()> {
+    // Parse symbols
+    let symbol_list: Vec<String> = symbols
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if symbol_list.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No symbols provided. Use --symbols BTCUSDT,ETHUSDT"
+        ));
+    }
+
+    println!("=== Perp Session Capture ===");
+    println!("Symbols: {:?}", symbol_list);
+    println!("Duration: {} seconds", duration_secs);
+    println!("Include spot: {}", include_spot);
+    println!("Include depth: {}", include_depth);
+    println!("Output: {}", out_dir);
+
+    let config = binance_perp_session::PerpSessionConfig {
+        symbols: symbol_list,
+        out_dir: std::path::PathBuf::from(out_dir),
+        duration_secs,
+        include_spot,
+        include_depth,
+        price_exponent,
+        qty_exponent,
+    };
+
+    let stats = binance_perp_session::capture_perp_session(config).await?;
+
+    println!("\n=== Session Summary ===");
+    println!("Session ID: {}", &stats.session_id[..8]);
+    println!("Duration: {:.1}s", stats.duration_secs);
+    println!("Total spot events: {}", stats.total_spot_events);
+    println!("Total perp events: {}", stats.total_perp_events);
+    println!("Total funding events: {}", stats.total_funding_events);
+
+    for sym_stat in &stats.symbols {
+        println!(
+            "  {}: basis={:.2}bps, funding={:.4}%",
+            sym_stat.symbol,
+            sym_stat.basis_bps,
+            sym_stat.last_funding_rate * 100.0
+        );
+    }
 
     Ok(())
 }

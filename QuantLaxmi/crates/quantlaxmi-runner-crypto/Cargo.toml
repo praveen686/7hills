@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2024"
 description = "Crypto trading runner for QuantLaxmi (Binance)"
 
+[[bin]]
+name = "quantlaxmi-crypto"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 # Shared runner infrastructure
 quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }
