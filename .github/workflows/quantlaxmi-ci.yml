@@ -67,9 +67,8 @@ jobs:
             exit 1
           fi
 
-          # Check operational artifacts (Dockerfile, contracts)
-          # Note: infra/observability/ excluded - metrics configs need separate migration
-          OP_VIOLATIONS=$(grep -rIn -i 'kubera' Dockerfile* contracts/ 2>/dev/null \
+          # Check operational artifacts (Dockerfile, contracts, infra)
+          OP_VIOLATIONS=$(grep -rIn -i 'kubera' Dockerfile* contracts/ infra/ 2>/dev/null \
             | grep -v 'patches/' \
             || true)
           if [ -n "$OP_VIOLATIONS" ]; then

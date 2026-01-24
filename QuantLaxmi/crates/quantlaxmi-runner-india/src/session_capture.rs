@@ -6,7 +6,8 @@
 //! ## Output Structure
 //! ```text
 //! data/sessions/{tag}/
-//! ├── session_manifest.json    # Meta-manifest for entire session
+//! ├── session_manifest.json    # Canonical manifest (written by lib.rs, not here)
+//! ├── capture_debug.json       # Debug manifest (written by this module)
 //! ├── BANKNIFTY26JAN48000CE/
 //! │   ├── ticks.jsonl
 //! │   └── manifest.json
@@ -15,6 +16,10 @@
 //! │   └── manifest.json
 //! └── ...
 //! ```
+//!
+//! NOTE: The canonical `session_manifest.json` is produced by the top-level
+//! runner (lib.rs), not by this capture module. This module writes only
+//! `capture_debug.json` for diagnostic purposes.
 
 use anyhow::{Context, Result, bail};
 use byteorder::{BigEndian, ByteOrder};

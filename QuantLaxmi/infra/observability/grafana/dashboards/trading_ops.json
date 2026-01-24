@@ -114,7 +114,7 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "histogram_quantile(0.99, sum(rate(kubera_ingestion_latency_ms_bucket[1m])) by (le, symbol, type))",
+                    "expr": "histogram_quantile(0.99, sum(rate(quantlaxmi_ingestion_latency_ms_bucket[1m])) by (le, symbol, type))",
                     "legendFormat": "{{symbol}} - {{type}}",
                     "range": true,
                     "refId": "A"
@@ -209,7 +209,7 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "histogram_quantile(0.99, sum(rate(kubera_strategy_decision_latency_ms_bucket[1m])) by (le, symbol, hook))",
+                    "expr": "histogram_quantile(0.99, sum(rate(quantlaxmi_strategy_decision_latency_ms_bucket[1m])) by (le, symbol, hook))",
                     "legendFormat": "{{symbol}} - {{hook}}",
                     "range": true,
                     "refId": "A"
@@ -300,7 +300,7 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "sum(rate(kubera_ingestion_messages_total[1m])) by (symbol)",
+                    "expr": "sum(rate(quantlaxmi_ingestion_messages_total[1m])) by (symbol)",
                     "legendFormat": "{{symbol}}",
                     "range": true,
                     "refId": "A"
@@ -391,7 +391,7 @@
                         "uid": "prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "sum(rate(kubera_risk_checks_total[1m])) by (result, reason)",
+                    "expr": "sum(rate(quantlaxmi_risk_checks_total[1m])) by (result, reason)",
                     "legendFormat": "{{result}} - {{reason}}",
                     "range": true,
                     "refId": "A"
@@ -407,7 +407,7 @@
     "tags": [
         "trading",
         "ops",
-        "kubera"
+        "quantlaxmi"
     ],
     "templating": {
         "list": []
@@ -418,8 +418,8 @@
     },
     "timepicker": {},
     "timezone": "",
-    "title": "QuantKubera Trading Ops",
-    "uid": "kubera_ops",
+    "title": "QuantLaxmi Trading Ops",
+    "uid": "quantlaxmi_ops",
     "version": 1,
     "weekStart": ""
 }

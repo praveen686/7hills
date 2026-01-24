@@ -30,7 +30,7 @@
             },
             "targets": [
                 {
-                    "expr": "histogram_quantile(0.9, sum by (le, symbol, type) (rate(kubera_ingestion_latency_ms_bucket[1m])))",
+                    "expr": "histogram_quantile(0.9, sum by (le, symbol, type) (rate(quantlaxmi_ingestion_latency_ms_bucket[1m])))",
                     "legendFormat": "{{symbol}} - {{type}}"
                 }
             ]
@@ -46,7 +46,7 @@
             },
             "targets": [
                 {
-                    "expr": "histogram_quantile(0.9, sum by (le, symbol, hook) (rate(kubera_strategy_decision_latency_ms_bucket[1m])))",
+                    "expr": "histogram_quantile(0.9, sum by (le, symbol, hook) (rate(quantlaxmi_strategy_decision_latency_ms_bucket[1m])))",
                     "legendFormat": "{{symbol}} - {{hook}}"
                 }
             ]
@@ -62,7 +62,7 @@
             },
             "targets": [
                 {
-                    "expr": "sum by (symbol) (rate(kubera_ingestion_messages_total[1m]))",
+                    "expr": "sum by (symbol) (rate(quantlaxmi_ingestion_messages_total[1m]))",
                     "legendFormat": "{{symbol}}"
                 }
             ]
@@ -78,11 +78,11 @@
             },
             "targets": [
                 {
-                    "expr": "kubera_bus_orders_queue_depth",
+                    "expr": "quantlaxmi_bus_orders_queue_depth",
                     "legendFormat": "Orders Queue"
                 },
                 {
-                    "expr": "kubera_bus_signals_queue_depth",
+                    "expr": "quantlaxmi_bus_signals_queue_depth",
                     "legendFormat": "Signals Queue"
                 }
             ]
@@ -92,7 +92,7 @@
     "schemaVersion": 36,
     "style": "dark",
     "tags": [
-        "quantkubera",
+        "quantlaxmi",
         "trading"
     ],
     "templating": {
@@ -104,8 +104,8 @@
     },
     "timepicker": {},
     "timezone": "",
-    "title": "QuantKubera Fleet Metrics",
-    "uid": "quantkubera-fleet",
+    "title": "QuantLaxmi Fleet Metrics",
+    "uid": "quantlaxmi-fleet",
     "version": 1,
     "weekStart": ""
 }
