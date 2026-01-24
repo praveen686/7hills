@@ -2,7 +2,8 @@
 //!
 //! This module captures all data needed for funding rate arbitrage:
 //! - Spot bookTicker (reference price)
-//! - Perp bookTicker (trading price)
+//! - Perp bookTicker or depth (trading price / L2)
+//! - Perp depth (optional, for slippage modeling)
 //! - Funding rate stream (funding signals)
 //!
 //! The combined capture enables basis calculation:
@@ -10,13 +11,19 @@
 //! Basis = (Perp_Price - Spot_Price) / Spot_Price
 //! ```
 //!
+//! ## Manifest Features (Phase 2A)
+//! - Per-stream event counts
+//! - Per-stream first/last timestamps
+//! - File SHA256 digests for integrity verification
+//!
 //! Directory structure:
 //! ```text
 //! data/perp_sessions/{tag}/
 //! ├── session_manifest.json
 //! ├── BTCUSDT/
 //! │   ├── spot_quotes.jsonl      # Spot bookTicker
-//! │   ├── perp_quotes.jsonl      # Perp bookTicker
+//! │   ├── perp_quotes.jsonl      # Perp bookTicker (or perp_depth.jsonl)
+//! │   ├── perp_depth.jsonl       # Perp L2 depth (if --with-depth)
 //! │   ├── funding.jsonl          # Funding rate stream
 //! │   └── manifest.json          # Per-symbol manifest
 //! └── ETHUSDT/
@@ -26,11 +33,106 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::binance_capture;
 use crate::binance_funding_capture;
 use crate::binance_perp_capture;
+
+// =============================================================================
+// Stream Digest (Phase 2A: per-file integrity + timestamps)
+// =============================================================================
+
+/// Digest information for a captured stream file.
+/// Enables integrity verification and temporal bounds checking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamDigest {
+    /// Relative path to the file (e.g., "BTCUSDT/funding.jsonl")
+    pub file_path: String,
+    /// Number of events/lines in the file
+    pub event_count: usize,
+    /// SHA256 hash of the file contents (hex-encoded)
+    pub sha256: String,
+    /// Size in bytes
+    pub size_bytes: u64,
+    /// First event timestamp (ISO 8601)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_event_ts: Option<String>,
+    /// Last event timestamp (ISO 8601)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_event_ts: Option<String>,
+}
+
+impl StreamDigest {
+    /// Compute digest for a JSONL file, extracting timestamps from "ts" field.
+    pub fn from_jsonl_file(path: &Path, relative_path: &str) -> Result<Self> {
+        use std::fs::File;
+
+        let metadata = std::fs::metadata(path).with_context(|| format!("stat file: {:?}", path))?;
+        let size_bytes = metadata.len();
+
+        let mut event_count = 0;
+        let mut first_ts: Option<String> = None;
+        let mut last_ts: Option<String> = None;
+
+        // Read file for timestamp extraction
+        let file_for_parse = File::open(path).with_context(|| format!("open file: {:?}", path))?;
+        let parse_reader = BufReader::new(file_for_parse);
+
+        for line_result in parse_reader.lines() {
+            let line = line_result?;
+            event_count += 1;
+
+            // Extract timestamp from JSON line
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line)
+                && let Some(ts) = json.get("ts").and_then(|v| v.as_str())
+            {
+                if first_ts.is_none() {
+                    first_ts = Some(ts.to_string());
+                }
+                last_ts = Some(ts.to_string());
+            }
+        }
+
+        // Compute SHA256 hash (single pass over file bytes)
+        let file_bytes = std::fs::read(path)?;
+        let hash_result = Sha256::digest(&file_bytes);
+        let sha256 = hex::encode(hash_result);
+
+        Ok(StreamDigest {
+            file_path: relative_path.to_string(),
+            event_count,
+            sha256,
+            size_bytes,
+            first_event_ts: first_ts,
+            last_event_ts: last_ts,
+        })
+    }
+
+    /// Compute digest for an existing file without timestamp extraction (binary files).
+    pub fn from_file_no_timestamps(path: &Path, relative_path: &str) -> Result<Self> {
+        let metadata = std::fs::metadata(path).with_context(|| format!("stat file: {:?}", path))?;
+        let size_bytes = metadata.len();
+
+        let file_bytes = std::fs::read(path)?;
+        let hash_result = Sha256::digest(&file_bytes);
+        let sha256 = hex::encode(hash_result);
+
+        // Count lines for event_count
+        let event_count = file_bytes.iter().filter(|&&b| b == b'\n').count();
+
+        Ok(StreamDigest {
+            file_path: relative_path.to_string(),
+            event_count,
+            sha256,
+            size_bytes,
+            first_event_ts: None,
+            last_event_ts: None,
+        })
+    }
+}
 
 /// Configuration for perp session capture.
 #[derive(Debug, Clone)]
@@ -71,6 +173,7 @@ pub struct SymbolCaptureStats {
     pub symbol: String,
     pub spot_events: usize,
     pub perp_events: usize,
+    pub depth_events: usize,
     pub funding_events: usize,
     pub last_spot_bid: f64,
     pub last_spot_ask: f64,
@@ -79,6 +182,12 @@ pub struct SymbolCaptureStats {
     pub last_funding_rate: f64,
     pub funding_settlements: usize,
     pub basis_bps: f64,
+    /// Output directory for this symbol (for digest computation)
+    #[serde(skip)]
+    pub out_dir: Option<PathBuf>,
+    /// Whether depth was captured (vs bookticker)
+    #[serde(skip)]
+    pub depth_captured: bool,
 }
 
 impl SymbolCaptureStats {
@@ -125,10 +234,26 @@ pub struct SymbolManifestEntry {
     pub symbol: String,
     pub spot_file: Option<String>,
     pub perp_file: String,
+    pub depth_file: Option<String>,
     pub funding_file: String,
     pub spot_events: usize,
     pub perp_events: usize,
+    pub depth_events: usize,
     pub funding_events: usize,
+    /// Per-stream digests (Phase 2A: integrity + temporal bounds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub digests: Option<SymbolDigests>,
+}
+
+/// Per-stream file digests for a symbol.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolDigests {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot: Option<StreamDigest>,
+    pub perp: StreamDigest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<StreamDigest>,
+    pub funding: StreamDigest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +262,73 @@ pub struct PerpSessionManifestConfig {
     pub include_depth: bool,
     pub price_exponent: i8,
     pub qty_exponent: i8,
+}
+
+/// Compute digests for all captured files for a symbol.
+/// Returns None if any required file is missing or unreadable.
+fn compute_symbol_digests(
+    sym_dir: &Path,
+    sym_upper: &str,
+    include_spot: bool,
+    include_depth: bool,
+) -> Option<SymbolDigests> {
+    // Perp file (required)
+    let perp_file = if include_depth {
+        "perp_depth.jsonl"
+    } else {
+        "perp_quotes.jsonl"
+    };
+    let perp_path = sym_dir.join(perp_file);
+    let perp_digest =
+        match StreamDigest::from_jsonl_file(&perp_path, &format!("{}/{}", sym_upper, perp_file)) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!("Failed to compute perp digest for {}: {}", sym_upper, e);
+                return None;
+            }
+        };
+
+    // Funding file (required)
+    let funding_path = sym_dir.join("funding.jsonl");
+    let funding_digest =
+        match StreamDigest::from_jsonl_file(&funding_path, &format!("{}/funding.jsonl", sym_upper))
+        {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!("Failed to compute funding digest for {}: {}", sym_upper, e);
+                return None;
+            }
+        };
+
+    // Spot file (optional)
+    let spot_digest = if include_spot {
+        let spot_path = sym_dir.join("spot_quotes.jsonl");
+        match StreamDigest::from_jsonl_file(&spot_path, &format!("{}/spot_quotes.jsonl", sym_upper))
+        {
+            Ok(d) => Some(d),
+            Err(e) => {
+                tracing::warn!("Failed to compute spot digest for {}: {}", sym_upper, e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Depth file (optional, only if include_depth)
+    let depth_digest = if include_depth {
+        // Depth is same as perp when include_depth=true
+        Some(perp_digest.clone())
+    } else {
+        None
+    };
+
+    Some(SymbolDigests {
+        spot: spot_digest,
+        perp: perp_digest,
+        depth: depth_digest,
+        funding: funding_digest,
+    })
 }
 
 /// Capture a perp session with Spot + Perp + Funding data.
@@ -213,29 +405,51 @@ pub async fn capture_perp_session(config: PerpSessionConfig) -> Result<PerpSessi
     let end_time = Utc::now();
     let duration_secs = (end_time - start_time).num_milliseconds() as f64 / 1000.0;
 
+    // Build manifest entries with digests
+    let mut manifest_entries = Vec::new();
+    for s in &symbol_stats {
+        let sym_upper = s.symbol.to_uppercase();
+        let sym_dir = session_dir.join(&sym_upper);
+
+        // Compute digests for each captured file
+        let digests =
+            compute_symbol_digests(&sym_dir, &sym_upper, config.include_spot, s.depth_captured);
+
+        let entry = SymbolManifestEntry {
+            symbol: s.symbol.clone(),
+            spot_file: if config.include_spot {
+                Some(format!("{}/spot_quotes.jsonl", sym_upper))
+            } else {
+                None
+            },
+            perp_file: if s.depth_captured {
+                format!("{}/perp_depth.jsonl", sym_upper)
+            } else {
+                format!("{}/perp_quotes.jsonl", sym_upper)
+            },
+            depth_file: if s.depth_captured {
+                Some(format!("{}/perp_depth.jsonl", sym_upper))
+            } else {
+                None
+            },
+            funding_file: format!("{}/funding.jsonl", sym_upper),
+            spot_events: s.spot_events,
+            perp_events: s.perp_events,
+            depth_events: s.depth_events,
+            funding_events: s.funding_events,
+            digests,
+        };
+        manifest_entries.push(entry);
+    }
+
     // Write session manifest
     let manifest = PerpSessionManifest {
-        schema_version: 1,
+        schema_version: 2, // Bump for digest support
         created_at_utc: start_time.to_rfc3339(),
         session_id: session_id.clone(),
         capture_mode: "perp_session".to_string(),
         duration_secs,
-        symbols: symbol_stats
-            .iter()
-            .map(|s| SymbolManifestEntry {
-                symbol: s.symbol.clone(),
-                spot_file: if config.include_spot {
-                    Some(format!("{}/spot_quotes.jsonl", s.symbol.to_uppercase()))
-                } else {
-                    None
-                },
-                perp_file: format!("{}/perp_quotes.jsonl", s.symbol.to_uppercase()),
-                funding_file: format!("{}/funding.jsonl", s.symbol.to_uppercase()),
-                spot_events: s.spot_events,
-                perp_events: s.perp_events,
-                funding_events: s.funding_events,
-            })
-            .collect(),
+        symbols: manifest_entries,
         config: PerpSessionManifestConfig {
             include_spot: config.include_spot,
             include_depth: config.include_depth,
@@ -310,6 +524,7 @@ async fn capture_symbol(
         symbol: symbol.to_string(),
         spot_events: 0,
         perp_events: 0,
+        depth_events: 0,
         funding_events: 0,
         last_spot_bid: 0.0,
         last_spot_ask: 0.0,
@@ -318,6 +533,8 @@ async fn capture_symbol(
         last_funding_rate: 0.0,
         funding_settlements: 0,
         basis_bps: 0.0,
+        out_dir: Some(out_dir.to_path_buf()),
+        depth_captured: include_depth,
     };
 
     // Spawn parallel capture tasks with unified return type
@@ -440,6 +657,7 @@ mod tests {
             symbol: "BTCUSDT".to_string(),
             spot_events: 100,
             perp_events: 100,
+            depth_events: 0,
             funding_events: 10,
             last_spot_bid: 99990.0,
             last_spot_ask: 100010.0,
@@ -448,6 +666,8 @@ mod tests {
             last_funding_rate: 0.0001,
             funding_settlements: 0,
             basis_bps: 0.0,
+            out_dir: None,
+            depth_captured: false,
         };
 
         stats.calculate_basis_bps();
@@ -455,5 +675,43 @@ mod tests {
         // Spot mid = 100000, Perp mid = 100050
         // Basis = (100050 - 100000) / 100000 = 0.0005 = 5 bps
         assert!((stats.basis_bps - 5.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_stream_digest_sha256_and_timestamps() {
+        use std::io::Write;
+
+        // Create a temp JSONL file
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join("test_digest.jsonl");
+
+        let mut file = std::fs::File::create(&test_file).unwrap();
+        writeln!(file, r#"{{"ts":"2026-01-24T10:00:00Z","price":100}}"#).unwrap();
+        writeln!(file, r#"{{"ts":"2026-01-24T10:00:01Z","price":101}}"#).unwrap();
+        writeln!(file, r#"{{"ts":"2026-01-24T10:00:02Z","price":102}}"#).unwrap();
+        drop(file);
+
+        // Compute digest
+        let digest = StreamDigest::from_jsonl_file(&test_file, "test/test.jsonl").unwrap();
+
+        assert_eq!(digest.event_count, 3);
+        assert_eq!(digest.file_path, "test/test.jsonl");
+        assert_eq!(
+            digest.first_event_ts.as_deref(),
+            Some("2026-01-24T10:00:00Z")
+        );
+        assert_eq!(
+            digest.last_event_ts.as_deref(),
+            Some("2026-01-24T10:00:02Z")
+        );
+        assert_eq!(digest.sha256.len(), 64); // SHA256 hex is 64 chars
+        assert!(digest.size_bytes > 0);
+
+        // Verify SHA256 is deterministic
+        let digest2 = StreamDigest::from_jsonl_file(&test_file, "test/test.jsonl").unwrap();
+        assert_eq!(digest.sha256, digest2.sha256);
+
+        // Cleanup
+        std::fs::remove_file(&test_file).ok();
     }
 }

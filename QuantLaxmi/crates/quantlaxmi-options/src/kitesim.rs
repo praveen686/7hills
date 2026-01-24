@@ -945,8 +945,8 @@ mod tests {
             ReplayEvent::Quote(QuoteEvent {
                 ts: t0 + Duration::milliseconds(10),
                 tradingsymbol: "NIFTY25JAN20000CE".to_string(),
-                bid: 10000,  // 100.00
-                ask: 10100,  // 101.00
+                bid: 10000, // 100.00
+                ask: 10100, // 101.00
                 bid_qty: 500,
                 ask_qty: 500,
                 price_exponent: -2,
@@ -954,8 +954,8 @@ mod tests {
             ReplayEvent::Quote(QuoteEvent {
                 ts: t0 + Duration::milliseconds(20),
                 tradingsymbol: "NIFTY25JAN20100CE".to_string(),
-                bid: 8000,   // 80.00
-                ask: 8100,   // 81.00
+                bid: 8000, // 80.00
+                ask: 8100, // 81.00
                 bid_qty: 10,
                 ask_qty: 10,
                 price_exponent: -2,

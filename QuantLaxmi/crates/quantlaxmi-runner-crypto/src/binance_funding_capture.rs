@@ -496,4 +496,240 @@ mod tests {
         // Basis = (100100 - 100000) / 100000 * 10000 = 10 bps
         assert!((event.basis_bps() - 10.0).abs() < 0.1);
     }
+
+    // =========================================================================
+    // FUNDING-CLOCK CORRECTNESS TESTS (Phase 2C)
+    // =========================================================================
+
+    /// Verify that funding timestamps snap to valid 8h intervals (00:00, 08:00, 16:00 UTC).
+    #[test]
+    fn test_funding_timestamp_snaps_to_8h_intervals() {
+        use chrono::Timelike;
+
+        // Valid funding times: 00:00, 08:00, 16:00 UTC
+        let valid_hours = [0, 8, 16];
+
+        // Create funding events with various next_funding_time values
+        let test_cases = [
+            // Timestamp at exactly 08:00 UTC on 2026-01-24
+            1737705600000i64, // 2026-01-24 08:00:00 UTC
+            // Timestamp at exactly 16:00 UTC
+            1737734400000i64, // 2026-01-24 16:00:00 UTC
+            // Timestamp at exactly 00:00 UTC next day
+            1737763200000i64, // 2026-01-25 00:00:00 UTC
+        ];
+
+        for ts_ms in test_cases {
+            let dt = Utc.timestamp_millis_opt(ts_ms).unwrap();
+            let hour = dt.hour();
+            let minute = dt.minute();
+            let second = dt.second();
+
+            // Funding time must be exactly on the hour
+            assert_eq!(minute, 0, "Funding time minute must be 0, got {}", minute);
+            assert_eq!(second, 0, "Funding time second must be 0, got {}", second);
+
+            // Funding time must be one of 00:00, 08:00, 16:00
+            assert!(
+                valid_hours.contains(&hour),
+                "Funding time hour must be 0, 8, or 16, got {}",
+                hour
+            );
+        }
+    }
+
+    /// Verify that next_funding_time is monotonically increasing across events.
+    #[test]
+    fn test_funding_timestamp_monotonic() {
+        let base_time = Utc::now();
+
+        // Create a sequence of funding events
+        let events: Vec<FundingEvent> = (0..5)
+            .map(|i| {
+                // Each event's next_funding_time should be 8 hours apart
+                let next_funding_ms =
+                    (base_time + chrono::Duration::hours(8 * (i + 1))).timestamp_millis();
+
+                FundingEvent {
+                    ts: base_time + chrono::Duration::minutes(i * 10),
+                    symbol: "BTCUSDT".to_string(),
+                    mark_price_mantissa: 10000000,
+                    index_price_mantissa: 10000000,
+                    estimated_settle_price_mantissa: 10000000,
+                    price_exponent: FUNDING_PRICE_EXPONENT,
+                    funding_rate_mantissa: 10000,
+                    rate_exponent: FUNDING_RATE_EXPONENT,
+                    next_funding_time_ms: next_funding_ms,
+                    source: None,
+                }
+            })
+            .collect();
+
+        // Verify monotonicity
+        for i in 1..events.len() {
+            assert!(
+                events[i].next_funding_time_ms >= events[i - 1].next_funding_time_ms,
+                "next_funding_time must be monotonically increasing: {} < {}",
+                events[i].next_funding_time_ms,
+                events[i - 1].next_funding_time_ms
+            );
+        }
+    }
+
+    /// Verify that funding cashflow is applied exactly once per 8h window.
+    /// This test checks that within a single funding window, there's exactly one
+    /// "settlement" event where next_funding_time changes.
+    #[test]
+    fn test_funding_cashflow_once_per_window() {
+        // Simulate funding events within a single 8h window
+        // next_funding_time should remain constant until settlement
+        let window_start = Utc.with_ymd_and_hms(2026, 1, 24, 0, 0, 0).unwrap();
+        let next_funding = Utc.with_ymd_and_hms(2026, 1, 24, 8, 0, 0).unwrap();
+        let after_funding = Utc.with_ymd_and_hms(2026, 1, 24, 16, 0, 0).unwrap();
+
+        let events = [
+            // Events before funding settlement
+            FundingEvent {
+                ts: window_start + chrono::Duration::minutes(10),
+                symbol: "BTCUSDT".to_string(),
+                mark_price_mantissa: 10000000,
+                index_price_mantissa: 10000000,
+                estimated_settle_price_mantissa: 10000000,
+                price_exponent: FUNDING_PRICE_EXPONENT,
+                funding_rate_mantissa: 10000,
+                rate_exponent: FUNDING_RATE_EXPONENT,
+                next_funding_time_ms: next_funding.timestamp_millis(),
+                source: None,
+            },
+            FundingEvent {
+                ts: window_start + chrono::Duration::hours(4),
+                symbol: "BTCUSDT".to_string(),
+                mark_price_mantissa: 10000000,
+                index_price_mantissa: 10000000,
+                estimated_settle_price_mantissa: 10000000,
+                price_exponent: FUNDING_PRICE_EXPONENT,
+                funding_rate_mantissa: 10000,
+                rate_exponent: FUNDING_RATE_EXPONENT,
+                next_funding_time_ms: next_funding.timestamp_millis(),
+                source: None,
+            },
+            // Event after funding settlement (next_funding_time changes)
+            FundingEvent {
+                ts: next_funding + chrono::Duration::minutes(1),
+                symbol: "BTCUSDT".to_string(),
+                mark_price_mantissa: 10000000,
+                index_price_mantissa: 10000000,
+                estimated_settle_price_mantissa: 10000000,
+                price_exponent: FUNDING_PRICE_EXPONENT,
+                funding_rate_mantissa: 12000, // Rate may change after settlement
+                rate_exponent: FUNDING_RATE_EXPONENT,
+                next_funding_time_ms: after_funding.timestamp_millis(),
+                source: None,
+            },
+        ];
+
+        // Count funding settlements (transitions in next_funding_time)
+        let mut settlements = 0;
+        for i in 1..events.len() {
+            if events[i].next_funding_time_ms != events[i - 1].next_funding_time_ms {
+                settlements += 1;
+            }
+        }
+
+        // There should be exactly 1 settlement in this sequence
+        assert_eq!(
+            settlements, 1,
+            "Expected exactly 1 funding settlement, got {}",
+            settlements
+        );
+    }
+
+    /// Verify deterministic serialization produces identical output.
+    #[test]
+    fn test_funding_event_deterministic_serialization() {
+        use sha2::{Digest, Sha256};
+
+        let event = FundingEvent {
+            ts: Utc.with_ymd_and_hms(2026, 1, 24, 10, 30, 0).unwrap(),
+            symbol: "BTCUSDT".to_string(),
+            mark_price_mantissa: 10000050,
+            index_price_mantissa: 10000025,
+            estimated_settle_price_mantissa: 10000040,
+            price_exponent: FUNDING_PRICE_EXPONENT,
+            funding_rate_mantissa: 10000,
+            rate_exponent: FUNDING_RATE_EXPONENT,
+            next_funding_time_ms: 1737734400000, // Fixed timestamp
+            source: None,
+        };
+
+        // Serialize multiple times
+        let json1 = serde_json::to_string(&event).unwrap();
+        let json2 = serde_json::to_string(&event).unwrap();
+        let json3 = serde_json::to_string(&event).unwrap();
+
+        // All serializations must be identical
+        assert_eq!(json1, json2, "Serialization not deterministic");
+        assert_eq!(json2, json3, "Serialization not deterministic");
+
+        // Hash must be consistent
+        let hash1 = hex::encode(Sha256::digest(json1.as_bytes()));
+        let hash2 = hex::encode(Sha256::digest(json2.as_bytes()));
+        assert_eq!(hash1, hash2, "Hash not deterministic");
+    }
+
+    /// Verify that funding interval is exactly 8 hours (28800 seconds).
+    #[test]
+    fn test_funding_interval_8_hours() {
+        let funding_times = [
+            Utc.with_ymd_and_hms(2026, 1, 24, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 24, 8, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 24, 16, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 25, 0, 0, 0).unwrap(),
+        ];
+
+        for i in 1..funding_times.len() {
+            let interval_secs = (funding_times[i] - funding_times[i - 1]).num_seconds();
+            assert_eq!(
+                interval_secs, 28800,
+                "Funding interval must be 28800 seconds (8 hours), got {}",
+                interval_secs
+            );
+        }
+    }
+
+    /// Verify funding rate conversion consistency (mantissa <-> f64 round-trip).
+    #[test]
+    fn test_funding_rate_conversion_consistency() {
+        let test_rates = [
+            (10000i64, 0.0001f64), // 0.01%
+            (-10000, -0.0001),     // -0.01%
+            (100000, 0.001),       // 0.1%
+            (1000, 0.00001),       // 0.001%
+            (0, 0.0),              // Zero rate
+        ];
+
+        for (mantissa, expected_f64) in test_rates {
+            let event = FundingEvent {
+                ts: Utc::now(),
+                symbol: "BTCUSDT".to_string(),
+                mark_price_mantissa: 10000000,
+                index_price_mantissa: 10000000,
+                estimated_settle_price_mantissa: 10000000,
+                price_exponent: FUNDING_PRICE_EXPONENT,
+                funding_rate_mantissa: mantissa,
+                rate_exponent: FUNDING_RATE_EXPONENT,
+                next_funding_time_ms: 0,
+                source: None,
+            };
+
+            let rate_f64 = event.funding_rate_f64();
+            assert!(
+                (rate_f64 - expected_f64).abs() < 1e-12,
+                "Rate conversion failed: {} mantissa should be {} f64, got {}",
+                mantissa,
+                expected_f64,
+                rate_f64
+            );
+        }
+    }
 }

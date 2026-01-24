@@ -8,6 +8,14 @@ description = "Crypto trading runner for QuantLaxmi (Binance)"
 name = "quantlaxmi-crypto"
 path = "src/main.rs"
 
+[[bin]]
+name = "run_funding_arb"
+path = "src/bin/run_funding_arb.rs"
+
+[[bin]]
+name = "score_funding_arb"
+path = "src/bin/score_funding_arb.rs"
+
 [lib]
 path = "src/lib.rs"
 
@@ -76,7 +84,8 @@ uuid = { workspace = true }
 # Binary encoding
 byteorder = { workspace = true }
 
-[dev-dependencies]
-# Determinism testing
+# Hashing (for manifest digests)
 sha2 = "0.10"
 hex = "0.4"
+
+[dev-dependencies]

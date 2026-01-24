@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "created_at_utc": "2026-01-24T00:00:00Z",
+  "session_id": "fixture-test-session",
+  "capture_mode": "perp_session",
+  "duration_secs": 57600.0,
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "spot_file": "BTCUSDT/spot_quotes.jsonl",
+      "perp_file": "BTCUSDT/perp_quotes.jsonl",
+      "depth_file": null,
+      "funding_file": "BTCUSDT/funding.jsonl",
+      "spot_events": 10,
+      "perp_events": 10,
+      "depth_events": 0,
+      "funding_events": 10,
+      "digests": null
+    }
+  ],
+  "config": {
+    "include_spot": true,
+    "include_depth": false,
+    "price_exponent": -2,
+    "qty_exponent": -8
+  }
+}
