@@ -154,11 +154,15 @@ struct Metrics {
     schema_version: u32,
     num_signals: usize,
     num_trades: usize,
+    num_no_fill: usize, // Trades skipped due to quote staleness
     gross_pnl: f64,
     net_pnl: f64,
     hit_rate: f64,
     max_drawdown: f64,
     avg_pnl: f64,
+    // Quote staleness diagnostics
+    avg_quote_age_ms: f64,
+    max_quote_age_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -177,26 +181,6 @@ struct ParsedSymbol {
 
 fn pow10_i32(exp: i32) -> f64 {
     10f64.powi(exp)
-}
-
-fn mid_from_tick(t: &TickEvent) -> Option<f64> {
-    if t.bid_price <= 0 || t.ask_price <= 0 || t.bid_qty == 0 || t.ask_qty == 0 {
-        return None;
-    }
-    let scale = pow10_i32(t.price_exponent);
-    Some(((t.bid_price as f64 + t.ask_price as f64) / 2.0) * scale)
-}
-
-fn find_mid_at_or_after(ticks: &[TickEvent], ts: DateTime<Utc>) -> Option<f64> {
-    // ticks are time-ordered in capture; linear scan is acceptable for v0.
-    for t in ticks {
-        if t.ts >= ts
-            && let Some(m) = mid_from_tick(t)
-        {
-            return Some(m);
-        }
-    }
-    None
 }
 
 /// Quote result with bid, ask, and staleness info
@@ -506,6 +490,10 @@ fn main() -> Result<()> {
     let mut equity: Vec<EquityPoint> = Vec::new();
     let mut cum = 0.0;
 
+    // Quote age tracking for diagnostics
+    let mut quote_ages: Vec<i64> = Vec::new();
+    let mut num_no_fill: usize = 0;
+
     for (i, sig) in signals.iter().enumerate() {
         let under = sig.underlying.to_uppercase();
         let fexp = match parse_expiry_iso(&sig.front_expiry) {
@@ -571,13 +559,29 @@ fn main() -> Result<()> {
         let (q_fce_e, q_fpe_e, q_bce_e, q_bpe_e) =
             match (q_fce_entry, q_fpe_entry, q_bce_entry, q_bpe_entry) {
                 (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-                _ => continue, // No fill - quote missing or too stale
+                _ => {
+                    num_no_fill += 1;
+                    continue; // No fill - quote missing or too stale
+                }
             };
         let (q_fce_x, q_fpe_x, q_bce_x, q_bpe_x) =
             match (q_fce_exit, q_fpe_exit, q_bce_exit, q_bpe_exit) {
                 (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
-                _ => continue, // No fill - quote missing or too stale
+                _ => {
+                    num_no_fill += 1;
+                    continue; // No fill - quote missing or too stale
+                }
             };
+
+        // Track quote ages for diagnostics (all 8 legs per trade)
+        quote_ages.push(q_fce_e.quote_age_ms);
+        quote_ages.push(q_fpe_e.quote_age_ms);
+        quote_ages.push(q_bce_e.quote_age_ms);
+        quote_ages.push(q_bpe_e.quote_age_ms);
+        quote_ages.push(q_fce_x.quote_age_ms);
+        quote_ages.push(q_fpe_x.quote_age_ms);
+        quote_ages.push(q_bce_x.quote_age_ms);
+        quote_ages.push(q_bpe_x.quote_age_ms);
 
         // Entry fills: short front (sell at bid), long back (buy at ask)
         // Exit fills: cover front (buy at ask), close back (sell at bid)
@@ -684,15 +688,26 @@ fn main() -> Result<()> {
         0.0
     };
 
+    // Quote age diagnostics
+    let avg_quote_age_ms = if !quote_ages.is_empty() {
+        quote_ages.iter().sum::<i64>() as f64 / quote_ages.len() as f64
+    } else {
+        0.0
+    };
+    let max_quote_age_ms = quote_ages.iter().copied().max().unwrap_or(0);
+
     let metrics = Metrics {
         schema_version: 1,
         num_signals,
         num_trades,
+        num_no_fill,
         gross_pnl,
         net_pnl,
         hit_rate,
         max_drawdown: max_dd,
         avg_pnl,
+        avg_quote_age_ms,
+        max_quote_age_ms,
     };
     let metrics_bytes =
         serde_json::to_vec_pretty(&metrics).context("Failed to serialize metrics")?;
