@@ -69,6 +69,15 @@ struct Args {
     /// Holding period in seconds.
     #[arg(long, default_value_t = 600)]
     holding_secs: u64,
+
+    /// Maximum quote age in milliseconds. If no quote within this window, trade is dropped.
+    /// Set to 0 to disable (use first available quote). Default: 500ms.
+    #[arg(long, default_value_t = 500)]
+    max_quote_age_ms: u64,
+
+    /// Use mid-price for fills (debug mode). Default: false (use bid/ask).
+    #[arg(long, default_value_t = false)]
+    use_mid: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +88,8 @@ struct ScoreConfigHash {
     exit_shift_ms: i64,
     friction_bps: f64,
     holding_secs: u64,
+    max_quote_age_ms: u64,
+    use_mid: bool,
 }
 
 #[allow(dead_code)]
@@ -184,6 +195,53 @@ fn find_mid_at_or_after(ticks: &[TickEvent], ts: DateTime<Utc>) -> Option<f64> {
         {
             return Some(m);
         }
+    }
+    None
+}
+
+/// Quote result with bid, ask, and staleness info
+#[derive(Debug, Clone, Copy)]
+struct QuoteResult {
+    bid: f64,
+    ask: f64,
+    mid: f64,
+    quote_age_ms: i64,
+}
+
+/// Find a valid quote at or after timestamp, respecting max_quote_age_ms constraint.
+/// Returns None if no valid quote found within the age window.
+fn find_quote_at_or_after(
+    ticks: &[TickEvent],
+    ts: DateTime<Utc>,
+    max_quote_age_ms: u64,
+) -> Option<QuoteResult> {
+    for t in ticks {
+        if t.ts < ts {
+            continue;
+        }
+        // Check quote validity
+        if t.bid_price <= 0 || t.ask_price <= 0 || t.bid_qty == 0 || t.ask_qty == 0 {
+            continue;
+        }
+
+        let quote_age_ms = (t.ts - ts).num_milliseconds();
+
+        // If max_quote_age_ms > 0, enforce staleness constraint
+        if max_quote_age_ms > 0 && quote_age_ms > max_quote_age_ms as i64 {
+            return None; // Quote too stale, strict no-fill
+        }
+
+        let scale = pow10_i32(t.price_exponent);
+        let bid = t.bid_price as f64 * scale;
+        let ask = t.ask_price as f64 * scale;
+        let mid = (bid + ask) / 2.0;
+
+        return Some(QuoteResult {
+            bid,
+            ask,
+            mid,
+            quote_age_ms,
+        });
     }
     None
 }
@@ -416,6 +474,8 @@ fn main() -> Result<()> {
         exit_shift_ms: args.exit_shift_ms,
         friction_bps: args.friction_bps,
         holding_secs: args.holding_secs,
+        max_quote_age_ms: args.max_quote_age_ms,
+        use_mid: args.use_mid,
     };
     let cfg_sha = config_hash(&cfg)?;
     let run_id = cfg_sha.chars().take(16).collect::<String>();
@@ -496,33 +556,47 @@ fn main() -> Result<()> {
         let bce = tick_cache.get(&b_ce).unwrap().as_slice();
         let bpe = tick_cache.get(&b_pe).unwrap().as_slice();
 
-        let entry_front = match (
-            find_mid_at_or_after(fce, entry_ts),
-            find_mid_at_or_after(fpe, entry_ts),
-        ) {
-            (Some(a), Some(b)) => a + b,
-            _ => continue,
-        };
-        let entry_back = match (
-            find_mid_at_or_after(bce, entry_ts),
-            find_mid_at_or_after(bpe, entry_ts),
-        ) {
-            (Some(a), Some(b)) => a + b,
-            _ => continue,
-        };
-        let exit_front = match (
-            find_mid_at_or_after(fce, exit_ts),
-            find_mid_at_or_after(fpe, exit_ts),
-        ) {
-            (Some(a), Some(b)) => a + b,
-            _ => continue,
-        };
-        let exit_back = match (
-            find_mid_at_or_after(bce, exit_ts),
-            find_mid_at_or_after(bpe, exit_ts),
-        ) {
-            (Some(a), Some(b)) => a + b,
-            _ => continue,
+        // Get quotes with staleness constraint
+        let q_fce_entry = find_quote_at_or_after(fce, entry_ts, args.max_quote_age_ms);
+        let q_fpe_entry = find_quote_at_or_after(fpe, entry_ts, args.max_quote_age_ms);
+        let q_bce_entry = find_quote_at_or_after(bce, entry_ts, args.max_quote_age_ms);
+        let q_bpe_entry = find_quote_at_or_after(bpe, entry_ts, args.max_quote_age_ms);
+
+        let q_fce_exit = find_quote_at_or_after(fce, exit_ts, args.max_quote_age_ms);
+        let q_fpe_exit = find_quote_at_or_after(fpe, exit_ts, args.max_quote_age_ms);
+        let q_bce_exit = find_quote_at_or_after(bce, exit_ts, args.max_quote_age_ms);
+        let q_bpe_exit = find_quote_at_or_after(bpe, exit_ts, args.max_quote_age_ms);
+
+        // Strict no-fill: if any leg missing, skip trade
+        let (q_fce_e, q_fpe_e, q_bce_e, q_bpe_e) =
+            match (q_fce_entry, q_fpe_entry, q_bce_entry, q_bpe_entry) {
+                (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+                _ => continue, // No fill - quote missing or too stale
+            };
+        let (q_fce_x, q_fpe_x, q_bce_x, q_bpe_x) =
+            match (q_fce_exit, q_fpe_exit, q_bce_exit, q_bpe_exit) {
+                (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+                _ => continue, // No fill - quote missing or too stale
+            };
+
+        // Entry fills: short front (sell at bid), long back (buy at ask)
+        // Exit fills: cover front (buy at ask), close back (sell at bid)
+        let (entry_front, entry_back, exit_front, exit_back) = if args.use_mid {
+            // Debug mode: use mid prices
+            (
+                q_fce_e.mid + q_fpe_e.mid,
+                q_bce_e.mid + q_bpe_e.mid,
+                q_fce_x.mid + q_fpe_x.mid,
+                q_bce_x.mid + q_bpe_x.mid,
+            )
+        } else {
+            // Market-realistic: short uses bid, long uses ask
+            (
+                q_fce_e.bid + q_fpe_e.bid, // Entry front: SELL at bid
+                q_bce_e.ask + q_bpe_e.ask, // Entry back: BUY at ask
+                q_fce_x.ask + q_fpe_x.ask, // Exit front: BUY at ask
+                q_bce_x.bid + q_bpe_x.bid, // Exit back: SELL at bid
+            )
         };
 
         // PnL: short front, long back
