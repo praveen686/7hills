@@ -1981,12 +1981,13 @@ fn main() -> Result<()> {
                     last_entry_ts = Some(current_ts);
 
                     // Emit alpha signal (Enter intent) - deterministic JSONL
+                    // Use ISO dates for expiry (scoring expects "%Y-%m-%d" format)
                     let signal = SignalEvent {
                         schema_version: 1,
                         ts: current_ts,
                         underlying: intent.underlying.clone(),
-                        front_expiry: intent.front_expiry.clone(),
-                        back_expiry: intent.back_expiry.clone(),
+                        front_expiry: front_expiry_date.to_string(), // ISO "2026-01-26"
+                        back_expiry: back_expiry_date.to_string(),   // ISO "2026-02-26"
                         front_strike: intent.front_strike,
                         back_strike: intent.back_strike,
                         front_lots: intent.front_lots,

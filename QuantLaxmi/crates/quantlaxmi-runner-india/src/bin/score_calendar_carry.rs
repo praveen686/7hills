@@ -199,9 +199,9 @@ fn month_str_to_num(m: &str) -> Option<u32> {
 }
 
 fn parse_option_symbol(symbol: &str) -> Option<ParsedSymbol> {
-    // Expected pattern (common for NSE options):
-    // <UNDERLYING><DD><MON><YY><STRIKE><CE|PE>
-    // Example: NIFTY26JAN24000CE
+    // NSE option symbols: <UNDERLYING><DD><MON><STRIKE><CE|PE>
+    // Example: NIFTY26JAN25100CE (no year suffix in 2026 format)
+    // Older format with YY suffix: NIFTY26JAN2625100CE
     let s = symbol.trim().to_uppercase();
     let opt_type = if s.ends_with("CE") {
         OptType::Call
@@ -223,27 +223,49 @@ fn parse_option_symbol(symbol: &str) -> Option<ParsedSymbol> {
     let strike_str = &core[idx..];
     let strike: f64 = strike_str.parse().ok()?;
     let prefix = &core[..idx];
-    if prefix.len() < 7 {
-        return None;
+
+    // Try 5-char format first (DDMON, no year) - common for 2026 NSE symbols
+    if prefix.len() >= 5 {
+        let date_part = &prefix[prefix.len() - 5..];
+        let under = &prefix[..prefix.len() - 5];
+
+        if let (Ok(dd), Some(mm)) = (
+            date_part[0..2].parse::<u32>(),
+            month_str_to_num(&date_part[2..5]),
+        ) {
+            // Infer year as 2026 (current trading year)
+            if let Some(expiry) = NaiveDate::from_ymd_opt(2026, mm, dd) {
+                return Some(ParsedSymbol {
+                    underlying: under.to_string(),
+                    expiry,
+                    strike,
+                    opt_type,
+                });
+            }
+        }
     }
 
-    // Suffix contains date: DD MON YY (2 + 3 + 2)
-    let date_part = &prefix[prefix.len() - 7..];
-    let under = &prefix[..prefix.len() - 7];
+    // Fallback: try 7-char format (DDMONYY)
+    if prefix.len() >= 7 {
+        let date_part = &prefix[prefix.len() - 7..];
+        let under = &prefix[..prefix.len() - 7];
 
-    let dd: u32 = date_part[0..2].parse().ok()?;
-    let mon = &date_part[2..5];
-    let yy: i32 = date_part[5..7].parse().ok()?;
-    let mm: u32 = month_str_to_num(mon)?;
-    let yyyy = 2000 + yy;
-    let expiry = NaiveDate::from_ymd_opt(yyyy, mm, dd)?;
+        let dd: u32 = date_part[0..2].parse().ok()?;
+        let mon = &date_part[2..5];
+        let yy: i32 = date_part[5..7].parse().ok()?;
+        let mm: u32 = month_str_to_num(mon)?;
+        let yyyy = 2000 + yy;
+        let expiry = NaiveDate::from_ymd_opt(yyyy, mm, dd)?;
 
-    Some(ParsedSymbol {
-        underlying: under.to_string(),
-        expiry,
-        strike,
-        opt_type,
-    })
+        return Some(ParsedSymbol {
+            underlying: under.to_string(),
+            expiry,
+            strike,
+            opt_type,
+        });
+    }
+
+    None
 }
 
 fn discover_symbol_tick_paths(session_dir: &Path) -> Result<HashMap<String, PathBuf>> {
