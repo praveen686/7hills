@@ -1671,19 +1671,22 @@ fn main() -> Result<()> {
         counters.inside_market_hours += 1;
 
         // Calibrate slices for all expiries at this timestamp
-        let mut slices: Vec<SanosSlice> = Vec::new();
+        // Track successful (expiry_date, expiry_str, slice) tuples to maintain alignment
+        let mut successful_slices: Vec<(NaiveDate, String, SanosSlice)> = Vec::new();
 
         for (idx, expiry_date) in expiries_naive.iter().enumerate() {
             // Use manifest-driven or legacy functions based on mode
-            let slice = if let Some(u_inv) = manifest_underlying {
+            let (slice, expiry_str) = if let Some(u_inv) = manifest_underlying {
                 // Manifest mode: no symbol parsing
                 let tte = time_to_expiry_from_date(current_ts, *expiry_date);
-                build_slice_manifest(&all_ticks, u_inv, *expiry_date, current_ts, tte)
+                let s = build_slice_manifest(&all_ticks, u_inv, *expiry_date, current_ts, tte);
+                (s, expiries[idx].clone())
             } else {
                 // Legacy mode: uses parse_symbol()
                 let expiry_str = &expiries[idx];
                 let tte = time_to_expiry(current_ts, expiry_str);
-                build_slice(&all_ticks, &args.underlying, expiry_str, current_ts, tte)
+                let s = build_slice(&all_ticks, &args.underlying, expiry_str, current_ts, tte);
+                (s, expiry_str.clone())
             };
 
             if slice.calls.is_empty() || slice.puts.is_empty() {
@@ -1692,7 +1695,7 @@ fn main() -> Result<()> {
 
             match calibrator.calibrate(&slice) {
                 Ok(sanos_slice) => {
-                    slices.push(sanos_slice);
+                    successful_slices.push((*expiry_date, expiry_str, sanos_slice));
                 }
                 Err(_e) => {
                     // Skip failed calibration
@@ -1700,10 +1703,13 @@ fn main() -> Result<()> {
             }
         }
 
-        if slices.len() < 2 {
+        if successful_slices.len() < 2 {
             current_ts += interval;
             continue;
         }
+
+        // Extract aligned slices for feature building
+        let slices: Vec<SanosSlice> = successful_slices.iter().map(|(_, _, s)| s.clone()).collect();
 
         // Build features
         let features = match build_features(&slices) {
@@ -1713,6 +1719,10 @@ fn main() -> Result<()> {
                 continue;
             }
         };
+
+        // Extract aligned expiry info from successful_slices
+        let (front_expiry_date, front_expiry_str, _) = &successful_slices[0];
+        let (back_expiry_date, back_expiry_str, _) = &successful_slices[1];
 
         // Find ATM strikes for front and back
         let front_atm = find_atm_strike(&slices[0], &args.underlying);
@@ -1725,7 +1735,7 @@ fn main() -> Result<()> {
                 let front = match build_straddle_quotes_manifest(
                     &all_ticks,
                     u_inv,
-                    expiries_naive[0],
+                    *front_expiry_date,
                     front_atm,
                     current_ts,
                 ) {
@@ -1739,7 +1749,7 @@ fn main() -> Result<()> {
                 let back = match build_straddle_quotes_manifest(
                     &all_ticks,
                     u_inv,
-                    expiries_naive[1],
+                    *back_expiry_date,
                     back_atm,
                     current_ts,
                 ) {
@@ -1754,14 +1764,14 @@ fn main() -> Result<()> {
                 let q1_f = validate_q1_straddle_manifest(
                     &all_ticks,
                     u_inv,
-                    expiries_naive[0],
+                    *front_expiry_date,
                     front_atm,
                     current_ts,
                 );
                 let q1_b = validate_q1_straddle_manifest(
                     &all_ticks,
                     u_inv,
-                    expiries_naive[1],
+                    *back_expiry_date,
                     back_atm,
                     current_ts,
                 );
@@ -1772,7 +1782,7 @@ fn main() -> Result<()> {
                 let front = match build_straddle_quotes(
                     &all_ticks,
                     &args.underlying,
-                    &expiries[0],
+                    front_expiry_str,
                     front_atm,
                     current_ts,
                 ) {
@@ -1786,7 +1796,7 @@ fn main() -> Result<()> {
                 let back = match build_straddle_quotes(
                     &all_ticks,
                     &args.underlying,
-                    &expiries[1],
+                    back_expiry_str,
                     back_atm,
                     current_ts,
                 ) {
@@ -1801,14 +1811,14 @@ fn main() -> Result<()> {
                 let q1_f = validate_q1_straddle(
                     &all_ticks,
                     &args.underlying,
-                    &expiries[0],
+                    front_expiry_str,
                     front_atm,
                     current_ts,
                 );
                 let q1_b = validate_q1_straddle(
                     &all_ticks,
                     &args.underlying,
-                    &expiries[1],
+                    back_expiry_str,
                     back_atm,
                     current_ts,
                 );
@@ -1826,12 +1836,12 @@ fn main() -> Result<()> {
             dist_quote_age_ms.add(back_q1.pe.quote_age_ms as f64);
         }
 
-        // Build session meta
+        // Build session meta (use aligned expiry strings from successful_slices)
         let meta = SessionMeta {
             underlying: args.underlying.clone(),
-            t1_expiry: expiries[0].clone(),
-            t2_expiry: expiries.get(1).cloned(),
-            t3_expiry: expiries.get(2).cloned(),
+            t1_expiry: front_expiry_str.clone(),
+            t2_expiry: Some(back_expiry_str.clone()),
+            t3_expiry: successful_slices.get(2).map(|(_, s, _)| s.clone()),
             lot_size: if args.underlying == "BANKNIFTY" {
                 15
             } else {
@@ -1843,14 +1853,8 @@ fn main() -> Result<()> {
             lp_status_t3: slices.get(2).map(|s| s.diagnostics.lp_status.clone()),
         };
 
-        // Check if it's expiry day for front (use NaiveDate directly in manifest mode)
-        let is_expiry_day_front = if manifest_underlying.is_some() {
-            expiries_naive[0] == current_ts.date_naive()
-        } else {
-            expiry_to_date(&expiries[0])
-                .map(|d| d == current_ts.date_naive())
-                .unwrap_or(false)
-        };
+        // Check if it's expiry day for front (use aligned expiry date)
+        let is_expiry_day_front = *front_expiry_date == current_ts.date_naive();
 
         // Build context
         let ctx = StrategyContext {
