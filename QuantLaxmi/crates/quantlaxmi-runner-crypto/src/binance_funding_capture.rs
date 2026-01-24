@@ -9,39 +9,189 @@
 //!
 //! Endpoint: wss://fstream.binance.com/ws/<symbol>@markPrice
 //!
+//! ## Determinism
+//! All numeric fields use scaled integer mantissas to avoid float drift:
+//! - Prices: mantissa with price_exponent (e.g., -2 for 2 decimal places)
+//! - Funding rate: mantissa with rate_exponent (e.g., -8 for 8 decimal places)
+//!
 //! Notes:
 //! - No API key required for public streams
 //! - Funding settles every 8h: 00:00, 08:00, 16:00 UTC
 //! - Rate updates every ~3 seconds
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, TimeZone, Utc};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-/// Funding event from markPrice stream.
+// =============================================================================
+// Deterministic FundingEvent (no f64 persistence)
+// =============================================================================
+// All prices and rates are stored as integer mantissas for cross-platform
+// reproducibility. Use the helper methods to convert to f64 for display.
+// =============================================================================
+
+/// Default price exponent for Binance futures (-2 = 2 decimal places).
+pub const FUNDING_PRICE_EXPONENT: i8 = -2;
+
+/// Default rate exponent for funding rates (-8 = 8 decimal places).
+/// Funding rates are typically small (e.g., 0.0001 = 0.01%), so we need
+/// high precision. -8 gives us 8 decimal places (like Binance's native format).
+pub const FUNDING_RATE_EXPONENT: i8 = -8;
+
+/// Funding event from markPrice stream (deterministic, fixed-point).
 /// This is the core data structure for funding rate arbitrage.
+///
+/// All numeric fields are stored as integer mantissas for deterministic replay.
+/// Use the helper methods (`mark_price_f64()`, `funding_rate_f64()`, etc.)
+/// to convert to floating point for display or computation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FundingEvent {
     /// Event timestamp
     pub ts: DateTime<Utc>,
     /// Symbol (e.g., BTCUSDT)
     pub symbol: String,
-    /// Mark price (fair price for funding/liquidation)
-    pub mark_price: f64,
-    /// Index price (spot reference)
-    pub index_price: f64,
-    /// Estimated settle price (only meaningful near funding time)
-    pub estimated_settle_price: f64,
-    /// Current predicted funding rate (8h rate as decimal, e.g., 0.0001 = 0.01%)
-    pub funding_rate: f64,
-    /// Next funding timestamp
-    pub next_funding_time: DateTime<Utc>,
+
+    // --- Price fields (mantissa form) ---
+    /// Mark price mantissa (divide by 10^|price_exponent| to get actual price)
+    pub mark_price_mantissa: i64,
+    /// Index price mantissa
+    pub index_price_mantissa: i64,
+    /// Estimated settle price mantissa
+    pub estimated_settle_price_mantissa: i64,
+    /// Price exponent (e.g., -2 means price = mantissa / 100)
+    #[serde(default = "default_price_exponent")]
+    pub price_exponent: i8,
+
+    // --- Funding rate (mantissa form) ---
+    /// Funding rate mantissa (e.g., 10000 with exponent -8 = 0.0001 = 0.01%)
+    pub funding_rate_mantissa: i64,
+    /// Rate exponent (e.g., -8 for 8 decimal places)
+    #[serde(default = "default_rate_exponent")]
+    pub rate_exponent: i8,
+
+    // --- Timing ---
+    /// Next funding timestamp (milliseconds since Unix epoch)
+    pub next_funding_time_ms: i64,
+
     /// Source identifier
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+}
+
+fn default_price_exponent() -> i8 {
+    FUNDING_PRICE_EXPONENT
+}
+
+fn default_rate_exponent() -> i8 {
+    FUNDING_RATE_EXPONENT
+}
+
+impl FundingEvent {
+    /// Convert mark price mantissa to f64.
+    pub fn mark_price_f64(&self) -> f64 {
+        self.mark_price_mantissa as f64 * 10f64.powi(self.price_exponent as i32)
+    }
+
+    /// Convert index price mantissa to f64.
+    pub fn index_price_f64(&self) -> f64 {
+        self.index_price_mantissa as f64 * 10f64.powi(self.price_exponent as i32)
+    }
+
+    /// Convert estimated settle price mantissa to f64.
+    pub fn estimated_settle_price_f64(&self) -> f64 {
+        self.estimated_settle_price_mantissa as f64 * 10f64.powi(self.price_exponent as i32)
+    }
+
+    /// Convert funding rate mantissa to f64 (e.g., 0.0001 for 0.01%).
+    pub fn funding_rate_f64(&self) -> f64 {
+        self.funding_rate_mantissa as f64 * 10f64.powi(self.rate_exponent as i32)
+    }
+
+    /// Funding rate as basis points (bps). 0.01% = 1 bps.
+    pub fn funding_rate_bps(&self) -> f64 {
+        self.funding_rate_f64() * 10_000.0
+    }
+
+    /// Next funding time as DateTime<Utc>.
+    pub fn next_funding_time(&self) -> DateTime<Utc> {
+        Utc.timestamp_millis_opt(self.next_funding_time_ms)
+            .single()
+            .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap())
+    }
+
+    /// Basis in basis points: (mark - index) / index * 10000.
+    pub fn basis_bps(&self) -> f64 {
+        let mark = self.mark_price_f64();
+        let index = self.index_price_f64();
+        if index == 0.0 {
+            return 0.0;
+        }
+        (mark - index) / index * 10_000.0
+    }
+}
+
+/// Parse decimal string to mantissa without f64 intermediate (deterministic).
+/// Reuses the same algorithm as depth capture.
+fn parse_to_mantissa(s: &str, exponent: i8) -> Result<i64> {
+    let s = s.trim();
+    if s.is_empty() {
+        bail!("empty string");
+    }
+
+    // Handle negative numbers
+    let (is_negative, s) = if let Some(stripped) = s.strip_prefix('-') {
+        (true, stripped)
+    } else {
+        (false, s)
+    };
+
+    // Split on decimal point
+    let parts: Vec<&str> = s.split('.').collect();
+    if parts.len() > 2 {
+        bail!("invalid decimal format: {}", s);
+    }
+
+    let int_part = parts[0];
+    let frac_part = if parts.len() == 2 { parts[1] } else { "" };
+
+    // Target decimal places = -exponent (e.g., exponent=-8 means 8 decimals)
+    let target_decimals = (-exponent) as usize;
+
+    // Build the mantissa string: integer part + fractional part padded/truncated
+    let mut mantissa_str = String::with_capacity(int_part.len() + target_decimals);
+    mantissa_str.push_str(int_part);
+
+    if frac_part.len() >= target_decimals {
+        // Truncate fractional part (with rounding check)
+        mantissa_str.push_str(&frac_part[..target_decimals]);
+        // Check if we need to round up
+        if frac_part.len() > target_decimals {
+            let next_digit = frac_part.chars().nth(target_decimals).unwrap_or('0');
+            if next_digit >= '5' {
+                // Round up by adding 1 to the mantissa
+                let mut mantissa: i64 = mantissa_str
+                    .parse()
+                    .with_context(|| format!("parse mantissa: {}", mantissa_str))?;
+                mantissa += 1;
+                return Ok(if is_negative { -mantissa } else { mantissa });
+            }
+        }
+    } else {
+        // Pad with zeros
+        mantissa_str.push_str(frac_part);
+        for _ in 0..(target_decimals - frac_part.len()) {
+            mantissa_str.push('0');
+        }
+    }
+
+    let mantissa: i64 = mantissa_str
+        .parse()
+        .with_context(|| format!("parse mantissa: {}", mantissa_str))?;
+
+    Ok(if is_negative { -mantissa } else { mantissa })
 }
 
 /// Raw markPrice WebSocket event from Binance Futures.
@@ -56,7 +206,7 @@ struct MarkPriceEvent {
     /// Symbol
     #[serde(rename = "s")]
     symbol: String,
-    /// Mark price
+    /// Mark price (string for deterministic parsing)
     #[serde(rename = "p")]
     mark_price: String,
     /// Index price
@@ -73,27 +223,48 @@ struct MarkPriceEvent {
     next_funding_time_ms: i64,
 }
 
-fn parse_f64(s: &str) -> Result<f64> {
-    s.parse::<f64>()
-        .with_context(|| format!("parse f64: {}", s))
-}
-
 fn ms_to_dt(ms: i64) -> DateTime<Utc> {
     Utc.timestamp_millis_opt(ms)
         .single()
         .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap())
 }
 
-/// Statistics from funding capture.
+/// Statistics from funding capture (uses mantissa for determinism).
 #[derive(Debug, Default)]
 pub struct FundingCaptureStats {
     pub events_written: usize,
     pub funding_events: usize,
-    pub min_funding_rate: f64,
-    pub max_funding_rate: f64,
-    pub last_funding_rate: f64,
-    pub last_mark_price: f64,
+    /// Min funding rate mantissa (with FUNDING_RATE_EXPONENT)
+    pub min_funding_rate_mantissa: i64,
+    /// Max funding rate mantissa
+    pub max_funding_rate_mantissa: i64,
+    /// Last funding rate mantissa
+    pub last_funding_rate_mantissa: i64,
+    /// Last mark price mantissa (with FUNDING_PRICE_EXPONENT)
+    pub last_mark_price_mantissa: i64,
     pub funding_settlements: usize,
+}
+
+impl FundingCaptureStats {
+    /// Convert min funding rate to f64.
+    pub fn min_funding_rate_f64(&self) -> f64 {
+        self.min_funding_rate_mantissa as f64 * 10f64.powi(FUNDING_RATE_EXPONENT as i32)
+    }
+
+    /// Convert max funding rate to f64.
+    pub fn max_funding_rate_f64(&self) -> f64 {
+        self.max_funding_rate_mantissa as f64 * 10f64.powi(FUNDING_RATE_EXPONENT as i32)
+    }
+
+    /// Convert last funding rate to f64.
+    pub fn last_funding_rate_f64(&self) -> f64 {
+        self.last_funding_rate_mantissa as f64 * 10f64.powi(FUNDING_RATE_EXPONENT as i32)
+    }
+
+    /// Convert last mark price to f64.
+    pub fn last_mark_price_f64(&self) -> f64 {
+        self.last_mark_price_mantissa as f64 * 10f64.powi(FUNDING_PRICE_EXPONENT as i32)
+    }
 }
 
 impl std::fmt::Display for FundingCaptureStats {
@@ -102,15 +273,15 @@ impl std::fmt::Display for FundingCaptureStats {
             f,
             "events={}, funding_range=[{:.4}%..{:.4}%], last_rate={:.4}%, settlements={}",
             self.events_written,
-            self.min_funding_rate * 100.0,
-            self.max_funding_rate * 100.0,
-            self.last_funding_rate * 100.0,
+            self.min_funding_rate_f64() * 100.0,
+            self.max_funding_rate_f64() * 100.0,
+            self.last_funding_rate_f64() * 100.0,
             self.funding_settlements
         )
     }
 }
 
-/// Capture funding rate stream to JSONL.
+/// Capture funding rate stream to JSONL (deterministic, fixed-point).
 pub async fn capture_funding_jsonl(
     symbol: &str,
     out_path: &Path,
@@ -135,8 +306,8 @@ pub async fn capture_funding_jsonl(
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
     let mut stats = FundingCaptureStats {
-        min_funding_rate: f64::MAX,
-        max_funding_rate: f64::MIN,
+        min_funding_rate_mantissa: i64::MAX,
+        max_funding_rate_mantissa: i64::MIN,
         ..Default::default()
     };
     let mut last_funding_time_ms: i64 = 0;
@@ -161,10 +332,12 @@ pub async fn capture_funding_jsonl(
             _ => continue,
         };
 
-        let funding_rate = parse_f64(&ev.funding_rate)?;
-        let mark_price = parse_f64(&ev.mark_price)?;
-        let index_price = parse_f64(&ev.index_price)?;
-        let estimated_settle = parse_f64(&ev.estimated_settle_price)?;
+        // Parse to mantissa (deterministic, no f64 intermediate)
+        let mark_price_mantissa = parse_to_mantissa(&ev.mark_price, FUNDING_PRICE_EXPONENT)?;
+        let index_price_mantissa = parse_to_mantissa(&ev.index_price, FUNDING_PRICE_EXPONENT)?;
+        let estimated_settle_mantissa =
+            parse_to_mantissa(&ev.estimated_settle_price, FUNDING_PRICE_EXPONENT)?;
+        let funding_rate_mantissa = parse_to_mantissa(&ev.funding_rate, FUNDING_RATE_EXPONENT)?;
 
         // Track funding settlements (when next_funding_time changes)
         if last_funding_time_ms != 0 && ev.next_funding_time_ms != last_funding_time_ms {
@@ -172,21 +345,25 @@ pub async fn capture_funding_jsonl(
         }
         last_funding_time_ms = ev.next_funding_time_ms;
 
-        // Update stats
-        stats.min_funding_rate = stats.min_funding_rate.min(funding_rate);
-        stats.max_funding_rate = stats.max_funding_rate.max(funding_rate);
-        stats.last_funding_rate = funding_rate;
-        stats.last_mark_price = mark_price;
+        // Update stats (all in mantissa form)
+        stats.min_funding_rate_mantissa =
+            stats.min_funding_rate_mantissa.min(funding_rate_mantissa);
+        stats.max_funding_rate_mantissa =
+            stats.max_funding_rate_mantissa.max(funding_rate_mantissa);
+        stats.last_funding_rate_mantissa = funding_rate_mantissa;
+        stats.last_mark_price_mantissa = mark_price_mantissa;
         stats.funding_events += 1;
 
         let funding_event = FundingEvent {
             ts: ms_to_dt(ev.event_time_ms),
             symbol: ev.symbol,
-            mark_price,
-            index_price,
-            estimated_settle_price: estimated_settle,
-            funding_rate,
-            next_funding_time: ms_to_dt(ev.next_funding_time_ms),
+            mark_price_mantissa,
+            index_price_mantissa,
+            estimated_settle_price_mantissa: estimated_settle_mantissa,
+            price_exponent: FUNDING_PRICE_EXPONENT,
+            funding_rate_mantissa,
+            rate_exponent: FUNDING_RATE_EXPONENT,
+            next_funding_time_ms: ev.next_funding_time_ms,
             source: Some("binance_funding_capture".to_string()),
         };
 
@@ -199,11 +376,11 @@ pub async fn capture_funding_jsonl(
     file.flush().await?;
 
     // Fix stats if no events
-    if stats.min_funding_rate == f64::MAX {
-        stats.min_funding_rate = 0.0;
+    if stats.min_funding_rate_mantissa == i64::MAX {
+        stats.min_funding_rate_mantissa = 0;
     }
-    if stats.max_funding_rate == f64::MIN {
-        stats.max_funding_rate = 0.0;
+    if stats.max_funding_rate_mantissa == i64::MIN {
+        stats.max_funding_rate_mantissa = 0;
     }
 
     Ok(stats)
@@ -247,23 +424,76 @@ mod tests {
 
     #[test]
     fn test_funding_event_serialization() {
+        // 100000.50 with exponent -2 = 10000050 mantissa
+        // 0.0001 with exponent -8 = 10000 mantissa
+        let now = Utc::now();
+        let next_funding_ms = (now + chrono::Duration::hours(8)).timestamp_millis();
+
         let event = FundingEvent {
-            ts: Utc::now(),
+            ts: now,
             symbol: "BTCUSDT".to_string(),
-            mark_price: 100000.50,
-            index_price: 100000.25,
-            estimated_settle_price: 100000.40,
-            funding_rate: 0.0001,
-            next_funding_time: Utc::now() + chrono::Duration::hours(8),
+            mark_price_mantissa: 10000050,             // 100000.50
+            index_price_mantissa: 10000025,            // 100000.25
+            estimated_settle_price_mantissa: 10000040, // 100000.40
+            price_exponent: FUNDING_PRICE_EXPONENT,
+            funding_rate_mantissa: 10000, // 0.0001 (0.01%)
+            rate_exponent: FUNDING_RATE_EXPONENT,
+            next_funding_time_ms: next_funding_ms,
             source: Some("test".to_string()),
         };
 
+        // Test helper methods
+        assert!((event.mark_price_f64() - 100000.50).abs() < 0.01);
+        assert!((event.index_price_f64() - 100000.25).abs() < 0.01);
+        assert!((event.funding_rate_f64() - 0.0001).abs() < 1e-10);
+        assert!((event.funding_rate_bps() - 1.0).abs() < 0.01); // 0.01% = 1 bps
+
+        // Test serialization
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("BTCUSDT"));
-        assert!(json.contains("funding_rate"));
+        assert!(json.contains("mark_price_mantissa"));
+        assert!(json.contains("funding_rate_mantissa"));
 
+        // Test deserialization
         let parsed: FundingEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.symbol, "BTCUSDT");
-        assert!((parsed.funding_rate - 0.0001).abs() < 1e-10);
+        assert_eq!(parsed.mark_price_mantissa, 10000050);
+        assert_eq!(parsed.funding_rate_mantissa, 10000);
+    }
+
+    #[test]
+    fn test_parse_to_mantissa() {
+        // Price parsing (exponent -2)
+        assert_eq!(parse_to_mantissa("100000.50", -2).unwrap(), 10000050);
+        assert_eq!(parse_to_mantissa("90000.12", -2).unwrap(), 9000012);
+        assert_eq!(parse_to_mantissa("100000", -2).unwrap(), 10000000);
+
+        // Funding rate parsing (exponent -8)
+        assert_eq!(parse_to_mantissa("0.0001", -8).unwrap(), 10000);
+        assert_eq!(parse_to_mantissa("0.00010000", -8).unwrap(), 10000);
+        assert_eq!(parse_to_mantissa("-0.0001", -8).unwrap(), -10000);
+
+        // Rounding
+        assert_eq!(parse_to_mantissa("100.125", -2).unwrap(), 10013); // rounds up
+        assert_eq!(parse_to_mantissa("100.124", -2).unwrap(), 10012); // truncates
+    }
+
+    #[test]
+    fn test_basis_bps() {
+        let event = FundingEvent {
+            ts: Utc::now(),
+            symbol: "BTCUSDT".to_string(),
+            mark_price_mantissa: 10010000,  // 100100.00
+            index_price_mantissa: 10000000, // 100000.00
+            estimated_settle_price_mantissa: 10005000,
+            price_exponent: FUNDING_PRICE_EXPONENT,
+            funding_rate_mantissa: 10000,
+            rate_exponent: FUNDING_RATE_EXPONENT,
+            next_funding_time_ms: 0,
+            source: None,
+        };
+
+        // Basis = (100100 - 100000) / 100000 * 10000 = 10 bps
+        assert!((event.basis_bps() - 10.0).abs() < 0.1);
     }
 }

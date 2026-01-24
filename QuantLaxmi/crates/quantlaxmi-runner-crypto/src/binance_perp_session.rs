@@ -380,7 +380,7 @@ async fn capture_symbol(
         let result = binance_funding_capture::capture_funding_jsonl(&sym, &path, dur).await?;
         Ok(CaptureResult::Funding {
             events: result.events_written,
-            rate: result.last_funding_rate,
+            rate: result.last_funding_rate_f64(),
             settlements: result.funding_settlements,
         })
     }));
