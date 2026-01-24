@@ -52,6 +52,16 @@ struct Args {
     #[arg(long, default_value_t = 50)]
     latency_ms: u64,
 
+    /// Shift entry timestamp by this many milliseconds (shift test).
+    /// Positive shifts entry later; negative shifts entry earlier.
+    #[arg(long, default_value_t = 0)]
+    entry_shift_ms: i64,
+
+    /// Shift exit timestamp by this many milliseconds (shift test).
+    /// Positive shifts exit later; negative shifts exit earlier.
+    #[arg(long, default_value_t = 0)]
+    exit_shift_ms: i64,
+
     /// Round-trip friction in basis points, applied on notional at entry and exit.
     #[arg(long, default_value_t = 1.0)]
     friction_bps: f64,
@@ -65,6 +75,8 @@ struct Args {
 struct ScoreConfigHash {
     signal_run_id: String,
     latency_ms: u64,
+    entry_shift_ms: i64,
+    exit_shift_ms: i64,
     friction_bps: f64,
     holding_secs: u64,
 }
@@ -400,6 +412,8 @@ fn main() -> Result<()> {
     let cfg = ScoreConfigHash {
         signal_run_id: signal_run_id.clone(),
         latency_ms: args.latency_ms,
+        entry_shift_ms: args.entry_shift_ms,
+        exit_shift_ms: args.exit_shift_ms,
         friction_bps: args.friction_bps,
         holding_secs: args.holding_secs,
     };
@@ -460,8 +474,11 @@ fn main() -> Result<()> {
             None => continue,
         };
 
-        let entry_ts = sig.ts + latency;
-        let exit_ts = sig.ts + chrono::Duration::seconds(args.holding_secs as i64) + latency;
+        let entry_ts = sig.ts + latency + chrono::Duration::milliseconds(args.entry_shift_ms);
+        let exit_ts = sig.ts
+            + chrono::Duration::seconds(args.holding_secs as i64)
+            + latency
+            + chrono::Duration::milliseconds(args.exit_shift_ms);
 
         // Load ticks into cache if not present
         for sym in [&f_ce, &f_pe, &b_ce, &b_pe] {
