@@ -1,6 +1,6 @@
 # Executor ABI v1 (C++ -> Rust FFI)
 
-See `crates/kubera-executor-cpp/src/kubera_executor.h` for the ABI definitions.
+See `crates/quantlaxmi-executor/src/lib.rs` for the Rust executor implementation.
 
 ## Scope
 - L2 book snapshot input (up to DEPTH_MAX=10 levels)

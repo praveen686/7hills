@@ -73,9 +73,14 @@ pub enum IntegrityTier {
     L1Only,
 }
 
-/// Session manifest for multi-instrument capture.
+/// Legacy capture-level manifest (debug/diagnostic only).
+///
+/// NOTE: This is NOT the canonical session manifest. The canonical manifest
+/// is `SessionManifest` from `quantlaxmi_runner_common::session_manifest`.
+/// This struct is retained only for per-capture debug diagnostics and is
+/// written to `capture_debug.json` (not `session_manifest.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionManifest {
+pub struct CaptureDebugManifest {
     pub session_id: String,
     pub watermark: String,
     pub family: String,
@@ -762,10 +767,14 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     )
     .await?;
 
-    let manifest_path = config.out_dir.join("session_manifest.json");
+    // Write capture debug manifest (diagnostic only, NOT the canonical session manifest)
+    let debug_manifest_path = config.out_dir.join("capture_debug.json");
     let json = serde_json::to_string_pretty(&session_manifest)?;
-    tokio::fs::write(&manifest_path, json).await?;
-    println!("\nSession manifest written: {:?}", manifest_path);
+    tokio::fs::write(&debug_manifest_path, json).await?;
+    println!(
+        "\nCapture debug manifest written: {:?}",
+        debug_manifest_path
+    );
 
     // Generate per-instrument manifests
     for (sym, stats) in &instrument_stats {
@@ -840,7 +849,7 @@ async fn generate_session_manifest(
     start_time: DateTime<Utc>,
     end_time: DateTime<Utc>,
     all_certified: bool,
-) -> Result<SessionManifest> {
+) -> Result<CaptureDebugManifest> {
     let mut captures = Vec::new();
     let mut instrument_hashes = HashMap::new();
 
@@ -880,7 +889,7 @@ async fn generate_session_manifest(
         &session_id[..8]
     );
 
-    Ok(SessionManifest {
+    Ok(CaptureDebugManifest {
         session_id: session_id.to_string(),
         watermark,
         family: "india".to_string(),
@@ -990,8 +999,8 @@ mod tests {
     }
 
     #[test]
-    fn test_session_manifest_serialization() {
-        let manifest = SessionManifest {
+    fn test_capture_debug_manifest_serialization() {
+        let manifest = CaptureDebugManifest {
             session_id: "test-123".to_string(),
             watermark: "QuantLaxmi-india-session-20260122-120000-test1234".to_string(),
             family: "india".to_string(),

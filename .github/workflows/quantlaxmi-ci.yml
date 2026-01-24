@@ -53,17 +53,30 @@ jobs:
         run: |
           # See docs/KUBERA_ZERO_POLICY.md for rationale
           # Allow: docs/, patches/, deprecation warnings in quantlaxmi_sdk
-          # Deny: everything else
+          # Deny: everything else (including operational artifacts like Dockerfile, contracts/)
           echo "Checking Kubera Zero Policy..."
+
+          # Check source code
           VIOLATIONS=$(grep -rIn --include='*.rs' --include='*.toml' --include='*.py' -i 'kubera' \
             crates apps python scripts Cargo.toml README.md 2>/dev/null \
             | grep -v 'quantlaxmi_sdk.*deprecated\|quantlaxmi_sdk.*DeprecationWarning\|quantlaxmi_sdk.*KuberaStrategy\|quantlaxmi_sdk.*Historical\|quantlaxmi_sdk.*decommission\|check_isolation.sh' \
             || true)
           if [ -n "$VIOLATIONS" ]; then
-            echo "ERROR: Kubera Zero Policy violation detected:"
+            echo "ERROR: Kubera Zero Policy violation in source:"
             echo "$VIOLATIONS"
             exit 1
           fi
+
+          # Check operational artifacts (Dockerfile, contracts, infra)
+          OP_VIOLATIONS=$(grep -rIn -i 'kubera' Dockerfile* contracts/ infra/ 2>/dev/null \
+            | grep -v 'patches/' \
+            || true)
+          if [ -n "$OP_VIOLATIONS" ]; then
+            echo "ERROR: Kubera Zero Policy violation in operational artifacts:"
+            echo "$OP_VIOLATIONS"
+            exit 1
+          fi
+
           echo "✓ Kubera Zero Policy: no violations"
 
       - name: Enforce single CI authority (migration policy)

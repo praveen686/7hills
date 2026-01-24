@@ -120,39 +120,54 @@ fn load_underlying_inventory(
         )
     })?;
 
-    // Build symbol set for this underlying
+    // Build symbol set for this underlying (normalized to uppercase)
     let symbol_set: HashSet<String> = um
         .instruments
         .iter()
-        .map(|i| i.tradingsymbol.clone())
+        .map(|i| i.tradingsymbol.to_uppercase())
         .collect();
 
-    // Filter tick outputs to those belonging to this underlying
-    let tick_outputs: Vec<TickOutputInfo> = all_tick_outputs
+    // Filter tick outputs to those belonging to this underlying (normalize keys)
+    let mut tick_outputs: Vec<TickOutputInfo> = all_tick_outputs
         .iter()
-        .filter(|te| symbol_set.contains(&te.symbol))
+        .filter(|te| symbol_set.contains(&te.symbol.to_uppercase()))
         .map(|te| TickOutputInfo {
-            symbol: te.symbol.clone(),
+            symbol: te.symbol.to_uppercase(), // Normalize to uppercase
             path: te.path.clone(),
             ticks_written: te.ticks_written,
             has_depth: te.has_depth,
         })
         .collect();
 
+    // Sort tick outputs for deterministic ordering
+    tick_outputs.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+
     // Group instruments by expiry
     let mut instruments_by_expiry: HashMap<NaiveDate, Vec<InstrumentInfo>> = HashMap::new();
     for instr in &um.instruments {
         let info = InstrumentInfo {
-            tradingsymbol: instr.tradingsymbol.clone(),
+            tradingsymbol: instr.tradingsymbol.to_uppercase(), // Normalize
             instrument_token: instr.instrument_token,
             expiry: instr.expiry,
             strike: instr.strike,
-            instrument_type: instr.instrument_type.clone(),
+            instrument_type: instr.instrument_type.to_uppercase(), // Normalize
         };
         instruments_by_expiry
             .entry(instr.expiry)
             .or_default()
             .push(info);
+    }
+
+    // Sort instruments within each expiry for deterministic ordering
+    // Order by: (strike, instrument_type, tradingsymbol)
+    for instruments in instruments_by_expiry.values_mut() {
+        instruments.sort_by(|a, b| {
+            a.strike
+                .partial_cmp(&b.strike)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.instrument_type.cmp(&b.instrument_type))
+                .then_with(|| a.tradingsymbol.cmp(&b.tradingsymbol))
+        });
     }
 
     Ok(SanosUnderlyingInventory {
@@ -196,11 +211,12 @@ impl SanosUnderlyingInventory {
             .unwrap_or_default()
     }
 
-    /// Get tick output path for a symbol.
+    /// Get tick output path for a symbol (case-insensitive lookup).
     pub fn get_tick_path(&self, symbol: &str) -> Option<&str> {
+        let normalized = symbol.to_uppercase();
         self.tick_outputs
             .iter()
-            .find(|t| t.symbol == symbol)
+            .find(|t| t.symbol == normalized)
             .map(|t| t.path.as_str())
     }
 
