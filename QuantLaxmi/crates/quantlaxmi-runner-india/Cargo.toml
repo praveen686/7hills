@@ -13,6 +13,14 @@ name = "replay_india_session"
 path = "src/bin/replay_india_session.rs"
 
 [[bin]]
+name = "run_calendar_carry"
+path = "src/bin/run_calendar_carry.rs"
+
+[[bin]]
+name = "score_calendar_carry"
+path = "src/bin/score_calendar_carry.rs"
+
+[[bin]]
 name = "sanos_single_slice"
 path = "src/bin/sanos_single_slice.rs"
 
