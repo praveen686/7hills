@@ -10,7 +10,7 @@
 //!
 //! ## Logging Architecture
 //! - **stdout**: WARN only by default (prevents log amplification in agent/transcript contexts)
-//! - **file**: INFO for quantlaxmi/kubera crates, WARN for deps (daily rotation)
+//! - **file**: INFO for quantlaxmi crates, WARN for deps (daily rotation)
 //! - **RUST_LOG**: Honored for file logs only; stdout always bounded to WARN
 //!
 //! ## References
@@ -71,7 +71,7 @@ fn ensure_logs_dir() {
 /// - **stdout**: Always WARN only (hard-coded, ignores RUST_LOG)
 ///   - Prevents log amplification when run under agents/transcripts
 ///   - Compact format, no timestamps (human-friendly)
-/// - **file**: INFO for quantlaxmi/kubera, WARN for deps (honors RUST_LOG override)
+/// - **file**: INFO for quantlaxmi, WARN for deps (honors RUST_LOG override)
 ///   - Daily rotation to `logs/{service_name}.log`
 ///   - Non-blocking to minimize capture latency impact
 ///   - Full metadata (timestamps, thread IDs, targets)
@@ -97,7 +97,7 @@ pub fn init_tracing(service_name: &str) -> TracingGuards {
 
     // file: Default to INFO for our crates, WARN for noisy deps.
     // Honors RUST_LOG if set (for debugging), otherwise safe default.
-    let default_file_filter = "quantlaxmi=info,kubera=info,warn";
+    let default_file_filter = "quantlaxmi=info,warn";
     let file_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(default_file_filter));
 
