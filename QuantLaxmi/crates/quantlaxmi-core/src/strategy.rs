@@ -17,27 +17,32 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
 use crate::EventBus;
-use quantlaxmi_models::{MarketEvent, OrderEvent, RiskEvent, SignalEvent};
+use quantlaxmi_models::{OrderEvent, RiskEvent, SignalEvent};
+use quantlaxmi_wal::{WalMarketRecord, MarketPayload};
 use std::sync::Arc;
+
+// Re-export for strategy implementors
+pub use quantlaxmi_wal::{WalMarketRecord as MarketRecord, MarketPayload as Payload};
 
 /// Core interface for systematic trading logic.
 ///
 /// # Lifecycle
 /// 1. `on_start`: Initialization and bus discovery.
-/// 2. `on_tick`/`on_bar`: Processing market dynamics.
+/// 2. `on_market`: Processing market events (quotes, depth, trades).
 /// 3. `on_order_update`/`on_fill`: Managing order status and lifecycle.
 /// 4. `on_signal_timer`: Time-based signal evaluation.
 /// 5. `on_risk_event`: Asynchronous risk violation handling.
 /// 6. `on_stop`: Teardown and cleanup.
+///
+/// # Market Event Type
+/// Uses `WalMarketRecord` (mantissa-based) for canonical market data.
 pub trait Strategy: Send + Sync {
     /// Initializes state when the runner activates.
     fn on_start(&mut self, bus: Arc<EventBus>);
 
-    /// Logic for L1 tick-level events.
-    fn on_tick(&mut self, event: &MarketEvent);
-
-    /// Logic for L2 or OHLCV bar events.
-    fn on_bar(&mut self, event: &MarketEvent);
+    /// Logic for processing market events (quotes, depth updates, trades).
+    /// This replaces the old on_tick/on_bar pattern with unified market events.
+    fn on_market(&mut self, event: &WalMarketRecord);
 
     /// Logic specifically for execution fills.
     fn on_fill(&mut self, fill: &OrderEvent);
@@ -104,15 +109,8 @@ impl StrategyRunner {
             tokio::select! {
                 Ok(event) = market_rx.recv() => {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        match &event.payload {
-                            quantlaxmi_models::MarketPayload::Tick { .. } => {
-                                self.strategy.on_tick(&event);
-                            }
-                            quantlaxmi_models::MarketPayload::Bar { .. } => {
-                                self.strategy.on_bar(&event);
-                            }
-                            _ => {}
-                        }
+                        // Unified market event handler
+                        self.strategy.on_market(&event);
                     }));
                     if let Err(_) = result { panic_count += 1; }
                 }
@@ -167,10 +165,16 @@ impl StrategyRunner {
 /// # Logic
 /// Generates 'Buy' signals when momentum over a window is positive and
 /// 'Sell' signals when it turns negative, provided a position exists.
+///
+/// # Note
+/// This strategy uses mid-price from Quote events (mantissa-based).
+/// Prices are stored as mantissas for exact representation.
 pub struct MomentumStrategy {
     name: String,
     lookback: usize,
-    prices: Vec<f64>,
+    /// Prices stored as mantissas (with their exponent for conversion)
+    prices: Vec<i64>,
+    price_exponent: i8,
     bus: Option<Arc<EventBus>>,
     position: f64,
 }
@@ -182,15 +186,18 @@ impl MomentumStrategy {
             name: "MomentumStrategy".to_string(),
             lookback,
             prices: Vec::new(),
+            price_exponent: -2, // default, will be updated on first quote
             bus: None,
             position: 0.0,
         }
     }
 
-    fn emit_signal(&self, event: &MarketEvent, side: quantlaxmi_models::Side, price: f64) {
+    fn emit_signal(&self, event: &WalMarketRecord, side: quantlaxmi_models::Side, price_mantissa: i64) {
         if let Some(bus) = &self.bus {
+            // Convert mantissa to f64 for signal (SignalEvent still uses f64)
+            let price = (price_mantissa as f64) * 10f64.powi(self.price_exponent as i32);
             let signal = SignalEvent {
-                timestamp: event.exchange_time,
+                timestamp: event.ts,
                 strategy_id: self.name.clone(),
                 symbol: event.symbol.clone(),
                 side,
@@ -216,11 +223,14 @@ impl Strategy for MomentumStrategy {
         self.bus = Some(bus);
     }
 
-    fn on_tick(&mut self, _event: &MarketEvent) {}
+    fn on_market(&mut self, event: &WalMarketRecord) {
+        // Only process Quote events for momentum calculation
+        if let MarketPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } = &event.payload {
+            // Calculate mid-price mantissa
+            let mid_mantissa = (bid_price_mantissa + ask_price_mantissa) / 2;
+            self.price_exponent = *price_exponent;
 
-    fn on_bar(&mut self, event: &MarketEvent) {
-        if let quantlaxmi_models::MarketPayload::Bar { close, .. } = &event.payload {
-            self.prices.push(*close);
+            self.prices.push(mid_mantissa);
             if self.prices.len() > self.lookback {
                 self.prices.remove(0);
             }
@@ -228,14 +238,16 @@ impl Strategy for MomentumStrategy {
             if self.prices.len() == self.lookback {
                 let momentum = self.prices.last().unwrap() - self.prices.first().unwrap();
 
-                if momentum > 0.0 && self.position == 0.0 {
-                    tracing::info!("[{}] BUY signal @ {}", self.name, close);
+                if momentum > 0 && self.position == 0.0 {
+                    let mid_f64 = (mid_mantissa as f64) * 10f64.powi(self.price_exponent as i32);
+                    tracing::info!("[{}] BUY signal @ {}", self.name, mid_f64);
                     self.position = 1.0;
-                    self.emit_signal(event, quantlaxmi_models::Side::Buy, *close);
-                } else if momentum < 0.0 && self.position > 0.0 {
-                    tracing::info!("[{}] SELL signal @ {}", self.name, close);
+                    self.emit_signal(event, quantlaxmi_models::Side::Buy, mid_mantissa);
+                } else if momentum < 0 && self.position > 0.0 {
+                    let mid_f64 = (mid_mantissa as f64) * 10f64.powi(self.price_exponent as i32);
+                    tracing::info!("[{}] SELL signal @ {}", self.name, mid_f64);
                     self.position = 0.0;
-                    self.emit_signal(event, quantlaxmi_models::Side::Sell, *close);
+                    self.emit_signal(event, quantlaxmi_models::Side::Sell, mid_mantissa);
                 }
             }
         }

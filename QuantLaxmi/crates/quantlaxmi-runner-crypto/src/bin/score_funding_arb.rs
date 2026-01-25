@@ -31,8 +31,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
+use quantlaxmi_models::events::QuoteEvent;
 use quantlaxmi_runner_crypto::binance_funding_capture::FundingEvent;
-use quantlaxmi_runner_crypto::quote::QuoteEvent;
 
 /// Type alias for symbol quote cache (spot quotes, perp quotes, funding events).
 type SymbolQuoteCache = HashMap<String, (Vec<QuoteEvent>, Vec<QuoteEvent>, Vec<FundingEvent>)>;
@@ -963,6 +963,7 @@ fn write_jsonl<T: Serialize>(path: &PathBuf, items: &[T]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quantlaxmi_models::events::CorrelationContext;
 
     /// Verify that TradeRecord serialization is deterministic.
     #[test]
@@ -1222,6 +1223,8 @@ mod tests {
             ask_qty_mantissa: 100000,
             price_exponent: -2,
             qty_exponent: -8,
+            venue: "binance".to_string(),
+            ctx: CorrelationContext::default(),
         }];
 
         // Quote from 1000ms ago, max age 500ms -> should be stale

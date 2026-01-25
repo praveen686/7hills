@@ -25,6 +25,7 @@ sha2 = { workspace = true }
 quantlaxmi-models = { path = "../quantlaxmi-models" }
 quantlaxmi-core = { path = "../quantlaxmi-core" }
 quantlaxmi-options = { path = "../quantlaxmi-options" }
+quantlaxmi-wal = { path = "../quantlaxmi-wal" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

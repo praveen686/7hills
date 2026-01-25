@@ -26,6 +26,7 @@ hex = { workspace = true }
 quantlaxmi-models = { path = "../quantlaxmi-models" }
 quantlaxmi-core = { path = "../quantlaxmi-core" }
 quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
+quantlaxmi-wal = { path = "../quantlaxmi-wal" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

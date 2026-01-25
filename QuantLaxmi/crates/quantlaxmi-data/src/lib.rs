@@ -267,8 +267,9 @@ impl VpinCalculator {
 }
 
 pub mod simulator {
-    use super::*;
     use quantlaxmi_core::EventBus;
+    use quantlaxmi_wal::{CorrelationContext, MarketPayload, WalMarketRecord};
+    use chrono::Utc;
     use rand::Rng;
     use std::sync::Arc;
     use tokio::time::{sleep, Duration as TokioDuration};
@@ -286,15 +287,21 @@ pub mod simulator {
                 let change = (rng.r#gen::<f64>() - 0.5) * 0.1;
                 current_price += change;
 
-                let tick = MarketEvent {
-                    exchange_time: Utc::now(),
-                    local_time: Utc::now(),
+                // Convert to mantissa-based values (exponent -2 = cents)
+                let price_mantissa = (current_price * 100.0) as i64;
+                let qty_mantissa = (rng.r#gen_range(1.0..10.0) * 100_000_000.0) as i64;
+                let is_buyer_maker = change <= 0.0; // sell aggressor = buyer is maker
+
+                let tick = WalMarketRecord {
+                    ts: Utc::now(),
                     symbol: symbol.clone(),
-                    payload: MarketPayload::Tick {
-                        price: current_price,
-                        size: rng.r#gen_range(1.0..10.0),
-                        side: if change > 0.0 { Side::Buy } else { Side::Sell },
+                    payload: MarketPayload::Trade {
+                        trade_id: 0,
+                        price_mantissa,
+                        qty_mantissa,
+                        is_buyer_maker,
                     },
+                    ctx: CorrelationContext::default(),
                 };
                 (tick, rng.r#gen_range(100..500))
             };

@@ -4240,7 +4240,9 @@ impl crate::Strategy for HydraStrategy {
         self.bus = Some(bus);
     }
 
-    fn on_tick(&mut self, event: &MarketEvent) {
+    fn on_market(&mut self, event: &quantlaxmi_wal::WalMarketRecord) {
+        use quantlaxmi_wal::MarketPayload as WalPayload;
+
         // --- V2: VENUE AUTO-CALIBRATION ---
         if self.config.venue == ExchangeProfile::Default {
             if event.symbol.contains("USDT") {
@@ -4264,59 +4266,46 @@ impl crate::Strategy for HydraStrategy {
         // V2 DEBUG: Verify tick reception
         if self.tick_count % 100 == 0 {
             info!(
-                "[HYDRA] on_tick #{} for {} - {} experts active",
+                "[HYDRA] on_market #{} for {} - {} experts active",
                 self.tick_count,
                 event.symbol,
                 self.experts.len()
             );
         }
 
-        // Update regime engine
-        self.regime_engine.update(event);
+        // Extract price from WalMarketRecord (mantissa-based)
+        // NOTE: Regime engine and experts need separate migration to WalMarketRecord
+        let (price, exponent) = match &event.payload {
+            WalPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } => {
+                // Mid-price
+                let mid = (bid_price_mantissa + ask_price_mantissa) / 2;
+                (mid, *price_exponent)
+            }
+            WalPayload::Trade { price_mantissa, .. } => {
+                (*price_mantissa, -2) // Assume -2 exponent for trades
+            }
+            WalPayload::Depth { bids, asks, .. } => {
+                // Best bid/ask mid-price
+                let bid = bids.first().map(|l| l.price).unwrap_or(0);
+                let ask = asks.first().map(|l| l.price).unwrap_or(0);
+                let mid = if bid > 0 && ask > 0 { (bid + ask) / 2 } else { bid.max(ask) };
+                (mid, -2)
+            }
+        };
 
-        // Update all experts
-        for expert in &mut self.experts {
-            expert.update_market(event);
-        }
+        // Convert to f64 for execute_logic
+        let price_f64 = (price as f64) * 10f64.powi(exponent as i32);
 
         // Execute trading logic
-        if let MarketPayload::Tick { price, .. } = &event.payload {
-            self.execute_logic(
-                event.exchange_time.timestamp_millis(),
-                &event.symbol,
-                *price,
-            );
-        }
-        if let MarketPayload::Trade { price, .. } = &event.payload {
-            self.execute_logic(
-                event.exchange_time.timestamp_millis(),
-                &event.symbol,
-                *price,
-            );
-        }
+        self.execute_logic(
+            event.ts.timestamp_millis(),
+            &event.symbol,
+            price_f64,
+        );
 
         // Periodic meta-allocator update
         if self.tick_count % 100 == 0 {
             self.allocator.update_weights(&self.ledger, self.tick_count);
-        }
-    }
-
-    fn on_bar(&mut self, event: &MarketEvent) {
-        // Update regime engine
-        self.regime_engine.update(event);
-
-        // Update all experts
-        for expert in &mut self.experts {
-            expert.update_market(event);
-        }
-
-        // Execute on bar close
-        if let MarketPayload::Bar { close, .. } = &event.payload {
-            self.execute_logic(
-                event.exchange_time.timestamp_millis(),
-                &event.symbol,
-                *close,
-            );
         }
     }
 

@@ -35,7 +35,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 use clap::Parser;
-use quantlaxmi_runner_crypto::quote::QuoteEvent;
+use quantlaxmi_models::events::QuoteEvent;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};

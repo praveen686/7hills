@@ -29,7 +29,8 @@ use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate, Timelike, Utc, Weekday};
 use quantlaxmi_core::EventBus;
 use quantlaxmi_core::connector::MarketConnector;
-use quantlaxmi_models::{L2Level, L2Update, MarketEvent, MarketPayload, Side};
+use quantlaxmi_models::L2Level;
+use quantlaxmi_wal::{CorrelationContext, DepthLevel, MarketPayload, WalMarketRecord};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::process::Command;
@@ -770,16 +771,21 @@ impl ZerodhaConnector {
                                 .cloned()
                                 .unwrap_or_else(|| format!("TOKEN:{}", tick.token));
 
-                            // Publish tick event
-                            let tick_event = MarketEvent {
-                                exchange_time: Utc::now(),
-                                local_time: Utc::now(),
+                            // Publish tick event as Trade (mantissa-based)
+                            // Convert float prices to mantissa (exponent -2 = paisa for INR)
+                            let price_mantissa = (tick.ltp * 100.0) as i64;
+                            let qty_mantissa = tick.volume as i64;
+
+                            let tick_event = WalMarketRecord {
+                                ts: Utc::now(),
                                 symbol: symbol.clone(),
-                                payload: MarketPayload::Tick {
-                                    price: tick.ltp,
-                                    size: tick.volume as f64,
-                                    side: Side::Buy,
+                                payload: MarketPayload::Trade {
+                                    trade_id: 0,
+                                    price_mantissa,
+                                    qty_mantissa,
+                                    is_buyer_maker: false, // Zerodha doesn't provide aggressor info
                                 },
+                                ctx: CorrelationContext::default(),
                             };
 
                             if let Err(e) = self.bus.publish_market(tick_event).await {
@@ -788,16 +794,27 @@ impl ZerodhaConnector {
 
                             // Publish L2 update if depth data is available
                             if !tick.bids.is_empty() || !tick.asks.is_empty() {
-                                let l2_event = MarketEvent {
-                                    exchange_time: Utc::now(),
-                                    local_time: Utc::now(),
+                                // Convert L2Levels (float) to DepthLevels (mantissa)
+                                let bids: Vec<DepthLevel> = tick.bids.iter().map(|l| DepthLevel {
+                                    price: (l.price * 100.0) as i64, // paisa
+                                    qty: l.size as i64,
+                                }).collect();
+                                let asks: Vec<DepthLevel> = tick.asks.iter().map(|l| DepthLevel {
+                                    price: (l.price * 100.0) as i64,
+                                    qty: l.size as i64,
+                                }).collect();
+
+                                let l2_event = WalMarketRecord {
+                                    ts: Utc::now(),
                                     symbol: symbol.clone(),
-                                    payload: MarketPayload::L2Update(L2Update {
-                                        bids: tick.bids.clone(),
-                                        asks: tick.asks.clone(),
-                                        first_update_id: 0, // Zerodha doesn't provide sequence numbers
+                                    payload: MarketPayload::Depth {
+                                        first_update_id: 0,
                                         last_update_id: 0,
-                                    }),
+                                        bids,
+                                        asks,
+                                        is_snapshot: false, // Zerodha sends updates
+                                    },
+                                    ctx: CorrelationContext::default(),
                                 };
 
                                 if let Err(e) = self.bus.publish_market(l2_event).await {

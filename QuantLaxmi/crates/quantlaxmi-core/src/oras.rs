@@ -17,7 +17,7 @@
 //! - **Self-Correction**: Online weight adjustment based on execution feedback (Slippage).
 
 use crate::EventBus;
-use quantlaxmi_models::{MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side, SignalEvent};
+use quantlaxmi_models::{OrderEvent, OrderPayload, Side, SignalEvent};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tracing::info;
@@ -200,9 +200,15 @@ impl crate::Strategy for OrasStrategy {
         self.bus = Some(bus);
     }
 
-    fn on_tick(&mut self, event: &MarketEvent) {
-        if let MarketPayload::Tick { price, side, .. } = &event.payload {
-            self.classifier.prices.push_back(*price);
+    fn on_market(&mut self, event: &quantlaxmi_wal::WalMarketRecord) {
+        use quantlaxmi_wal::MarketPayload;
+
+        // Handle Trade events for ORAS strategy (mantissa-based)
+        if let MarketPayload::Trade { price_mantissa, is_buyer_maker, .. } = &event.payload {
+            // Convert mantissa to f64 (assume exponent -2 for now)
+            let price = (*price_mantissa as f64) * 0.01;
+
+            self.classifier.prices.push_back(price);
             if self.classifier.prices.len() > self.classifier.window {
                 self.classifier.prices.pop_front();
             }
@@ -215,11 +221,8 @@ impl crate::Strategy for OrasStrategy {
             };
             let trend_dir = momentum.signum();
 
-            // Estimate Imbalance from Tick Side
-            let tick_imb = match side {
-                Side::Buy => 0.5,
-                Side::Sell => -0.5,
-            };
+            // Estimate Imbalance from Trade side (buyer_maker = sell aggressor)
+            let tick_imb = if *is_buyer_maker { -0.5 } else { 0.5 };
 
             // Inject into MicroAlpha buffer
             self.micro_alpha.imbalance_buffer.push_back(tick_imb);
@@ -246,18 +249,14 @@ impl crate::Strategy for OrasStrategy {
                     Side::Sell
                 };
                 self.emit_signal(
-                    event.exchange_time.timestamp_millis(),
+                    event.ts.timestamp_millis(),
                     &event.symbol,
                     side,
-                    *price,
+                    price,
                 );
                 self.position = if final_signal > 0.0 { 0.5 } else { -0.5 };
             }
         }
-    }
-
-    fn on_bar(&mut self, _event: &MarketEvent) {
-        // Hierarchical alpha could go here
     }
 
     fn on_fill(&mut self, fill: &OrderEvent) {

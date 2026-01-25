@@ -22,7 +22,7 @@
 //! ```
 
 use quantlaxmi_models::{
-    MarketEvent, MarketPayload, OrderEvent, OrderPayload, OrderStatus, Side, SignalEvent,
+    OrderEvent, OrderPayload, OrderStatus, Side, SignalEvent,
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -215,16 +215,27 @@ impl Strategy for AeonStrategy {
         self.hydra.on_start(bus);
     }
 
-    fn on_tick(&mut self, event: &MarketEvent) {
-        let price = match &event.payload {
-            MarketPayload::Tick { price, .. } => *price,
-            MarketPayload::Trade { price, .. } => *price,
-            _ => {
-                // Pass-through other events (like L2) to HYDRA without gating
-                self.hydra.on_tick(event);
-                return;
+    fn on_market(&mut self, event: &quantlaxmi_wal::WalMarketRecord) {
+        use quantlaxmi_wal::MarketPayload as WalPayload;
+
+        // Extract price from WalMarketRecord (mantissa-based)
+        let (price_mantissa, exponent) = match &event.payload {
+            WalPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } => {
+                let mid = (bid_price_mantissa + ask_price_mantissa) / 2;
+                (mid, *price_exponent)
+            }
+            WalPayload::Trade { price_mantissa, .. } => {
+                (*price_mantissa, -2)
+            }
+            WalPayload::Depth { bids, asks, .. } => {
+                let bid = bids.first().map(|l| l.price).unwrap_or(0);
+                let ask = asks.first().map(|l| l.price).unwrap_or(0);
+                let mid = if bid > 0 && ask > 0 { (bid + ask) / 2 } else { bid.max(ask) };
+                (mid, -2)
             }
         };
+
+        let price = (price_mantissa as f64) * 10f64.powi(exponent as i32);
 
         // Update state tracking
         self.last_price = price;
@@ -236,6 +247,8 @@ impl Strategy for AeonStrategy {
         }
 
         if self.prices.len() < self.config.lookback {
+            // Pass through to HYDRA even during warmup
+            self.hydra.on_market(event);
             return;
         }
 
@@ -263,8 +276,8 @@ impl Strategy for AeonStrategy {
         // Propagate predictability to HYDRA for entropy-adjusted scaling
         self.hydra.set_aeon_bif_score(predictability);
 
-        // Update HYDRA experts
-        self.hydra.on_tick(event);
+        // Update HYDRA
+        self.hydra.on_market(event);
 
         // Gating Logic based on FTI
         let is_trend = fti_score > self.config.fti_trend_threshold;
@@ -289,10 +302,6 @@ impl Strategy for AeonStrategy {
 
         // Gates are open - allow trading
         self.manage_position(true, fti_score, price, &event.symbol.clone());
-    }
-
-    fn on_bar(&mut self, event: &MarketEvent) {
-        self.hydra.on_bar(event);
     }
 
     fn on_fill(&mut self, fill: &OrderEvent) {

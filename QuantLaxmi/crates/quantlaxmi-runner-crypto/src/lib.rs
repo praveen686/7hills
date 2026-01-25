@@ -23,9 +23,8 @@ pub mod binance_perp_capture;
 pub mod binance_perp_session;
 pub mod binance_sbe_depth_capture;
 pub mod binance_trades_capture;
-pub mod fixed_point;
 pub mod paper_trading;
-pub mod quote;
+pub mod segment_manifest;
 pub mod session_capture;
 
 use anyhow::Context;
@@ -1153,6 +1152,10 @@ async fn run_capture_perp_session(
     price_exponent: i8,
     qty_exponent: i8,
 ) -> anyhow::Result<()> {
+    use segment_manifest::{EventCounts, ManagedSegment, StopReason};
+    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::Arc;
+
     // Parse symbols
     let symbol_list: Vec<String> = symbols
         .split(',')
@@ -1166,16 +1169,58 @@ async fn run_capture_perp_session(
         ));
     }
 
+    let out_path = std::path::Path::new(out_dir);
+    std::fs::create_dir_all(out_path)?;
+
+    // Start managed segment with manifest
+    let mut managed = ManagedSegment::start(out_path, &symbol_list, "capture-perp-session").await?;
+    let segment_dir = managed.segment_dir().to_path_buf();
+    let segment_id = managed.segment_id().await;
+
     tracing::info!("=== Perp Session Capture ===");
+    tracing::info!("Segment ID: {}", segment_id);
     tracing::info!("Symbols: {:?}", symbol_list);
     tracing::info!("Duration: {} seconds", duration_secs);
     tracing::info!("Include spot: {}", include_spot);
     tracing::info!("Include depth: {}", include_depth);
-    tracing::info!("Output: {}", out_dir);
+    tracing::info!("Output: {:?}", segment_dir);
 
-    let config = binance_perp_session::PerpSessionConfig {
-        symbols: symbol_list,
-        out_dir: std::path::PathBuf::from(out_dir),
+    // Set up signal handling
+    // 0 = running, 1 = SIGINT, 2 = SIGTERM, 3 = SIGHUP
+    let signal_received = Arc::new(AtomicU8::new(0));
+    let signal_for_int = Arc::clone(&signal_received);
+    let signal_for_term = Arc::clone(&signal_received);
+    let signal_for_hup = Arc::clone(&signal_received);
+
+    // SIGINT handler (Ctrl+C)
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            signal_for_int.store(1, Ordering::SeqCst);
+        }
+    });
+
+    // SIGTERM handler
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigterm = signal(SignalKind::terminate())?;
+        tokio::spawn(async move {
+            sigterm.recv().await;
+            signal_for_term.store(2, Ordering::SeqCst);
+        });
+
+        let mut sighup = signal(SignalKind::hangup())?;
+        tokio::spawn(async move {
+            sighup.recv().await;
+            signal_for_hup.store(3, Ordering::SeqCst);
+        });
+    }
+
+    // Run capture with signal monitoring
+    // Capture runs in the segment directory (not out_dir)
+    let capture_config = binance_perp_session::PerpSessionConfig {
+        symbols: symbol_list.clone(),
+        out_dir: segment_dir.parent().unwrap_or(out_path).to_path_buf(),
         duration_secs,
         include_spot,
         include_depth,
@@ -1183,22 +1228,98 @@ async fn run_capture_perp_session(
         qty_exponent,
     };
 
-    let stats = binance_perp_session::capture_perp_session(config).await?;
+    // Run capture with signal checking
+    let signal_check = Arc::clone(&signal_received);
+    let capture_result = tokio::select! {
+        result = binance_perp_session::capture_perp_session(capture_config) => {
+            result
+        }
+        _ = async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                if signal_check.load(Ordering::SeqCst) != 0 {
+                    break;
+                }
+            }
+        } => {
+            // Signal received - will handle below
+            Err(anyhow::anyhow!("Signal received"))
+        }
+    };
+
+    // Determine stop reason and collect stats
+    let signal_val = signal_received.load(Ordering::SeqCst);
+    let (stop_reason, stats) = match (signal_val, &capture_result) {
+        (0, Ok(stats)) => (StopReason::NormalCompletion, Some(stats.clone())),
+        (1, _) => {
+            tracing::info!("SIGINT received - finalizing segment...");
+            (StopReason::UserInterrupt, None)
+        }
+        (2, _) => {
+            tracing::info!("SIGTERM received - finalizing segment...");
+            (StopReason::ExternalKillSigterm, None)
+        }
+        (3, _) => {
+            tracing::info!("SIGHUP received - finalizing segment...");
+            (StopReason::ExternalKillSighup, None)
+        }
+        (_, Err(e)) => {
+            tracing::error!("Capture error: {}", e);
+            (StopReason::NetworkError, None)
+        }
+        (_, Ok(stats)) => {
+            // Unexpected signal value but capture succeeded
+            tracing::warn!("Unexpected signal value: {}", signal_val);
+            (StopReason::NormalCompletion, Some(stats.clone()))
+        }
+    };
+
+    // Collect event counts
+    let events = if let Some(ref s) = stats {
+        EventCounts {
+            spot_quotes: s.total_spot_events,
+            perp_quotes: s.total_perp_events,
+            funding: s.total_funding_events,
+            depth: 0,
+        }
+    } else {
+        // Count events from files if capture was interrupted
+        let mut events = EventCounts::default();
+        for symbol in &symbol_list {
+            let sym_dir = segment_dir.join(symbol.to_uppercase());
+            if let Ok(content) = std::fs::read_to_string(sym_dir.join("spot_quotes.jsonl")) {
+                events.spot_quotes += content.lines().count();
+            }
+            if let Ok(content) = std::fs::read_to_string(sym_dir.join("perp_quotes.jsonl")) {
+                events.perp_quotes += content.lines().count();
+            }
+            if let Ok(content) = std::fs::read_to_string(sym_dir.join("funding.jsonl")) {
+                events.funding += content.lines().count();
+            }
+        }
+        events
+    };
+
+    // Finalize segment manifest
+    managed.finalize(stop_reason, events.clone()).await?;
 
     tracing::info!("\n=== Session Summary ===");
-    tracing::info!("Session ID: {}", &stats.session_id[..8]);
-    tracing::info!("Duration: {:.1}s", stats.duration_secs);
-    tracing::info!("Total spot events: {}", stats.total_spot_events);
-    tracing::info!("Total perp events: {}", stats.total_perp_events);
-    tracing::info!("Total funding events: {}", stats.total_funding_events);
+    tracing::info!("Segment ID: {}", segment_id);
+    tracing::info!("Stop reason: {}", stop_reason);
+    tracing::info!("Total spot events: {}", events.spot_quotes);
+    tracing::info!("Total perp events: {}", events.perp_quotes);
+    tracing::info!("Total funding events: {}", events.funding);
 
-    for sym_stat in &stats.symbols {
-        tracing::info!(
-            "  {}: basis={:.2}bps, funding={:.4}%",
-            sym_stat.symbol,
-            sym_stat.basis_bps,
-            sym_stat.last_funding_rate * 100.0
-        );
+    if let Some(stats) = stats {
+        tracing::info!("Duration: {:.1}s", stats.duration_secs);
+        for sym_stat in &stats.symbols {
+            tracing::info!(
+                "  {}: basis={:.2}bps, funding={:.4}%",
+                sym_stat.symbol,
+                sym_stat.basis_bps,
+                sym_stat.last_funding_rate * 100.0
+            );
+        }
     }
 
     Ok(())

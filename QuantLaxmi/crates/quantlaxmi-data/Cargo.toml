@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 quantlaxmi-models = { path = "../quantlaxmi-models" }
 quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-wal = { path = "../quantlaxmi-wal" }
 tokio = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }

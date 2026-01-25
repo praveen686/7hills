@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-wal = { path = "../quantlaxmi-wal" }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

@@ -13,7 +13,7 @@
 //! It generates zero trades and only emits heartbeat signals for pipeline continuity.
 
 use crate::{EventBus, Strategy};
-use quantlaxmi_models::{MarketEvent, MarketPayload, OrderEvent};
+use quantlaxmi_models::OrderEvent;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
@@ -355,40 +355,34 @@ impl Strategy for NullObserverStrategy {
         self.bus = Some(bus);
     }
 
-    fn on_tick(&mut self, event: &MarketEvent) {
+    fn on_market(&mut self, event: &quantlaxmi_wal::WalMarketRecord) {
+        use quantlaxmi_wal::MarketPayload;
+
         self.total_events += 1;
 
-        // Extract bid/ask from L2 snapshot
-        let (bid, ask) = match &event.payload {
-            MarketPayload::L2Snapshot(snap) => {
-                let bid = snap.bids.first().map(|l| l.price).unwrap_or(0.0);
-                let ask = snap.asks.first().map(|l| l.price).unwrap_or(0.0);
-                (bid, ask)
+        // Extract bid/ask from canonical WalMarketRecord (mantissa-based)
+        let (bid, ask, exponent) = match &event.payload {
+            MarketPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } => {
+                (*bid_price_mantissa, *ask_price_mantissa, *price_exponent)
             }
-            MarketPayload::L2Update(update) => {
-                let bid = update
-                    .bids
-                    .iter()
-                    .find(|l| l.size > 0.0)
-                    .map(|l| l.price)
-                    .unwrap_or(0.0);
-                let ask = update
-                    .asks
-                    .iter()
-                    .find(|l| l.size > 0.0)
-                    .map(|l| l.price)
-                    .unwrap_or(0.0);
-                (bid, ask)
+            MarketPayload::Depth { bids, asks, .. } => {
+                let bid = bids.first().map(|l| l.price).unwrap_or(0);
+                let ask = asks.first().map(|l| l.price).unwrap_or(0);
+                // Depth levels are mantissas; assume exponent -2 (configurable later)
+                (bid, ask, -2)
             }
-            MarketPayload::Tick { price, .. } => (*price, *price), // Tick has single price, use as both bid/ask
-            _ => return,
+            MarketPayload::Trade { price_mantissa, .. } => {
+                // Trade has single price, use as both bid/ask
+                (*price_mantissa, *price_mantissa, -2)
+            }
         };
 
-        self.observe(&event.symbol, event.exchange_time, bid, ask);
-    }
+        // Convert mantissas to f64 for legacy observe() method
+        let scale = 10f64.powi(exponent as i32);
+        let bid_f64 = (bid as f64) * scale;
+        let ask_f64 = (ask as f64) * scale;
 
-    fn on_bar(&mut self, _event: &MarketEvent) {
-        // Options don't use bars
+        self.observe(&event.symbol, event.ts, bid_f64, ask_f64);
     }
 
     fn on_fill(&mut self, _fill: &OrderEvent) {

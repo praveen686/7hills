@@ -11,7 +11,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use futures::{SinkExt, StreamExt};
 use quantlaxmi_core::EventBus;
-use quantlaxmi_models::{L2Level, L2Snapshot, L2Update, MarketEvent, MarketPayload, Side};
+use quantlaxmi_models::{L2Level, L2Snapshot, L2Update};
+use quantlaxmi_wal::{CorrelationContext, DepthLevel, MarketPayload, WalMarketRecord};
 use serde::Deserialize;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -246,13 +247,29 @@ impl SymbolHandler {
                         match self.fetch_snapshot().await {
                             Ok((sid, snapshot)) => {
                                 snapshot_update_id = sid;
+                                // Convert L2Snapshot (float) to mantissa-based DepthLevels
+                                let bids: Vec<DepthLevel> = snapshot.bids.iter().map(|l| DepthLevel {
+                                    price: (l.price * 100.0) as i64, // cents
+                                    qty: (l.size * 100_000_000.0) as i64, // satoshis
+                                }).collect();
+                                let asks: Vec<DepthLevel> = snapshot.asks.iter().map(|l| DepthLevel {
+                                    price: (l.price * 100.0) as i64,
+                                    qty: (l.size * 100_000_000.0) as i64,
+                                }).collect();
+
                                 let _ = self
                                     .bus
-                                    .publish_market(MarketEvent {
-                                        exchange_time: Utc::now(),
-                                        local_time: Utc::now(),
+                                    .publish_market(WalMarketRecord {
+                                        ts: Utc::now(),
                                         symbol: self.symbol.clone(),
-                                        payload: MarketPayload::L2Snapshot(snapshot),
+                                        payload: MarketPayload::Depth {
+                                            first_update_id: 0,
+                                            last_update_id: snapshot_update_id,
+                                            bids,
+                                            asks,
+                                            is_snapshot: true,
+                                        },
+                                        ctx: CorrelationContext::default(),
                                     })
                                     .await;
                                 sync_state = SyncState::Synchronizing;
@@ -387,27 +404,26 @@ impl SymbolHandler {
             Ok(trade) => {
                 self.stats.trades_decoded.fetch_add(1, Ordering::Relaxed);
 
-                let aggressor_side = if trade.is_buyer_maker {
-                    Side::Sell
-                } else {
-                    Side::Buy
-                };
                 let exchange_time = trade.exchange_time();
-                let now = Utc::now();
+
+                // Convert to mantissa-based values
+                let price_mantissa = (trade.price * 100.0) as i64; // cents
+                let qty_mantissa = (trade.quantity * 100_000_000.0) as i64; // satoshis
 
                 let bus = self.bus.clone();
                 let symbol = self.symbol.clone();
                 tokio::spawn(async move {
                     let _ = bus
-                        .publish_market(MarketEvent {
-                            exchange_time,
-                            local_time: now,
+                        .publish_market(WalMarketRecord {
+                            ts: exchange_time,
                             symbol,
-                            payload: MarketPayload::Tick {
-                                price: trade.price,
-                                size: trade.quantity,
-                                side: aggressor_side,
+                            payload: MarketPayload::Trade {
+                                trade_id: 0, // Not available from SBE decoder
+                                price_mantissa,
+                                qty_mantissa,
+                                is_buyer_maker: trade.is_buyer_maker,
                             },
+                            ctx: CorrelationContext::default(),
                         })
                         .await;
                 });
@@ -493,15 +509,34 @@ impl SymbolHandler {
     }
 
     async fn publish_depth_update(&self, update: L2Update, exchange_time: chrono::DateTime<Utc>) {
+        // Convert L2Update (float) to mantissa-based DepthLevels
+        let bids: Vec<DepthLevel> = update.bids.iter().map(|l| DepthLevel {
+            price: (l.price * 100.0) as i64, // cents
+            qty: (l.size * 100_000_000.0) as i64, // satoshis
+        }).collect();
+        let asks: Vec<DepthLevel> = update.asks.iter().map(|l| DepthLevel {
+            price: (l.price * 100.0) as i64,
+            qty: (l.size * 100_000_000.0) as i64,
+        }).collect();
+
+        let first_update_id = update.first_update_id;
+        let last_update_id = update.last_update_id;
+
         let bus = self.bus.clone();
         let symbol = self.symbol.clone();
         tokio::spawn(async move {
             let _ = bus
-                .publish_market(MarketEvent {
-                    exchange_time,
-                    local_time: Utc::now(),
+                .publish_market(WalMarketRecord {
+                    ts: exchange_time,
                     symbol,
-                    payload: MarketPayload::L2Update(update),
+                    payload: MarketPayload::Depth {
+                        first_update_id,
+                        last_update_id,
+                        bids,
+                        asks,
+                        is_snapshot: false,
+                    },
+                    ctx: CorrelationContext::default(),
                 })
                 .await;
         });

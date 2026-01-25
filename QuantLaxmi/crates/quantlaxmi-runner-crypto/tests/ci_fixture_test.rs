@@ -18,13 +18,16 @@ fn fixture_path() -> PathBuf {
 /// Test that the fixture session manifest loads correctly.
 #[test]
 fn test_fixture_manifest_loads() {
-    use quantlaxmi_runner_crypto::binance_perp_session::load_perp_session_manifest;
+    use quantlaxmi_runner_crypto::binance_perp_session::{
+        load_perp_session_manifest, PERP_SESSION_MANIFEST_SCHEMA_VERSION,
+    };
 
     let session_dir = fixture_path();
     let manifest =
         load_perp_session_manifest(&session_dir).expect("Failed to load fixture manifest");
 
-    assert_eq!(manifest.schema_version, 2);
+    // Assert against the canonical constant, not a magic number
+    assert_eq!(manifest.schema_version, PERP_SESSION_MANIFEST_SCHEMA_VERSION);
     assert_eq!(manifest.session_id, "fixture-test-session");
     assert_eq!(manifest.symbols.len(), 1);
     assert_eq!(manifest.symbols[0].symbol, "BTCUSDT");

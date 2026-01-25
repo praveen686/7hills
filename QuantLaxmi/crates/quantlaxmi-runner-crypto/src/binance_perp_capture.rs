@@ -21,8 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use crate::fixed_point::parse_to_mantissa_pure;
-use crate::quote::QuoteEvent;
+use quantlaxmi_models::events::{parse_to_mantissa_pure, CorrelationContext, QuoteEvent};
 
 /// Perp depth event (L2 order book update).
 /// Uses the same structure as spot DepthEvent for compatibility.
@@ -128,7 +127,7 @@ struct FuturesBookTicker {
 
 /// Parse string to mantissa using deterministic fixed-point (no float intermediates).
 pub fn parse_to_mantissa(s: &str, exponent: i8) -> Result<i64> {
-    parse_to_mantissa_pure(s, exponent)
+    parse_to_mantissa_pure(s, exponent).map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 fn ms_to_dt(ms: i64) -> DateTime<Utc> {
@@ -230,6 +229,8 @@ pub async fn capture_perp_bookticker_jsonl(
             ask_qty_mantissa: parse_to_mantissa(&ev.ask_qty, BINANCE_QTY_EXP)?,
             price_exponent: BINANCE_PRICE_EXP,
             qty_exponent: BINANCE_QTY_EXP,
+            venue: "binance_perp".to_string(),
+            ctx: CorrelationContext::default(),
         };
 
         let line = serde_json::to_string(&quote)?;

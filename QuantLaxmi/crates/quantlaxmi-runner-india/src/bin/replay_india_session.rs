@@ -10,7 +10,7 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use quantlaxmi_core::{EventBus, NullObserverStrategy, Portfolio, Strategy};
+use quantlaxmi_core::{EventBus, NullObserverStrategy, Portfolio, Strategy, WalMarketRecord, MarketPayload as WalMarketPayload};
 use quantlaxmi_executor::{CommissionModel, RiskEnvelope, SimulatedExchange};
 use quantlaxmi_models::{
     L2Level, L2Snapshot, MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side,
@@ -76,6 +76,7 @@ fn default_price_exponent() -> i8 {
 /// Wrapper for sorting events by timestamp (min-heap)
 struct TimestampedEvent {
     event: MarketEvent,
+    wal_record: WalMarketRecord,
 }
 
 impl PartialEq for TimestampedEvent {
@@ -125,6 +126,23 @@ fn tick_to_market_event(tick: &TickEvent) -> MarketEvent {
         local_time: tick.ts,
         symbol: tick.tradingsymbol.clone(),
         payload,
+    }
+}
+
+/// Convert TickEvent to WalMarketRecord (mantissa-based for strategy)
+fn tick_to_wal_record(tick: &TickEvent) -> WalMarketRecord {
+    WalMarketRecord {
+        ts: tick.ts,
+        symbol: tick.tradingsymbol.clone(),
+        payload: WalMarketPayload::Quote {
+            bid_price_mantissa: tick.bid_price,
+            ask_price_mantissa: tick.ask_price,
+            bid_qty_mantissa: tick.bid_qty as i64,
+            ask_qty_mantissa: tick.ask_qty as i64,
+            price_exponent: tick.price_exponent,
+            qty_exponent: 0, // qty is whole units
+        },
+        ctx: Default::default(),
     }
 }
 
@@ -341,8 +359,10 @@ async fn main() -> Result<()> {
         let tick_events = load_tick_events(&ticks_path)?;
         for tick in tick_events {
             let market_event = tick_to_market_event(&tick);
+            let wal_record = tick_to_wal_record(&tick);
             event_heap.push(TimestampedEvent {
                 event: market_event,
+                wal_record,
             });
             total_events += 1;
         }
@@ -401,6 +421,7 @@ async fn main() -> Result<()> {
     // Replay loop
     while let Some(timestamped) = event_heap.pop() {
         let event = timestamped.event;
+        let wal_record = timestamped.wal_record;
         metrics.market_events += 1;
 
         // Track last price for equity calculation
@@ -457,8 +478,8 @@ async fn main() -> Result<()> {
             last_sample_ts = Some(event.exchange_time);
         }
 
-        // 1. Feed strategy
-        strategy.on_tick(&event);
+        // 1. Feed strategy (using canonical WalMarketRecord)
+        strategy.on_market(&wal_record);
 
         // 2. Feed exchange
         exchange.on_market_data(event.clone()).await?;

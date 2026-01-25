@@ -221,6 +221,55 @@ pub struct PerpSessionStats {
 /// Any manifest without this exact value is considered legacy and must be rejected.
 pub const CANONICAL_QUOTE_SCHEMA: &str = "canonical_v1";
 
+/// =============================================================================
+/// PerpSessionManifest – Compatibility Matrix
+/// =============================================================================
+///
+/// Purpose
+/// - Defines the on-disk contract for perp capture sessions (manifest + stream files).
+/// - The loader MUST enforce schema_version and quote_schema so downstream
+///   pipelines never silently ingest ambiguous/legacy layouts.
+///
+/// Versioning rules
+/// - `schema_version` is a hard compatibility boundary:
+///     - If manifest.schema_version != PERP_SESSION_MANIFEST_SCHEMA_VERSION → HARD FAIL.
+/// - `quote_schema` is a hard compatibility boundary:
+///     - Must be Some("canonical_v1") → otherwise HARD FAIL.
+/// - Backward compatibility is NOT supported across breaking versions.
+///   Recapture or run an explicit migration tool (if/when provided).
+///
+/// Schema versions
+/// - v1 (legacy; unsupported)
+///     - Pre-canonical quote fields and/or legacy naming.
+///     - May lack quote_schema entirely.
+///     - Rejected by loader.
+///
+/// - v2 (legacy; unsupported)
+///     - Transitional format used before canonical quote stabilization.
+///     - Still incompatible with canonical mantissa-based QuoteEvent assumptions.
+///     - Rejected by loader.
+///
+/// - v3 (current; supported)
+///     - Canonical quote schema enforced via quote_schema == "canonical_v1".
+///     - Manifest includes capture configuration (include_spot/include_depth,
+///       price_exponent/qty_exponent).
+///     - Symbol entries enumerate stream files and event counts.
+///     - Optional `digests` enables Phase 2A integrity + temporal bounds.
+///     - Loader guarantees:
+///         - schema_version == 3
+///         - quote_schema == Some("canonical_v1")
+///         - Downstream can assume canonical mantissa-based quoting semantics.
+///
+/// Planned changes (when bumping beyond v3)
+/// - Any rename of fields, semantic change to file paths, changes to units/meaning
+///   of exponents, or digest layout changes MUST bump schema_version.
+/// - When bumping, update:
+///     - PERP_SESSION_MANIFEST_SCHEMA_VERSION
+///     - load_perp_session_manifest() enforcement message
+///     - fixtures + tests asserting against the constant
+/// =============================================================================
+pub const PERP_SESSION_MANIFEST_SCHEMA_VERSION: u32 = 3;
+
 /// Session manifest for perp capture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerpSessionManifest {
@@ -662,6 +711,17 @@ pub fn load_perp_session_manifest(session_dir: &Path) -> Result<PerpSessionManif
         .with_context(|| format!("read manifest: {:?}", manifest_path))?;
     let manifest: PerpSessionManifest = serde_json::from_str(&content)
         .with_context(|| format!("parse manifest: {:?}", manifest_path))?;
+
+    // HARD FAIL: Reject unsupported schema versions
+    if manifest.schema_version != PERP_SESSION_MANIFEST_SCHEMA_VERSION {
+        anyhow::bail!(
+            "FATAL: Unsupported manifest schema_version {} in {:?}. \
+             Expected {}. This capture may need to be migrated or recaptured.",
+            manifest.schema_version,
+            manifest_path,
+            PERP_SESSION_MANIFEST_SCHEMA_VERSION
+        );
+    }
 
     // HARD FAIL: Reject legacy captures that don't have canonical quote schema
     match &manifest.quote_schema {

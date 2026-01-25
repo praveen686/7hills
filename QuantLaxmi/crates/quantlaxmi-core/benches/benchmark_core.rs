@@ -1,7 +1,6 @@
 use chrono::Utc;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use quantlaxmi_core::EventBus;
-use quantlaxmi_models::{MarketEvent, MarketPayload, Side};
+use quantlaxmi_core::{EventBus, WalMarketRecord, MarketPayload};
 use tokio::runtime::Runtime;
 
 fn bench_event_bus(c: &mut Criterion) {
@@ -11,15 +10,18 @@ fn bench_event_bus(c: &mut Criterion) {
     c.bench_function("event_bus_publish_market", |b| {
         b.iter(|| {
             rt.block_on(async {
-                let event = MarketEvent {
-                    exchange_time: Utc::now(),
-                    local_time: Utc::now(),
+                let event = WalMarketRecord {
+                    ts: Utc::now(),
                     symbol: black_box("BTCUSDT".to_string()),
-                    payload: MarketPayload::Tick {
-                        price: 50000.0,
-                        size: 1.0,
-                        side: Side::Buy,
+                    payload: MarketPayload::Quote {
+                        bid_price_mantissa: 5000000,  // 50000.00
+                        ask_price_mantissa: 5000100,  // 50001.00
+                        bid_qty_mantissa: 100,
+                        ask_qty_mantissa: 100,
+                        price_exponent: -2,
+                        qty_exponent: -2,
                     },
+                    ctx: Default::default(),
                 };
                 bus.publish_market(event).await.unwrap();
             })
@@ -55,24 +57,27 @@ fn bench_e2e_tick_to_decision(c: &mut Criterion) {
     c.bench_function("e2e_tick_to_strategy_decision", |b| {
         b.iter(|| {
             rt.block_on(async {
-                // Simulate tick arrival
-                let tick = MarketEvent {
-                    exchange_time: Utc::now(),
-                    local_time: Utc::now(),
+                // Simulate quote arrival (canonical mantissa-based)
+                let record = WalMarketRecord {
+                    ts: Utc::now(),
                     symbol: black_box("BTCUSDT".to_string()),
-                    payload: MarketPayload::Tick {
-                        price: 50000.0,
-                        size: 1.0,
-                        side: Side::Buy,
+                    payload: MarketPayload::Quote {
+                        bid_price_mantissa: 5000000,  // 50000.00
+                        ask_price_mantissa: 5000100,  // 50001.00
+                        bid_qty_mantissa: 100,
+                        ask_qty_mantissa: 100,
+                        price_exponent: -2,
+                        qty_exponent: -2,
                     },
+                    ctx: Default::default(),
                 };
 
                 // Publish to bus
-                bus.publish_market(tick.clone()).await.unwrap();
+                bus.publish_market(record.clone()).await.unwrap();
 
-                // Strategy processes tick (simulated)
+                // Strategy processes market event
                 let mut strategy = MomentumStrategy::new(5);
-                strategy.on_tick(&tick);
+                strategy.on_market(&record);
             })
         });
     });

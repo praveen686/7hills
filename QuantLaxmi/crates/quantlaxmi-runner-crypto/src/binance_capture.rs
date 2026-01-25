@@ -1,7 +1,7 @@
 //! Binance Spot capture -> canonical QuoteEvent JSONL.
 //!
 //! Uses Binance Spot bookTicker stream: best bid/ask updates.
-//! Output format matches `quantlaxmi_runner_crypto::quote::QuoteEvent`.
+//! Output format uses canonical `quantlaxmi_models::events::QuoteEvent`.
 //!
 //! Notes:
 //! - Public stream (no API keys required)
@@ -13,8 +13,7 @@ use futures_util::StreamExt;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use crate::fixed_point::parse_to_mantissa_pure;
-use crate::quote::QuoteEvent;
+use quantlaxmi_models::events::{parse_to_mantissa_pure, CorrelationContext, QuoteEvent};
 
 #[derive(Debug, serde::Deserialize)]
 struct BookTickerEvent {
@@ -118,6 +117,8 @@ pub async fn capture_book_ticker_jsonl(
             ask_qty_mantissa: parse_to_mantissa_pure(&ev.ask_qty, BINANCE_QTY_EXP)?,
             price_exponent: BINANCE_PRICE_EXP,
             qty_exponent: BINANCE_QTY_EXP,
+            venue: "binance".to_string(),
+            ctx: CorrelationContext::default(),
         };
 
         let line = serde_json::to_string(&q)?;

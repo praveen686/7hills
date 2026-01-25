@@ -361,6 +361,17 @@ pub struct WalFileInfo {
     pub bytes_len: usize,
 }
 
+impl WalManifest {
+    /// Load manifest from a JSON file.
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read manifest {}: {}", path.display(), e))?;
+        let manifest: WalManifest = serde_json::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("Failed to parse manifest {}: {}", path.display(), e))?;
+        Ok(manifest)
+    }
+}
+
 // =============================================================================
 // WAL READER
 // =============================================================================
@@ -464,6 +475,65 @@ impl WalReader {
         report.passed = report.missing_files.is_empty() && report.hash_mismatches.is_empty();
         Ok(report)
     }
+
+    /// Verify stream file digests against manifest using streaming hash.
+    ///
+    /// This is a hard-fail verification: if any digest mismatch is found, returns Err.
+    /// Uses streaming SHA-256 to handle large files without loading into memory.
+    ///
+    /// # Returns
+    /// - `Ok(())` if all files in manifest.files have matching digests
+    /// - `Err` with details if any file is missing or has hash mismatch
+    ///
+    /// # Note
+    /// If manifest.files is empty, returns Ok (no digests to verify).
+    pub fn verify_stream_digests(&self, manifest: &WalManifest) -> Result<()> {
+        if manifest.files.is_empty() {
+            tracing::info!(
+                session_dir = %self.session_dir.display(),
+                "No stream digests in manifest, skipping digest verification"
+            );
+            return Ok(());
+        }
+
+        for (name, info) in &manifest.files {
+            let path = self.session_dir.join(&info.path);
+
+            if !path.exists() {
+                anyhow::bail!(
+                    "Stream file missing: {} (path: {})",
+                    name,
+                    path.display()
+                );
+            }
+
+            let actual_hash = sha256_file_hex(&path)?;
+
+            if actual_hash != info.sha256 {
+                anyhow::bail!(
+                    "Stream digest mismatch for '{}': expected={}, actual={}, path={}",
+                    name,
+                    info.sha256,
+                    actual_hash,
+                    path.display()
+                );
+            }
+
+            tracing::debug!(
+                file = %name,
+                hash = %actual_hash,
+                "Stream digest verified"
+            );
+        }
+
+        tracing::info!(
+            session_dir = %self.session_dir.display(),
+            files_verified = manifest.files.len(),
+            "All stream digests verified"
+        );
+
+        Ok(())
+    }
 }
 
 /// Integrity verification report.
@@ -492,6 +562,32 @@ pub fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
     format!("{:x}", hasher.finalize())
+}
+
+/// Compute SHA-256 hash of a file using streaming (no full file load).
+///
+/// Reads the file in 64KB chunks to handle large files efficiently.
+/// Returns the hash as a lowercase hex string.
+pub fn sha256_file_hex(path: &Path) -> Result<String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| anyhow::anyhow!("Failed to open file {}: {}", path.display(), e))?;
+
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 65536]; // 64KB buffer
+
+    loop {
+        let bytes_read = file
+            .read(&mut buffer)
+            .map_err(|e| anyhow::anyhow!("Failed to read file {}: {}", path.display(), e))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 #[cfg(test)]
@@ -534,5 +630,135 @@ mod tests {
         // Verify integrity
         let report = reader.verify_integrity(&manifest).unwrap();
         assert!(report.passed);
+    }
+
+    #[test]
+    fn test_verify_stream_digests_pass() {
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path();
+
+        // Create a fake stream file with known content
+        let wal_dir = session_dir.join("wal");
+        std::fs::create_dir_all(&wal_dir).unwrap();
+        let stream_content = b"line1\nline2\nline3\n";
+        let stream_path = wal_dir.join("test_stream.jsonl");
+        std::fs::write(&stream_path, stream_content).unwrap();
+
+        // Compute expected hash
+        let expected_hash = sha256_hex(stream_content);
+
+        // Create manifest with correct digest
+        let mut files = HashMap::new();
+        files.insert(
+            "test_stream".to_string(),
+            WalFileInfo {
+                path: "wal/test_stream.jsonl".to_string(),
+                sha256: expected_hash.clone(),
+                record_count: 3,
+                bytes_len: stream_content.len(),
+            },
+        );
+
+        let manifest = WalManifest {
+            created_at: Utc::now(),
+            counts: WalCounts::default(),
+            files,
+        };
+
+        // Verify should pass
+        let reader = WalReader::open(session_dir).unwrap();
+        let result = reader.verify_stream_digests(&manifest);
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+    }
+
+    #[test]
+    fn test_verify_stream_digests_fail_on_modified_file() {
+        use std::collections::HashMap;
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path();
+
+        // Create a fake stream file
+        let wal_dir = session_dir.join("wal");
+        std::fs::create_dir_all(&wal_dir).unwrap();
+        let original_content = b"original content";
+        let stream_path = wal_dir.join("test_stream.jsonl");
+        std::fs::write(&stream_path, original_content).unwrap();
+
+        // Compute hash of original content
+        let original_hash = sha256_hex(original_content);
+
+        // Create manifest with original hash
+        let mut files = HashMap::new();
+        files.insert(
+            "test_stream".to_string(),
+            WalFileInfo {
+                path: "wal/test_stream.jsonl".to_string(),
+                sha256: original_hash,
+                record_count: 1,
+                bytes_len: original_content.len(),
+            },
+        );
+
+        let manifest = WalManifest {
+            created_at: Utc::now(),
+            counts: WalCounts::default(),
+            files,
+        };
+
+        // Modify the file
+        std::fs::write(&stream_path, b"MODIFIED content").unwrap();
+
+        // Verify should fail with expected/actual in error message
+        let reader = WalReader::open(session_dir).unwrap();
+        let result = reader.verify_stream_digests(&manifest);
+        assert!(result.is_err(), "Expected Err, got Ok");
+
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("expected=") && err_msg.contains("actual="),
+            "Error should contain expected/actual hashes: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("test_stream"),
+            "Error should contain file name: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_verify_stream_digests_empty_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path();
+
+        // Empty manifest (no files)
+        let manifest = WalManifest {
+            created_at: Utc::now(),
+            counts: WalCounts::default(),
+            files: std::collections::HashMap::new(),
+        };
+
+        let reader = WalReader::open(session_dir).unwrap();
+        let result = reader.verify_stream_digests(&manifest);
+        assert!(result.is_ok(), "Empty manifest should pass: {:?}", result);
+    }
+
+    #[test]
+    fn test_sha256_file_hex_streaming() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test_file.bin");
+
+        // Create a file with known content
+        let content = b"hello world streaming test";
+        std::fs::write(&file_path, content).unwrap();
+
+        // Streaming hash should match in-memory hash
+        let streaming_hash = sha256_file_hex(&file_path).unwrap();
+        let memory_hash = sha256_hex(content);
+
+        assert_eq!(streaming_hash, memory_hash);
     }
 }
