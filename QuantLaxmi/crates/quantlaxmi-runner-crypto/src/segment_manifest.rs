@@ -306,7 +306,11 @@ impl SessionInventory {
     /// Write inventory to disk.
     pub fn write(&self, out_dir: &Path) -> Result<()> {
         // Extract date from session_family (e.g., "perp_BTCUSDT_20260125" -> "20260125")
-        let date_part = self.session_family.split('_').next_back().unwrap_or("unknown");
+        let date_part = self
+            .session_family
+            .split('_')
+            .next_back()
+            .unwrap_or("unknown");
         let filename = format!("perp_{}_inventory.json", date_part);
         let inventory_path = out_dir.join(filename);
 
