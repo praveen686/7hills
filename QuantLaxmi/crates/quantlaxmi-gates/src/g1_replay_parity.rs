@@ -189,6 +189,18 @@ impl G1ReplayParity {
             ));
         } else {
             let divergence_idx = find_first_divergence_v2(&live_decisions, &replay_decisions);
+            let live_len = live_decisions.len();
+            let replay_len = replay_decisions.len();
+
+            // Compute per-record hashes at divergence point
+            let live_record_hash = live_decisions.get(divergence_idx).map(|d| {
+                let h = compute_decision_trace_hash_v2(std::slice::from_ref(d));
+                h[..16].to_string()
+            });
+            let replay_record_hash = replay_decisions.get(divergence_idx).map(|d| {
+                let h = compute_decision_trace_hash_v2(std::slice::from_ref(d));
+                h[..16].to_string()
+            });
 
             // Enrich message with decision_ids if available at divergence index
             let live_id = live_decisions
@@ -199,18 +211,28 @@ impl G1ReplayParity {
                 .map(|d| d.decision_id.to_string());
 
             let id_hint = match (live_id, replay_id) {
-                (Some(l), Some(r)) => format!(" (live decision_id={l}, replay decision_id={r})"),
-                (Some(l), None) => format!(" (live decision_id={l}, replay missing)"),
-                (None, Some(r)) => format!(" (live missing, replay decision_id={r})"),
-                (None, None) => String::new(),
+                (Some(l), Some(r)) => format!("live_id={}, replay_id={}", &l[..8], &r[..8]),
+                (Some(l), None) => format!("live_id={}, replay=MISSING", &l[..8]),
+                (None, Some(r)) => format!("live=MISSING, replay_id={}", &r[..8]),
+                (None, None) => "no_ids".to_string(),
+            };
+
+            let record_hint = match (live_record_hash, replay_record_hash) {
+                (Some(l), Some(r)) => format!("record_hash: {}... vs {}...", l, r),
+                (Some(l), None) => format!("record_hash: {}... vs MISSING", l),
+                (None, Some(r)) => format!("record_hash: MISSING vs {}...", r),
+                (None, None) => "record_hash: both MISSING".to_string(),
             };
 
             result.add_check(CheckResult::fail(
                 "decision_parity",
                 format!(
-                    "Decision trace hash mismatch at index {}{}. Live: {}..., Replay: {}...",
+                    "MISMATCH@{} (live_len={}, replay_len={}). {}. {}. trace: {}...vs {}...",
                     divergence_idx,
+                    live_len,
+                    replay_len,
                     id_hint,
+                    record_hint,
                     &live_hash[..16],
                     &replay_hash[..16],
                 ),
