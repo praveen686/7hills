@@ -33,6 +33,13 @@ use uuid::Uuid;
 pub mod depth;
 pub use depth::{DepthEvent, DepthLevel, IntegrityTier};
 
+// Canonical events with fixed-point representation and correlation IDs
+pub mod events;
+pub use events::{
+    CorrelationContext, DecisionEvent, MarketSnapshot, ParseMantissaError,
+    QuoteEvent as CanonicalQuoteEvent, parse_to_mantissa_pure,
+};
+
 // Option Greeks and pricing primitives (moved here to break dependency cycles)
 pub mod greeks;
 pub use greeks::{OptionGreeks, OptionType};

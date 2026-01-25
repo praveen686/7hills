@@ -9,6 +9,10 @@ members = [
     "crates/quantlaxmi-options",
     "crates/quantlaxmi-sbe",
 
+    # Platform spine (Phase 1)
+    "crates/quantlaxmi-gates",
+    "crates/quantlaxmi-wal",
+
     # Venue connectors (isolated by market)
     "crates/quantlaxmi-connectors-zerodha",
     "crates/quantlaxmi-connectors-binance",
@@ -62,3 +66,4 @@ tower-http = { version = "0.5", features = ["cors", "fs"] }
 arrow = { version = "53", default-features = false, features = ["ipc"] }
 parquet = { version = "53", default-features = false, features = ["arrow", "snap"] }
 good_lp = { version = "1.8", default-features = false, features = ["microlp"] }
+tempfile = "3.10"

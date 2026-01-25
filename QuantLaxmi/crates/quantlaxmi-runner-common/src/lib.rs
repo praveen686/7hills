@@ -32,8 +32,8 @@ pub use circuit_breakers::{
 };
 pub use config::{ExecutionInfo, ModeInfo, RiskInfo, RunnerConfig, StrategyConfig};
 pub use run_manifest::{
-    InputBinding, OutputBinding, RunManifest, bind_json_file, config_hash, git_commit_string,
-    hash_file, persist_run_manifest_atomic,
+    InputBinding, OutputBinding, RunManifest, WalBinding, bind_json_file, config_hash,
+    git_commit_string, hash_file, persist_run_manifest_atomic,
 };
 pub use session_manifest::{
     IntegritySummary, SESSION_MANIFEST_SCHEMA_VERSION, SessionManifest, TickOutputEntry,

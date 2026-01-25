@@ -2356,6 +2356,7 @@ fn main() -> Result<()> {
         universe_manifests: universe_bindings,
         config_sha256: cfg_sha256,
         outputs,
+        wal_files: Vec::new(),
     };
 
     let run_manifest_sha = persist_run_manifest_atomic(&run_dir, &rm)?;

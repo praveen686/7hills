@@ -42,6 +42,25 @@ pub struct RunManifest {
 
     /// Declared outputs for this run
     pub outputs: Vec<OutputBinding>,
+
+    /// WAL file bindings (path + sha256 for each WAL file)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wal_files: Vec<WalBinding>,
+}
+
+/// WAL file binding with integrity hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalBinding {
+    /// WAL file type (e.g., "market", "decisions", "orders", "fills", "risk")
+    pub file_type: String,
+    /// Relative path to WAL file
+    pub rel_path: String,
+    /// SHA-256 hash of file contents
+    pub sha256: String,
+    /// Number of records in file
+    pub record_count: u64,
+    /// File size in bytes
+    pub bytes_len: usize,
 }
 
 /// Input binding (path + sha256).
@@ -73,6 +92,9 @@ pub fn persist_run_manifest_atomic(run_dir: &Path, rm: &RunManifest) -> Result<S
     rm_sorted
         .outputs
         .sort_by(|a, b| a.label.cmp(&b.label).then(a.rel_path.cmp(&b.rel_path)));
+    rm_sorted
+        .wal_files
+        .sort_by(|a, b| a.file_type.cmp(&b.file_type));
 
     // Pretty JSON for human audit
     let bytes = serde_json::to_vec_pretty(&rm_sorted).context("Failed to serialize RunManifest")?;

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "session_id": "fixture-crypto-001",
+  "created_at_utc": "2026-01-25T10:00:00Z",
+  "capture_mode": "crypto_fixture",
+  "out_dir": "fixtures/crypto_session",
+  "duration_secs": 60.0,
+  "price_exponent": -2,
+  "underlyings": [],
+  "tick_outputs": [
+    {
+      "symbol": "BTCUSDT",
+      "path": "wal/market.jsonl",
+      "ticks_written": 10,
+      "has_depth": false
+    }
+  ],
+  "integrity": {
+    "out_of_universe_ticks_dropped": 0,
+    "subscribe_mode": "fixture"
+  }
+}
