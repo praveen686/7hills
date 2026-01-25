@@ -290,7 +290,8 @@ async fn async_main() -> anyhow::Result<()> {
 async fn run_discover_zerodha(underlying: &str, strikes: u32) -> anyhow::Result<()> {
     tracing::info!(
         "Discovering {} options (ATM ± {} strikes)...",
-        underlying, strikes
+        underlying,
+        strikes
     );
 
     let discovery = ZerodhaAutoDiscovery::from_sidecar()?;
@@ -397,7 +398,9 @@ async fn run_capture_session(
         for underlying_sym in underlying_list {
             tracing::info!(
                 "Auto-discovering {} options (±{} strikes, policy={})...",
-                underlying_sym, strike_band, expiry_policy
+                underlying_sym,
+                strike_band,
+                expiry_policy
             );
 
             let config = MultiExpiryDiscoveryConfig {
@@ -589,7 +592,8 @@ async fn run_capture_session(
         );
         tracing::info!(
             "Session manifest saved: {:?} ({} bytes)",
-            persist_result.manifest_path, persist_result.bytes_len
+            persist_result.manifest_path,
+            persist_result.bytes_len
         );
     }
 

@@ -50,10 +50,18 @@ pub struct G0Config {
     pub max_clock_drift_ms: i64,
 }
 
-fn default_max_quote_age_ms() -> i64 { 5000 }
-fn default_max_timestamp_gap_ms() -> i64 { 1000 }
-fn default_min_events_per_symbol() -> usize { 10 }
-fn default_max_clock_drift_ms() -> i64 { 60000 }
+fn default_max_quote_age_ms() -> i64 {
+    5000
+}
+fn default_max_timestamp_gap_ms() -> i64 {
+    1000
+}
+fn default_min_events_per_symbol() -> usize {
+    10
+}
+fn default_max_clock_drift_ms() -> i64 {
+    60000
+}
 
 impl Default for G0Config {
     fn default() -> Self {
@@ -141,13 +149,13 @@ impl G0DataTruth {
                 let has_schema_version = json.get("schema_version").is_some();
 
                 if has_session_id && has_schema_version {
-                    Ok(CheckResult::pass(
-                        "manifest_exists",
-                        "Session manifest found and valid",
-                    ).with_metrics(serde_json::json!({
-                        "path": manifest_path.display().to_string(),
-                        "session_id": json.get("session_id"),
-                    })))
+                    Ok(
+                        CheckResult::pass("manifest_exists", "Session manifest found and valid")
+                            .with_metrics(serde_json::json!({
+                                "path": manifest_path.display().to_string(),
+                                "session_id": json.get("session_id"),
+                            })),
+                    )
                 } else {
                     Ok(CheckResult::fail(
                         "manifest_exists",
@@ -182,7 +190,10 @@ impl G0DataTruth {
         // Check underlying manifests
         if let Some(underlyings) = manifest.get("underlyings").and_then(|u| u.as_array()) {
             for underlying in underlyings {
-                if let Some(path) = underlying.get("universe_manifest_path").and_then(|p| p.as_str()) {
+                if let Some(path) = underlying
+                    .get("universe_manifest_path")
+                    .and_then(|p| p.as_str())
+                {
                     let full_path = session_dir.join(path);
                     if !full_path.exists() {
                         missing.push(path.to_string());
@@ -190,11 +201,18 @@ impl G0DataTruth {
                     }
 
                     // Verify hash if present
-                    if let Some(expected_hash) = underlying.get("universe_manifest_sha256").and_then(|h| h.as_str()) {
+                    if let Some(expected_hash) = underlying
+                        .get("universe_manifest_sha256")
+                        .and_then(|h| h.as_str())
+                    {
                         let bytes = std::fs::read(&full_path)?;
                         let actual_hash = sha256_hex(&bytes);
                         if actual_hash != expected_hash {
-                            hash_mismatches.push((path.to_string(), expected_hash.to_string(), actual_hash));
+                            hash_mismatches.push((
+                                path.to_string(),
+                                expected_hash.to_string(),
+                                actual_hash,
+                            ));
                         } else {
                             verified += 1;
                         }
@@ -227,7 +245,8 @@ impl G0DataTruth {
                     missing.len(),
                     hash_mismatches.len()
                 ),
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "verified": verified,
                 "missing": missing,
                 "hash_mismatches": hash_mismatches.iter().map(|(p, e, a)| {
@@ -238,7 +257,8 @@ impl G0DataTruth {
             Ok(CheckResult::pass(
                 "manifest_compliance",
                 format!("All {} manifest entries verified", verified),
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "verified": verified,
             })))
         }
@@ -276,7 +296,8 @@ impl G0DataTruth {
                     "All {} events in {} files have monotonic timestamps",
                     events_checked, files_checked
                 ),
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "files_checked": files_checked,
                 "events_checked": events_checked,
             })))
@@ -288,7 +309,8 @@ impl G0DataTruth {
                     violations.len(),
                     files_checked
                 ),
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "violations": violations.iter().take(10).collect::<Vec<_>>(),
                 "total_violations": violations.len(),
             })))
@@ -296,7 +318,10 @@ impl G0DataTruth {
     }
 
     /// Check monotonicity for legacy tick files (not in wal/ directory).
-    fn check_monotonic_timestamps_legacy(&self, session_dir: &Path) -> Result<CheckResult, GateError> {
+    fn check_monotonic_timestamps_legacy(
+        &self,
+        session_dir: &Path,
+    ) -> Result<CheckResult, GateError> {
         let mut violations = Vec::new();
         let mut files_checked = 0;
         let mut events_checked = 0;
@@ -339,10 +364,7 @@ impl G0DataTruth {
         } else {
             Ok(CheckResult::fail(
                 "monotonic_timestamps",
-                format!(
-                    "Found {} timestamp violations",
-                    violations.len()
-                ),
+                format!("Found {} timestamp violations", violations.len()),
             ))
         }
     }
@@ -471,14 +493,16 @@ impl G0DataTruth {
             Ok(CheckResult::pass(
                 "schema_validity",
                 format!("All {} events have valid schema", valid_events),
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "valid_events": valid_events,
             })))
         } else {
             Ok(CheckResult::fail(
                 "schema_validity",
                 format!("{} schema errors found", errors.len()),
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "errors": errors.iter().take(10).collect::<Vec<_>>(),
                 "total_errors": errors.len(),
                 "valid_events": valid_events,
@@ -525,14 +549,22 @@ impl G0DataTruth {
     }
 
     /// Validate a single quote event (for live validation).
-    pub fn validate_quote(&self, quote: &quantlaxmi_models::events::QuoteEvent, now: DateTime<Utc>) -> CheckResult {
+    pub fn validate_quote(
+        &self,
+        quote: &quantlaxmi_models::events::QuoteEvent,
+        now: DateTime<Utc>,
+    ) -> CheckResult {
         let age_ms = quote.age_ms(now);
 
         if age_ms > self.config.max_quote_age_ms {
             return CheckResult::fail(
                 "quote_freshness",
-                format!("Quote is {}ms old (max: {}ms)", age_ms, self.config.max_quote_age_ms),
-            ).with_metrics(serde_json::json!({
+                format!(
+                    "Quote is {}ms old (max: {}ms)",
+                    age_ms, self.config.max_quote_age_ms
+                ),
+            )
+            .with_metrics(serde_json::json!({
                 "age_ms": age_ms,
                 "max_age_ms": self.config.max_quote_age_ms,
                 "symbol": &quote.symbol,
@@ -540,14 +572,12 @@ impl G0DataTruth {
         }
 
         if !quote.is_valid() {
-            return CheckResult::fail(
-                "quote_validity",
-                "Quote has invalid price/quantity values",
-            ).with_metrics(serde_json::json!({
-                "bid": quote.bid_price_mantissa,
-                "ask": quote.ask_price_mantissa,
-                "symbol": &quote.symbol,
-            }));
+            return CheckResult::fail("quote_validity", "Quote has invalid price/quantity values")
+                .with_metrics(serde_json::json!({
+                    "bid": quote.bid_price_mantissa,
+                    "ask": quote.ask_price_mantissa,
+                    "symbol": &quote.symbol,
+                }));
         }
 
         CheckResult::pass(
@@ -577,7 +607,12 @@ mod tests {
         let result = g0.validate_session(dir.path()).unwrap();
         // Should fail because no manifest
         assert!(!result.passed);
-        assert!(result.checks.iter().any(|c| c.name == "manifest_exists" && !c.passed));
+        assert!(
+            result
+                .checks
+                .iter()
+                .any(|c| c.name == "manifest_exists" && !c.passed)
+        );
     }
 
     #[test]
@@ -602,18 +637,27 @@ mod tests {
         });
 
         let manifest_path = dir.path().join("session_manifest.json");
-        std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
 
         let g0 = G0DataTruth::new(G0Config::default());
         let result = g0.validate_session(dir.path()).unwrap();
 
         assert!(result.passed);
-        assert!(result.checks.iter().any(|c| c.name == "manifest_exists" && c.passed));
+        assert!(
+            result
+                .checks
+                .iter()
+                .any(|c| c.name == "manifest_exists" && c.passed)
+        );
     }
 
     #[test]
     fn test_g0_quote_validation() {
-        use quantlaxmi_models::events::{QuoteEvent, CorrelationContext};
+        use quantlaxmi_models::events::{CorrelationContext, QuoteEvent};
 
         let g0 = G0DataTruth::new(G0Config {
             max_quote_age_ms: 1000,

@@ -49,10 +49,18 @@ pub struct G2Config {
     pub large_order_threshold: f64,
 }
 
-fn default_true() -> bool { true }
-fn default_min_slippage_bps() -> f64 { 1.0 } // 0.01%
-fn default_max_fill_rate() -> f64 { 0.10 } // 10% of volume
-fn default_large_order_threshold() -> f64 { 0.01 } // 1% of ADV
+fn default_true() -> bool {
+    true
+}
+fn default_min_slippage_bps() -> f64 {
+    1.0
+} // 0.01%
+fn default_max_fill_rate() -> f64 {
+    0.10
+} // 10% of volume
+fn default_large_order_threshold() -> f64 {
+    0.01
+} // 1% of ADV
 
 /// G2 BacktestCorrectness gate validator (scaffold).
 pub struct G2BacktestCorrectness {
@@ -121,7 +129,10 @@ impl G2BacktestCorrectness {
 
     /// Placeholder for lookahead bias detection.
     #[allow(dead_code)]
-    fn check_lookahead(&self, _decisions: &[quantlaxmi_models::events::DecisionEvent]) -> CheckResult {
+    fn check_lookahead(
+        &self,
+        _decisions: &[quantlaxmi_models::events::DecisionEvent],
+    ) -> CheckResult {
         // TODO: Implement lookahead detection
         // - For each decision, verify all referenced data has ts < decision.ts
         // - Check that market_snapshot.book_ts_ns < decision.ts

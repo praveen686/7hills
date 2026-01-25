@@ -379,7 +379,9 @@ pub async fn capture_sbe_depth_jsonl(
         {
             tracing::info!(
                 "Bootstrap sync found in buffer: U={}, u={}, snapshot={}",
-                update.first_update_id, update.last_update_id, snapshot_last_id
+                update.first_update_id,
+                update.last_update_id,
+                snapshot_last_id
             );
 
             // Write snapshot first

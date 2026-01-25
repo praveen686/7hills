@@ -231,7 +231,8 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
                 let snapshot_written = line_count > 0;
                 tracing::info!(
                     "  Recovered from file: {} lines, snapshot={}",
-                    line_count, snapshot_written
+                    line_count,
+                    snapshot_written
                 );
                 (line_count, 0, snapshot_written)
             }
@@ -242,7 +243,8 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
             if config.strict {
                 tracing::info!(
                     "WARNING: {} had {} sequence gaps (strict mode)",
-                    symbol, gaps_detected
+                    symbol,
+                    gaps_detected
                 );
             }
         }
@@ -268,7 +270,9 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
 
         tracing::info!(
             "{}: depth={} events, {} gaps",
-            symbol, events_written, gaps_detected
+            symbol,
+            events_written,
+            gaps_detected
         );
     }
 
@@ -320,7 +324,10 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
 
         tracing::info!(
             "{}: trades={} (buys={}, sells={})",
-            symbol, trades_written, buy_count, sell_count
+            symbol,
+            trades_written,
+            buy_count,
+            sell_count
         );
     }
 

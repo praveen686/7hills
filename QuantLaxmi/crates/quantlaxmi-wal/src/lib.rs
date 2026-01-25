@@ -413,8 +413,8 @@ impl WalReader {
             return Ok(Vec::new());
         }
 
-        let file = std::fs::File::open(&path)
-            .with_context(|| format!("open WAL file: {:?}", path))?;
+        let file =
+            std::fs::File::open(&path).with_context(|| format!("open WAL file: {:?}", path))?;
         let reader = BufReader::new(file);
         let mut records = Vec::new();
 
@@ -423,8 +423,13 @@ impl WalReader {
             if line.trim().is_empty() {
                 continue;
             }
-            let record: T = serde_json::from_str(&line)
-                .with_context(|| format!("parse line {}: {}", line_num + 1, &line[..line.len().min(100)]))?;
+            let record: T = serde_json::from_str(&line).with_context(|| {
+                format!(
+                    "parse line {}: {}",
+                    line_num + 1,
+                    &line[..line.len().min(100)]
+                )
+            })?;
             records.push(record);
         }
 

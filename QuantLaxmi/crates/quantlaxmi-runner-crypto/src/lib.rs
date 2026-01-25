@@ -417,7 +417,8 @@ async fn run_capture_binance(symbol: &str, out: &str, duration_secs: u64) -> any
 
     tracing::info!(
         "Capturing Binance {} bookTicker for {} seconds...",
-        symbol, duration_secs
+        symbol,
+        duration_secs
     );
     let stats = binance_capture::capture_book_ticker_jsonl(symbol, out_path, duration_secs).await?;
     tracing::info!("Capture complete: {} ({})", out, stats);
@@ -499,7 +500,11 @@ async fn run_capture_sbe_depth(
 
     tracing::info!(
         "Capturing Binance SBE {} depth stream for {} seconds (price_exp={}, qty_exp={}, strict={})...",
-        symbol, duration_secs, price_exponent, qty_exponent, strict
+        symbol,
+        duration_secs,
+        price_exponent,
+        qty_exponent,
+        strict
     );
 
     let stats = binance_sbe_depth_capture::capture_sbe_depth_jsonl(
@@ -637,7 +642,10 @@ async fn run_capture_trades(
 
     tracing::info!(
         "Capturing Binance SBE {} trades stream for {} seconds (price_exp={}, qty_exp={})...",
-        symbol, duration_secs, price_exponent, qty_exponent
+        symbol,
+        duration_secs,
+        price_exponent,
+        qty_exponent
     );
 
     let stats = binance_trades_capture::capture_sbe_trades_jsonl(
@@ -798,7 +806,9 @@ async fn run_exchange_info(symbols: &str) -> anyhow::Result<()> {
             for (sym, (tick_size, qty_scale)) in specs {
                 tracing::info!(
                     "  {}: tick_size={}, qty_scale={}",
-                    sym, tick_size, qty_scale
+                    sym,
+                    tick_size,
+                    qty_scale
                 );
             }
         }
@@ -1062,7 +1072,8 @@ async fn run_capture_perp_ticker(
 
     tracing::info!(
         "Capturing Binance Futures {} bookTicker for {} seconds...",
-        symbol, duration_secs
+        symbol,
+        duration_secs
     );
 
     let stats =
@@ -1087,7 +1098,10 @@ async fn run_capture_perp_depth(
 
     tracing::info!(
         "Capturing Binance Futures {} depth for {} seconds (price_exp={}, qty_exp={})...",
-        symbol, duration_secs, price_exponent, qty_exponent
+        symbol,
+        duration_secs,
+        price_exponent,
+        qty_exponent
     );
 
     let stats = binance_perp_capture::capture_perp_depth_jsonl(
@@ -1119,7 +1133,8 @@ async fn run_capture_funding(symbol: &str, out: &str, duration_secs: u64) -> any
 
     tracing::info!(
         "Capturing Binance Futures {} funding rate for {} seconds...",
-        symbol, duration_secs
+        symbol,
+        duration_secs
     );
 
     let stats =

@@ -801,7 +801,10 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     for (sym, stats) in &instrument_stats {
         tracing::info!(
             "  {}: {} ticks (certified={}, research={})",
-            sym, stats.ticks_written, stats.certified_ticks, stats.research_ticks
+            sym,
+            stats.ticks_written,
+            stats.certified_ticks,
+            stats.research_ticks
         );
     }
     tracing::info!(

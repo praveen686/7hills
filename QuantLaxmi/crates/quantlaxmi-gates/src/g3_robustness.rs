@@ -50,9 +50,15 @@ pub struct G3Config {
     pub simulated_latency_ms: u64,
 }
 
-fn default_max_reconnect_ms() -> u64 { 5000 }
-fn default_max_data_gap_ms() -> u64 { 10000 }
-fn default_simulated_latency_ms() -> u64 { 500 }
+fn default_max_reconnect_ms() -> u64 {
+    5000
+}
+fn default_max_data_gap_ms() -> u64 {
+    10000
+}
+fn default_simulated_latency_ms() -> u64 {
+    500
+}
 
 /// G3 Robustness gate validator (scaffold).
 pub struct G3Robustness {

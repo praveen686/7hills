@@ -21,8 +21,8 @@
 use crate::{CheckResult, GateError, GateResult};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::info;
 
 /// G4 Deployability configuration.
@@ -53,9 +53,15 @@ pub struct G4Config {
     pub config_dir: String,
 }
 
-fn default_true() -> bool { true }
-fn default_metrics_port() -> u16 { 9000 }
-fn default_config_dir() -> String { "configs".to_string() }
+fn default_true() -> bool {
+    true
+}
+fn default_metrics_port() -> u16 {
+    9000
+}
+fn default_config_dir() -> String {
+    "configs".to_string()
+}
 
 impl Default for G4Config {
     fn default() -> Self {
@@ -160,8 +166,12 @@ impl G4Deployability {
         if ctx.metrics_enabled {
             CheckResult::pass(
                 "metrics_enabled",
-                format!("Prometheus metrics enabled on port {}", self.config.metrics_port),
-            ).with_metrics(serde_json::json!({
+                format!(
+                    "Prometheus metrics enabled on port {}",
+                    self.config.metrics_port
+                ),
+            )
+            .with_metrics(serde_json::json!({
                 "port": self.config.metrics_port,
             }))
         } else {
@@ -179,15 +189,9 @@ impl G4Deployability {
         }
 
         if ctx.tracing_enabled {
-            CheckResult::pass(
-                "tracing_enabled",
-                "Structured tracing initialized",
-            )
+            CheckResult::pass("tracing_enabled", "Structured tracing initialized")
         } else {
-            CheckResult::fail(
-                "tracing_enabled",
-                "Structured tracing not initialized",
-            )
+            CheckResult::fail("tracing_enabled", "Structured tracing not initialized")
         }
     }
 
@@ -217,7 +221,8 @@ impl G4Deployability {
                 Ok(_) => Ok(CheckResult::pass(
                     "config_snapshot_exists",
                     format!("Config snapshot found: {}", snapshot_path),
-                ).with_metrics(serde_json::json!({
+                )
+                .with_metrics(serde_json::json!({
                     "path": snapshot_path,
                     "bytes": content.len(),
                 }))),
@@ -269,7 +274,8 @@ impl G4Deployability {
             CheckResult::pass(
                 "panic_behavior",
                 "Debug build - panics will unwind with full trace",
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "debug_assertions": true,
                 "rust_backtrace": backtrace,
             }))
@@ -277,7 +283,8 @@ impl G4Deployability {
             CheckResult::pass(
                 "panic_behavior",
                 "Release build - panics configured for production",
-            ).with_metrics(serde_json::json!({
+            )
+            .with_metrics(serde_json::json!({
                 "debug_assertions": false,
                 "rust_backtrace": backtrace,
             }))
@@ -296,10 +303,7 @@ impl G4Deployability {
                 "Kill switch successfully set - shutdown initiated",
             )
         } else {
-            CheckResult::fail(
-                "shutdown_signal",
-                "Failed to set kill switch",
-            )
+            CheckResult::fail("shutdown_signal", "Failed to set kill switch")
         }
     }
 }
@@ -311,8 +315,7 @@ pub fn create_config_snapshot<T: Serialize>(
 ) -> Result<String, GateError> {
     let snapshot_path = run_dir.join("config_snapshot.json");
 
-    let json = serde_json::to_string_pretty(config)
-        .map_err(|e| GateError::Json(e))?;
+    let json = serde_json::to_string_pretty(config).map_err(|e| GateError::Json(e))?;
 
     std::fs::create_dir_all(run_dir)?;
     std::fs::write(&snapshot_path, &json)?;
@@ -384,7 +387,12 @@ mod tests {
 
         let result = g4.validate(&ctx).unwrap();
         assert!(!result.passed);
-        assert!(result.checks.iter().any(|c| c.name == "metrics_enabled" && !c.passed));
+        assert!(
+            result
+                .checks
+                .iter()
+                .any(|c| c.name == "metrics_enabled" && !c.passed)
+        );
     }
 
     #[test]

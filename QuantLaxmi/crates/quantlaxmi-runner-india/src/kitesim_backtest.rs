@@ -362,7 +362,9 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     tracing::info!("Strategy: {}", strategy_name);
     tracing::info!(
         "Orders: {}, Legs filled: {}/{}",
-        fill.orders_total, fill.legs_filled, fill.legs_total
+        fill.orders_total,
+        fill.legs_filled,
+        fill.legs_total
     );
     tracing::info!("PnL: ₹{:.2}", pnl);
 

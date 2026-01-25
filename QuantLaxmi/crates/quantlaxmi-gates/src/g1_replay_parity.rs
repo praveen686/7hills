@@ -46,9 +46,15 @@ pub struct G1Config {
     pub timing_slack_ms: i64,
 }
 
-fn default_price_tolerance_bps() -> f64 { 10.0 } // 0.1%
-fn default_qty_tolerance() -> f64 { 0.001 } // 0.1%
-fn default_timing_slack_ms() -> i64 { 100 }
+fn default_price_tolerance_bps() -> f64 {
+    10.0
+} // 0.1%
+fn default_qty_tolerance() -> f64 {
+    0.001
+} // 0.1%
+fn default_timing_slack_ms() -> i64 {
+    100
+}
 
 /// G1 ReplayParity gate validator (scaffold).
 pub struct G1ReplayParity {

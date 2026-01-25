@@ -25,9 +25,7 @@ use opentelemetry::global;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{Config, Sampler};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{
-    fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
-};
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Guards that must be held for the lifetime of the process.
 /// Dropping this will cause buffered logs to be lost.
@@ -86,8 +84,7 @@ pub fn init_tracing(service_name: &str) -> TracingGuards {
     ensure_logs_dir();
 
     // --- File Appender (non-blocking, daily rotation) ---
-    let file_appender =
-        tracing_appender::rolling::daily("logs", format!("{}.log", service_name));
+    let file_appender = tracing_appender::rolling::daily("logs", format!("{}.log", service_name));
     let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
 
     // --- Filter Definitions ---
@@ -98,8 +95,8 @@ pub fn init_tracing(service_name: &str) -> TracingGuards {
     // file: Default to INFO for our crates, WARN for noisy deps.
     // Honors RUST_LOG if set (for debugging), otherwise safe default.
     let default_file_filter = "quantlaxmi=info,warn";
-    let file_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_file_filter));
+    let file_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_file_filter));
 
     // --- stdout Layer: Bounded, Human-Friendly ---
     let stdout_layer = fmt::layer()
@@ -130,8 +127,7 @@ pub fn init_tracing(service_name: &str) -> TracingGuards {
 
     global::set_tracer_provider(provider.clone());
 
-    let tracer =
-        opentelemetry::trace::TracerProvider::tracer(&provider, service_name.to_string());
+    let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, service_name.to_string());
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
     // --- Compose and Initialize ---
