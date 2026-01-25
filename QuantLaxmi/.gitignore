@@ -7,6 +7,9 @@ tokens.txt
 options_universe.csv
 runs/
 output/
+data/
+logs/
+*.pdf
 *.wal
 *.parquet
 *.jsonl
