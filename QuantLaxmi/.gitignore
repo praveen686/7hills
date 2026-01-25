@@ -58,3 +58,6 @@ dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Large research PDFs (keep out of git)
+research/*.pdf

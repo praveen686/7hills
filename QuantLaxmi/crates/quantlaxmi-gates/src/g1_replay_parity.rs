@@ -211,9 +211,17 @@ impl G1ReplayParity {
                 .map(|d| d.decision_id.to_string());
 
             let id_hint = match (live_id, replay_id) {
-                (Some(l), Some(r)) => format!("live_id={}, replay_id={}", &l[..8], &r[..8]),
-                (Some(l), None) => format!("live_id={}, replay=MISSING", &l[..8]),
-                (None, Some(r)) => format!("live=MISSING, replay_id={}", &r[..8]),
+                (Some(l), Some(r)) => format!(
+                    "live_id={}, replay_id={}",
+                    l.get(..8).unwrap_or(&l),
+                    r.get(..8).unwrap_or(&r)
+                ),
+                (Some(l), None) => {
+                    format!("live_id={}, replay=MISSING", l.get(..8).unwrap_or(&l))
+                }
+                (None, Some(r)) => {
+                    format!("live=MISSING, replay_id={}", r.get(..8).unwrap_or(&r))
+                }
                 (None, None) => "no_ids".to_string(),
             };
 
