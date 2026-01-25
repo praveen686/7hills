@@ -132,14 +132,24 @@ impl AppState {
     }
 }
 
-/// Initialize observability (metrics + tracing)
-pub fn init_observability(service_name: &str) {
+/// Initialize observability (metrics + tracing).
+///
+/// # Returns
+/// `TracingGuards` - Must be held for the lifetime of the process or buffered logs may be lost.
+///
+/// # Example
+/// ```ignore
+/// let _guards = init_observability("my-service");
+/// // ... run application ...
+/// // guards dropped on exit, flushing logs
+/// ```
+pub fn init_observability(service_name: &str) -> quantlaxmi_core::observability::TracingGuards {
     let metrics_port = std::env::var("METRICS_PORT").unwrap_or_else(|_| "9000".to_string());
     let metrics_addr = format!("0.0.0.0:{}", metrics_port)
         .parse()
         .expect("Invalid metrics address");
     quantlaxmi_core::observability::init_metrics(metrics_addr);
-    quantlaxmi_core::observability::init_tracing(service_name);
+    quantlaxmi_core::observability::init_tracing(service_name)
 }
 
 /// Create the shared tokio runtime with appropriate stack size

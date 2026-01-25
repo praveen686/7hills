@@ -217,10 +217,18 @@ pub struct PerpSessionStats {
     pub all_symbols_complete: bool,
 }
 
+/// Canonical quote schema version identifier.
+/// Any manifest without this exact value is considered legacy and must be rejected.
+pub const CANONICAL_QUOTE_SCHEMA: &str = "canonical_v1";
+
 /// Session manifest for perp capture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerpSessionManifest {
     pub schema_version: u32,
+    /// Quote schema identifier. Must be "canonical_v1" for valid captures.
+    /// Legacy captures (pre-2026-01-24) used different field names and are invalid.
+    #[serde(default)]
+    pub quote_schema: Option<String>,
     pub created_at_utc: String,
     pub session_id: String,
     pub capture_mode: String,
@@ -444,7 +452,8 @@ pub async fn capture_perp_session(config: PerpSessionConfig) -> Result<PerpSessi
 
     // Write session manifest
     let manifest = PerpSessionManifest {
-        schema_version: 2, // Bump for digest support
+        schema_version: 3, // Bump for canonical quote schema
+        quote_schema: Some(CANONICAL_QUOTE_SCHEMA.to_string()),
         created_at_utc: start_time.to_rfc3339(),
         session_id: session_id.clone(),
         capture_mode: "perp_session".to_string(),
@@ -638,12 +647,46 @@ async fn capture_symbol(
 }
 
 /// Load a perp session manifest from disk.
+///
+/// # Schema Validation (Hard Fail)
+/// This function enforces that the manifest contains `quote_schema: "canonical_v1"`.
+/// Legacy captures (pre-2026-01-24) used different quote field names and are fundamentally
+/// incompatible with the current pipeline. They MUST be recaptured.
+///
+/// If you encounter a schema validation error:
+/// 1. Move the legacy capture to `data/legacy_pre_canonical_2026_01_24/`
+/// 2. Recapture with the current tooling
 pub fn load_perp_session_manifest(session_dir: &Path) -> Result<PerpSessionManifest> {
     let manifest_path = session_dir.join("session_manifest.json");
     let content = std::fs::read_to_string(&manifest_path)
         .with_context(|| format!("read manifest: {:?}", manifest_path))?;
     let manifest: PerpSessionManifest = serde_json::from_str(&content)
         .with_context(|| format!("parse manifest: {:?}", manifest_path))?;
+
+    // HARD FAIL: Reject legacy captures that don't have canonical quote schema
+    match &manifest.quote_schema {
+        Some(schema) if schema == CANONICAL_QUOTE_SCHEMA => {
+            // Valid canonical capture
+        }
+        Some(schema) => {
+            anyhow::bail!(
+                "FATAL: Invalid quote schema '{}' in {:?}. \
+                 Expected '{}'. This capture uses an incompatible schema and must be recaptured.",
+                schema,
+                manifest_path,
+                CANONICAL_QUOTE_SCHEMA
+            );
+        }
+        None => {
+            anyhow::bail!(
+                "FATAL: Legacy capture detected — missing 'quote_schema' field in {:?}. \
+                 This capture predates the canonical schema (2026-01-24) and is incompatible. \
+                 Move to data/legacy_pre_canonical_2026_01_24/ and recapture with current tooling.",
+                manifest_path
+            );
+        }
+    }
+
     Ok(manifest)
 }
 

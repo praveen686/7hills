@@ -174,7 +174,7 @@ struct AuthOutput {
 ///
 /// The sidecar script is located at `scripts/zerodha_auth.py` in the QuantLaxmi repo root.
 fn authenticate() -> Result<(String, String)> {
-    println!("Authenticating with Zerodha...");
+    tracing::info!("Authenticating with Zerodha...");
     let output = Command::new("python3")
         .arg("scripts/zerodha_auth.py")
         .output()
@@ -188,7 +188,7 @@ fn authenticate() -> Result<(String, String)> {
     let auth: AuthOutput =
         serde_json::from_slice(&output.stdout).context("Failed to parse auth response")?;
 
-    println!("✅ Authenticated with Zerodha");
+    tracing::info!("✅ Authenticated with Zerodha");
     Ok((auth.api_key, auth.access_token))
 }
 
@@ -234,7 +234,7 @@ async fn fetch_instrument_tokens(
 
     // Fetch instruments master for the specified segment
     let url = format!("{}/instruments/{}", KITE_API_URL, segment.as_str());
-    println!("Fetching instruments from: {}", url);
+    tracing::info!("Fetching instruments from: {}", url);
 
     let response = client
         .get(&url)
@@ -425,13 +425,13 @@ fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> 
                 std::sync::atomic::AtomicUsize::new(0);
             let count = DEBUG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if count < 1 {
-                eprintln!(
+                tracing::info!(
                     "[DEBUG] token={} ltp={} (₹{:.2})",
                     token,
                     ltp_raw,
                     ltp_raw as f64 / 100.0
                 );
-                eprintln!("[DEBUG] Full packet ({} bytes):", packet_len);
+                tracing::info!("[DEBUG] Full packet ({} bytes):", packet_len);
                 // Dump in 20-byte chunks with offset labels
                 for chunk_start in (0..packet_len).step_by(20) {
                     let chunk_end = (chunk_start + 20).min(packet_len);
@@ -444,7 +444,7 @@ fn parse_kite_tick(data: &[u8], _price_exponent: i8) -> Option<Vec<ParsedTick>> 
                             i32_vals.push_str(&format!("{:>10} ", val));
                         }
                     }
-                    eprintln!("[{:3}] {:02x?} | {}", chunk_start, chunk, i32_vals);
+                    tracing::info!("[{:3}] {:02x?} | {}", chunk_start, chunk, i32_vals);
                 }
             }
 
@@ -520,13 +520,13 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let session_id = uuid::Uuid::new_v4().to_string();
     let start_time = Utc::now();
 
-    println!(
+    tracing::info!(
         "Starting India session capture: {} instruments, {} seconds",
         config.instruments.len(),
         config.duration_secs
     );
-    println!("Session ID: {}", session_id);
-    println!("Output directory: {:?}", config.out_dir);
+    tracing::info!("Session ID: {}", session_id);
+    tracing::info!("Output directory: {:?}", config.out_dir);
 
     // Create session directory
     tokio::fs::create_dir_all(&config.out_dir).await?;
@@ -537,7 +537,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     // Determine tokens: use manifest tokens if provided (Commit B), otherwise fetch from API
     let (tokens, subscribe_mode): (Vec<(String, u32)>, String) =
         if let Some(manifest_tokens) = &config.manifest_tokens {
-            println!(
+            tracing::info!(
                 "Using {} manifest-provided tokens (subscribe_mode=manifest_tokens)",
                 manifest_tokens.len()
             );
@@ -550,7 +550,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
             (manifest_tokens.clone(), "manifest_tokens".to_string())
         } else {
             // Legacy path: fetch instrument tokens from API (auto-detects segment)
-            println!(
+            tracing::info!(
                 "Fetching instrument tokens for {} symbols (subscribe_mode=api_lookup)...",
                 config.instruments.len()
             );
@@ -571,12 +571,12 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         );
     }
 
-    println!("Subscribing to {} instrument tokens:", tokens.len());
+    tracing::info!("Subscribing to {} instrument tokens:", tokens.len());
     for (sym, tok) in tokens.iter().take(10) {
-        println!("  {} -> {}", sym, tok);
+        tracing::info!("  {} -> {}", sym, tok);
     }
     if tokens.len() > 10 {
-        println!("  ... and {} more", tokens.len() - 10);
+        tracing::info!("  ... and {} more", tokens.len() - 10);
     }
 
     // Build token validation set for out-of-universe detection (Commit B)
@@ -613,13 +613,13 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         "wss://ws.kite.trade/?api_key={}&access_token={}",
         api_key, access_token
     );
-    println!("Connecting to Kite WebSocket...");
+    tracing::info!("Connecting to Kite WebSocket...");
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
         .await
         .context("Failed to connect to Kite WebSocket")?;
 
-    println!("✅ Connected to Kite WebSocket");
+    tracing::info!("✅ Connected to Kite WebSocket");
     let (mut write, mut read) = ws_stream.split();
 
     // Subscribe to instruments in Full mode
@@ -636,7 +636,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         "v": ["full", token_list]
     });
     write.send(Message::Text(mode_msg.to_string())).await?;
-    println!("Subscribed to {} instruments in Full mode", tokens.len());
+    tracing::info!("Subscribed to {} instruments in Full mode", tokens.len());
 
     // Initialize stats
     let mut instrument_stats: HashMap<String, InstrumentCaptureStats> = HashMap::new();
@@ -663,11 +663,11 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         let item = match msg {
             Ok(Some(Ok(m))) => m,
             Ok(Some(Err(e))) => {
-                eprintln!("WebSocket error: {}", e);
+                tracing::info!("WebSocket error: {}", e);
                 continue;
             }
             Ok(None) => {
-                println!("WebSocket closed");
+                tracing::info!("WebSocket closed");
                 break;
             }
             Err(_) => continue, // Timeout, retry
@@ -737,7 +737,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
             }
             Message::Text(text) => {
                 if text.contains("error") {
-                    eprintln!("Server message: {}", text);
+                    tracing::info!("Server message: {}", text);
                 }
             }
             Message::Ping(p) => {
@@ -776,7 +776,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let debug_manifest_path = config.out_dir.join("capture_debug.json");
     let json = serde_json::to_string_pretty(&session_manifest)?;
     tokio::fs::write(&debug_manifest_path, json).await?;
-    println!(
+    tracing::info!(
         "\nCapture debug manifest written: {:?}",
         debug_manifest_path
     );
@@ -788,23 +788,23 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     }
 
     // Print summary
-    println!("\n=== Session Capture Complete ===");
-    println!("  Duration: {:.1}s", duration_secs);
-    println!("  Total ticks: {}", total_ticks);
+    tracing::info!("\n=== Session Capture Complete ===");
+    tracing::info!("  Duration: {:.1}s", duration_secs);
+    tracing::info!("  Total ticks: {}", total_ticks);
     if out_of_universe_ticks > 0 {
-        println!("  Out-of-universe ticks dropped: {}", out_of_universe_ticks);
+        tracing::info!("  Out-of-universe ticks dropped: {}", out_of_universe_ticks);
         warn!(
             out_of_universe_ticks,
             "Session had out-of-universe ticks (dropped)"
         );
     }
     for (sym, stats) in &instrument_stats {
-        println!(
+        tracing::info!(
             "  {}: {} ticks (certified={}, research={})",
             sym, stats.ticks_written, stats.certified_ticks, stats.research_ticks
         );
     }
-    println!(
+    tracing::info!(
         "  Status: {}",
         if all_certified {
             "CERTIFIED"
@@ -968,7 +968,7 @@ async fn generate_instrument_manifest(
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, json)?;
 
-    println!(
+    tracing::info!(
         "  {} manifest written: {:?}",
         symbol.to_uppercase(),
         manifest_path

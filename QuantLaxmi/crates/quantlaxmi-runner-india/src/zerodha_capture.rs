@@ -94,7 +94,7 @@ impl std::fmt::Display for CaptureStats {
 ///
 /// The sidecar script is located at `scripts/zerodha_auth.py` in the QuantLaxmi repo root.
 fn authenticate() -> Result<(String, String)> {
-    println!("Authenticating with Zerodha...");
+    tracing::info!("Authenticating with Zerodha...");
     let output = Command::new("python3")
         .arg("scripts/zerodha_auth.py")
         .output()
@@ -108,7 +108,7 @@ fn authenticate() -> Result<(String, String)> {
     let auth: AuthOutput =
         serde_json::from_slice(&output.stdout).context("Failed to parse auth response")?;
 
-    println!("✅ Authenticated with Zerodha");
+    tracing::info!("✅ Authenticated with Zerodha");
     Ok((auth.api_key, auth.access_token))
 }
 
@@ -361,7 +361,7 @@ pub async fn capture_zerodha_quotes(
     let (api_key, access_token) = authenticate()?;
 
     // Step 2: Get instrument tokens
-    println!(
+    tracing::info!(
         "Fetching instrument tokens for {} symbols...",
         symbols.len()
     );
@@ -374,9 +374,9 @@ pub async fn capture_zerodha_quotes(
         );
     }
 
-    println!("Found {} instrument tokens:", tokens.len());
+    tracing::info!("Found {} instrument tokens:", tokens.len());
     for (sym, tok) in &tokens {
-        println!("  {} -> {}", sym, tok);
+        tracing::info!("  {} -> {}", sym, tok);
     }
 
     // Build token -> symbol map
@@ -388,13 +388,13 @@ pub async fn capture_zerodha_quotes(
         "wss://ws.kite.trade/?api_key={}&access_token={}",
         api_key, access_token
     );
-    println!("Connecting to Kite WebSocket...");
+    tracing::info!("Connecting to Kite WebSocket...");
 
     let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
         .await
         .context("Failed to connect to Kite WebSocket")?;
 
-    println!("✅ Connected to Kite WebSocket");
+    tracing::info!("✅ Connected to Kite WebSocket");
     let (mut write, mut read) = ws_stream.split();
 
     // Subscribe to instruments in Full mode
@@ -411,7 +411,7 @@ pub async fn capture_zerodha_quotes(
         "v": ["full", token_list]
     });
     write.send(Message::Text(mode_msg.to_string())).await?;
-    println!("Subscribed to {} instruments in Full mode", tokens.len());
+    tracing::info!("Subscribed to {} instruments in Full mode", tokens.len());
 
     // Open output file
     let mut file = tokio::fs::OpenOptions::new()
@@ -436,11 +436,11 @@ pub async fn capture_zerodha_quotes(
         let item = match msg {
             Ok(Some(Ok(m))) => m,
             Ok(Some(Err(e))) => {
-                eprintln!("WebSocket error: {}", e);
+                tracing::info!("WebSocket error: {}", e);
                 continue;
             }
             Ok(None) => {
-                println!("WebSocket closed");
+                tracing::info!("WebSocket closed");
                 break;
             }
             Err(_) => continue, // Timeout, retry
@@ -478,7 +478,7 @@ pub async fn capture_zerodha_quotes(
             Message::Text(text) => {
                 // Usually subscription confirmation or errors
                 if text.contains("error") {
-                    eprintln!("Server message: {}", text);
+                    tracing::info!("Server message: {}", text);
                 }
             }
             Message::Ping(p) => {
@@ -489,7 +489,7 @@ pub async fn capture_zerodha_quotes(
     }
 
     file.flush().await?;
-    println!("\n✅ Capture complete");
+    tracing::info!("\n✅ Capture complete");
 
     Ok(stats)
 }

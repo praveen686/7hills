@@ -210,8 +210,8 @@ pub fn run() -> anyhow::Result<()> {
 async fn async_main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // Initialize observability
-    init_observability("quantlaxmi-india");
+    // Initialize observability - guard must be held for process lifetime
+    let _tracing_guards = init_observability("quantlaxmi-india");
 
     match cli.command {
         Commands::DiscoverZerodha {
@@ -288,7 +288,7 @@ async fn async_main() -> anyhow::Result<()> {
 }
 
 async fn run_discover_zerodha(underlying: &str, strikes: u32) -> anyhow::Result<()> {
-    println!(
+    tracing::info!(
         "Discovering {} options (ATM ± {} strikes)...",
         underlying, strikes
     );
@@ -307,14 +307,14 @@ async fn run_discover_zerodha(underlying: &str, strikes: u32) -> anyhow::Result<
 
     let symbols = discovery.discover_symbols(&config).await?;
 
-    println!("\n✅ Found {} symbols for {}:\n", symbols.len(), underlying);
+    tracing::info!("\n✅ Found {} symbols for {}:\n", symbols.len(), underlying);
     let symbol_names: Vec<&str> = symbols.iter().map(|(s, _)| s.as_str()).collect();
     for (sym, token) in &symbols {
-        println!("  {} (token: {})", sym, token);
+        tracing::info!("  {} (token: {})", sym, token);
     }
 
-    println!("\n📋 Copy this for --symbols:");
-    println!("{}", symbol_names.join(","));
+    tracing::info!("\n📋 Copy this for --symbols:");
+    tracing::info!("{}", symbol_names.join(","));
 
     Ok(())
 }
@@ -337,7 +337,7 @@ async fn run_capture_zerodha(symbols: &str, out: &str, duration_secs: u64) -> an
         ));
     }
 
-    println!(
+    tracing::info!(
         "Capturing Zerodha quotes for {} symbols for {} seconds...",
         symbol_list.len(),
         duration_secs
@@ -345,7 +345,7 @@ async fn run_capture_zerodha(symbols: &str, out: &str, duration_secs: u64) -> an
 
     let stats =
         zerodha_capture::capture_zerodha_quotes(&symbol_list, out_path, duration_secs).await?;
-    println!("Capture complete: {} ({})", out, stats);
+    tracing::info!("Capture complete: {} ({})", out, stats);
 
     Ok(())
 }
@@ -395,7 +395,7 @@ async fn run_capture_session(
         let today = chrono::Local::now().date_naive();
 
         for underlying_sym in underlying_list {
-            println!(
+            tracing::info!(
                 "Auto-discovering {} options (±{} strikes, policy={})...",
                 underlying_sym, strike_band, expiry_policy
             );
@@ -411,28 +411,28 @@ async fn run_capture_session(
 
             let manifest = discovery.discover_universe(&config).await?;
 
-            println!("✅ {} Universe Manifest:", underlying_sym);
-            println!("   Spot: {:.2}", manifest.spot);
-            println!("   ATM: {:.0}", manifest.atm);
-            println!("   Strike step: {:.0}", manifest.strike_step);
-            println!(
+            tracing::info!("✅ {} Universe Manifest:", underlying_sym);
+            tracing::info!("   Spot: {:.2}", manifest.spot);
+            tracing::info!("   ATM: {:.0}", manifest.atm);
+            tracing::info!("   Strike step: {:.0}", manifest.strike_step);
+            tracing::info!(
                 "   Expiries: T1={}, T2={:?}, T3={:?}",
                 manifest.expiry_selection.t1,
                 manifest.expiry_selection.t2,
                 manifest.expiry_selection.t3
             );
-            println!(
+            tracing::info!(
                 "   Strikes: {} ({:.0} to {:.0})",
                 manifest.target_strikes.len(),
                 manifest.target_strikes.first().unwrap_or(&0.0),
                 manifest.target_strikes.last().unwrap_or(&0.0)
             );
-            println!("   Instruments: {}", manifest.instruments.len());
+            tracing::info!("   Instruments: {}", manifest.instruments.len());
 
             // Log missing
             for (exp, miss) in &manifest.missing {
                 if !miss.is_empty() {
-                    println!("   Missing for {}: {} instruments", exp, miss.len());
+                    tracing::info!("   Missing for {}: {} instruments", exp, miss.len());
                 }
             }
 
@@ -480,8 +480,8 @@ async fn run_capture_session(
                 "UniverseManifest persisted"
             );
 
-            println!("   Manifest saved: {:?}", persist_result.manifest_path);
-            println!("   SHA-256: {}", persist_result.sha256);
+            tracing::info!("   Manifest saved: {:?}", persist_result.manifest_path);
+            tracing::info!("   SHA-256: {}", persist_result.sha256);
 
             // Commit B: Collect tokens from manifest for subscription (use iter, not into_iter)
             for instr in &manifest.instruments {
@@ -527,7 +527,7 @@ async fn run_capture_session(
         ));
     }
 
-    println!(
+    tracing::info!(
         "\nStarting capture with {} instruments...",
         instrument_list.len()
     );
@@ -587,24 +587,24 @@ async fn run_capture_session(
             out_of_universe_ticks_dropped = stats.out_of_universe_ticks_dropped,
             "Aggregate session manifest persisted"
         );
-        println!(
+        tracing::info!(
             "Session manifest saved: {:?} ({} bytes)",
             persist_result.manifest_path, persist_result.bytes_len
         );
     }
 
-    println!("\n=== Session Summary ===");
-    println!("Session ID: {}", stats.session_id);
-    println!("Duration: {:.1}s", stats.duration_secs);
-    println!("Total ticks: {}", stats.total_ticks);
-    println!("Subscribe mode: {}", stats.subscribe_mode);
+    tracing::info!("\n=== Session Summary ===");
+    tracing::info!("Session ID: {}", stats.session_id);
+    tracing::info!("Duration: {:.1}s", stats.duration_secs);
+    tracing::info!("Total ticks: {}", stats.total_ticks);
+    tracing::info!("Subscribe mode: {}", stats.subscribe_mode);
     if stats.out_of_universe_ticks_dropped > 0 {
-        println!(
+        tracing::info!(
             "Out-of-universe ticks dropped: {}",
             stats.out_of_universe_ticks_dropped
         );
     }
-    println!(
+    tracing::info!(
         "Certified: {}",
         if stats.all_certified { "YES" } else { "NO" }
     );

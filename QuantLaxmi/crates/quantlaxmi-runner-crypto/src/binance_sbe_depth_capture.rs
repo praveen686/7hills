@@ -281,7 +281,7 @@ pub async fn capture_sbe_depth_jsonl(
 
     // Step 1: Connect to SBE stream FIRST
     let url_str = "wss://stream-sbe.binance.com:9443/stream";
-    println!("Connecting to Binance SBE stream: {}", url_str);
+    tracing::info!("Connecting to Binance SBE stream: {}", url_str);
 
     let url = Url::parse(url_str)?;
     let mut request = url.into_client_request()?;
@@ -296,7 +296,7 @@ pub async fn capture_sbe_depth_jsonl(
         .await
         .with_context(|| format!("connect SBE websocket: {}", url_str))?;
 
-    println!("✅ Connected to SBE stream");
+    tracing::info!("✅ Connected to SBE stream");
 
     let (mut write, mut read) = ws_stream.split();
 
@@ -307,7 +307,7 @@ pub async fn capture_sbe_depth_jsonl(
         "id": 1
     });
 
-    println!("Subscribing to {}@depth...", sym_lower);
+    tracing::info!("Subscribing to {}@depth...", sym_lower);
     write.send(Message::Text(sub.to_string())).await?;
 
     // Wait for subscription confirmation and buffer some initial messages
@@ -321,7 +321,7 @@ pub async fn capture_sbe_depth_jsonl(
         match msg {
             Ok(Some(Ok(Message::Text(text)))) => {
                 if text.contains("\"result\":null") {
-                    println!("Subscription confirmed");
+                    tracing::info!("Subscription confirmed");
                     subscription_confirmed = true;
                 } else if text.contains("\"error\"") {
                     bail!("Subscription error: {}", text);
@@ -348,13 +348,13 @@ pub async fn capture_sbe_depth_jsonl(
         bail!("Subscription not confirmed within 2 seconds");
     }
 
-    println!("Buffered {} initial depth updates", initial_buffer.len());
+    tracing::info!("Buffered {} initial depth updates", initial_buffer.len());
 
     // Step 2: NOW fetch REST snapshot (after WebSocket is connected and buffering)
-    println!("Fetching depth snapshot for {}...", sym_upper);
+    tracing::info!("Fetching depth snapshot for {}...", sym_upper);
     let snapshot = fetch_depth_snapshot(&sym_upper, 1000).await?;
     let snapshot_last_id = snapshot.last_update_id;
-    println!("Snapshot lastUpdateId: {}", snapshot_last_id);
+    tracing::info!("Snapshot lastUpdateId: {}", snapshot_last_id);
 
     // Open output file
     let mut file = tokio::fs::OpenOptions::new()
@@ -377,7 +377,7 @@ pub async fn capture_sbe_depth_jsonl(
         if update.first_update_id <= snapshot_last_id + 1
             && snapshot_last_id < update.last_update_id
         {
-            println!(
+            tracing::info!(
                 "Bootstrap sync found in buffer: U={}, u={}, snapshot={}",
                 update.first_update_id, update.last_update_id, snapshot_last_id
             );
@@ -406,7 +406,7 @@ pub async fn capture_sbe_depth_jsonl(
             }
 
             state = BootstrapState::Ready { last_update_id };
-            println!("Bootstrap complete from buffer, now capturing...");
+            tracing::info!("Bootstrap complete from buffer, now capturing...");
             break;
         }
     }
@@ -451,7 +451,7 @@ pub async fn capture_sbe_depth_jsonl(
                 ) {
                     Ok(u) => u,
                     Err(e) => {
-                        eprintln!("SBE decode error: {}", e);
+                        tracing::info!("SBE decode error: {}", e);
                         continue;
                     }
                 };
@@ -498,7 +498,7 @@ pub async fn capture_sbe_depth_jsonl(
                             state = BootstrapState::Ready {
                                 last_update_id: update.last_update_id,
                             };
-                            println!("Bootstrap complete, now capturing...");
+                            tracing::info!("Bootstrap complete, now capturing...");
                         }
 
                         // Limit buffer size to avoid memory issues
@@ -511,7 +511,7 @@ pub async fn capture_sbe_depth_jsonl(
                         if update.first_update_id != *last_update_id + 1 {
                             // Gap detected - this is a hard failure for replay
                             stats.gaps_detected += 1;
-                            eprintln!(
+                            tracing::info!(
                                 "SEQUENCE GAP: expected {}, got {} (gap of {})",
                                 *last_update_id + 1,
                                 update.first_update_id,
@@ -535,7 +535,7 @@ pub async fn capture_sbe_depth_jsonl(
             Message::Text(text) => {
                 // JSON response (subscription confirmation, etc.)
                 if text.contains("\"error\"") {
-                    eprintln!("Server error: {}", text);
+                    tracing::info!("Server error: {}", text);
                 }
             }
             Message::Ping(p) => {

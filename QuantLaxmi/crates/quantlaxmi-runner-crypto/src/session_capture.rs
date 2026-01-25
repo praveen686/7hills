@@ -135,13 +135,13 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let session_id = uuid::Uuid::new_v4().to_string();
     let start_time = Utc::now();
 
-    println!(
+    tracing::info!(
         "Starting session capture: {} symbols, {} seconds",
         config.symbols.len(),
         config.duration_secs
     );
-    println!("Session ID: {}", session_id);
-    println!("Output directory: {:?}", config.out_dir);
+    tracing::info!("Session ID: {}", session_id);
+    tracing::info!("Output directory: {:?}", config.out_dir);
 
     // Create session directory
     tokio::fs::create_dir_all(&config.out_dir).await?;
@@ -181,7 +181,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         }
     }
 
-    println!(
+    tracing::info!(
         "Capturing {} depth streams + {} trades streams...",
         depth_handles.len(),
         trades_handles.len()
@@ -205,7 +205,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         let result = match handle.await {
             Ok(r) => r,
             Err(join_err) => {
-                println!("ERROR: {} depth task panicked: {}", symbol, join_err);
+                tracing::info!("ERROR: {} depth task panicked: {}", symbol, join_err);
                 all_clean = false;
                 // Try to recover stats from file
                 Err(anyhow::anyhow!("Task panicked: {}", join_err))
@@ -220,7 +220,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
                 stats.snapshot_written,
             ),
             Err(e) => {
-                println!("WARNING: {} depth capture error: {}", symbol, e);
+                tracing::info!("WARNING: {} depth capture error: {}", symbol, e);
                 // Fallback: count lines in file if it exists
                 let line_count = if depth_path.exists() {
                     count_file_lines(&depth_path).unwrap_or(0)
@@ -229,7 +229,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
                 };
                 // If file has data, bootstrap likely succeeded initially
                 let snapshot_written = line_count > 0;
-                println!(
+                tracing::info!(
                     "  Recovered from file: {} lines, snapshot={}",
                     line_count, snapshot_written
                 );
@@ -240,7 +240,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         if gaps_detected > 0 {
             all_clean = false;
             if config.strict {
-                println!(
+                tracing::info!(
                     "WARNING: {} had {} sequence gaps (strict mode)",
                     symbol, gaps_detected
                 );
@@ -266,7 +266,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
             },
         );
 
-        println!(
+        tracing::info!(
             "{}: depth={} events, {} gaps",
             symbol, events_written, gaps_detected
         );
@@ -281,7 +281,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         let result = match handle.await {
             Ok(r) => r,
             Err(join_err) => {
-                println!("ERROR: {} trades task panicked: {}", symbol, join_err);
+                tracing::info!("ERROR: {} trades task panicked: {}", symbol, join_err);
                 Err(anyhow::anyhow!("Task panicked: {}", join_err))
             }
         };
@@ -295,14 +295,14 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
                 stats.total_volume_mantissa,
             ),
             Err(e) => {
-                println!("WARNING: {} trades capture error: {}", symbol, e);
+                tracing::info!("WARNING: {} trades capture error: {}", symbol, e);
                 // Fallback: count lines in file if it exists
                 let line_count = if trades_path.exists() {
                     count_file_lines(&trades_path).unwrap_or(0)
                 } else {
                     0
                 };
-                println!("  Recovered from file: {} lines", line_count);
+                tracing::info!("  Recovered from file: {} lines", line_count);
                 (line_count, 0, 0, 0)
             }
         };
@@ -318,7 +318,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
             });
         }
 
-        println!(
+        tracing::info!(
             "{}: trades={} (buys={}, sells={})",
             symbol, trades_written, buy_count, sell_count
         );
@@ -335,7 +335,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
     let manifest_path = config.out_dir.join("session_manifest.json");
     let json = serde_json::to_string_pretty(&session_manifest)?;
     tokio::fs::write(&manifest_path, json).await?;
-    println!("Session manifest written: {:?}", manifest_path);
+    tracing::info!("Session manifest written: {:?}", manifest_path);
 
     // Generate per-symbol manifests
     for symbol in &config.symbols {
@@ -347,7 +347,7 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
 
     // Strict mode check
     if config.strict && total_gaps > 0 {
-        println!(
+        tracing::info!(
             "\nSTRICT MODE FAILURE: {} total gaps across all symbols",
             total_gaps
         );
@@ -370,12 +370,12 @@ pub async fn capture_session(config: SessionCaptureConfig) -> Result<SessionCapt
         all_symbols_clean: all_clean,
     };
 
-    println!("\n=== Session Capture Complete ===");
-    println!("  Duration: {:.1}s", stats.duration_secs);
-    println!("  Total depth events: {}", stats.total_depth_events);
-    println!("  Total trades: {}", stats.total_trades);
-    println!("  Total gaps: {}", stats.total_gaps);
-    println!(
+    tracing::info!("\n=== Session Capture Complete ===");
+    tracing::info!("  Duration: {:.1}s", stats.duration_secs);
+    tracing::info!("  Total depth events: {}", stats.total_depth_events);
+    tracing::info!("  Total trades: {}", stats.total_trades);
+    tracing::info!("  Total gaps: {}", stats.total_gaps);
+    tracing::info!(
         "  Status: {}",
         if stats.all_symbols_clean {
             "CLEAN"
@@ -555,7 +555,7 @@ async fn generate_symbol_manifest(
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, json)?;
 
-    println!(
+    tracing::info!(
         "  {} manifest written: {:?}",
         symbol.to_uppercase(),
         manifest_path

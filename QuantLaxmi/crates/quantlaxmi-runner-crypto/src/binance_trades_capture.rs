@@ -96,7 +96,7 @@ pub async fn capture_sbe_trades_jsonl(
 
     // Connect to SBE stream
     let url_str = "wss://stream-sbe.binance.com:9443/stream";
-    println!("Connecting to Binance SBE stream: {}", url_str);
+    tracing::info!("Connecting to Binance SBE stream: {}", url_str);
 
     let url = Url::parse(url_str)?;
     let mut request = url.into_client_request()?;
@@ -111,7 +111,7 @@ pub async fn capture_sbe_trades_jsonl(
         .await
         .with_context(|| format!("connect SBE websocket: {}", url_str))?;
 
-    println!("Connected to SBE stream");
+    tracing::info!("Connected to SBE stream");
 
     let (mut write, mut read) = ws_stream.split();
 
@@ -122,7 +122,7 @@ pub async fn capture_sbe_trades_jsonl(
         "id": 1
     });
 
-    println!("Subscribing to {}@trade...", sym_lower);
+    tracing::info!("Subscribing to {}@trade...", sym_lower);
     write.send(Message::Text(sub.to_string())).await?;
 
     // Wait for subscription confirmation
@@ -132,7 +132,7 @@ pub async fn capture_sbe_trades_jsonl(
         let msg = tokio::time::timeout(std::time::Duration::from_millis(500), read.next()).await;
         if let Ok(Some(Ok(Message::Text(text)))) = msg {
             if text.contains("\"result\":null") {
-                println!("Subscription confirmed");
+                tracing::info!("Subscription confirmed");
                 subscription_confirmed = true;
             } else if text.contains("\"error\"") {
                 anyhow::bail!("Subscription error: {}", text);
@@ -187,7 +187,7 @@ pub async fn capture_sbe_trades_jsonl(
                     match BinanceSbeDecoder::decode_trade(&header, &bin[SBE_HEADER_SIZE..]) {
                         Ok(t) => t,
                         Err(e) => {
-                            eprintln!("SBE trade decode error: {}", e);
+                            tracing::info!("SBE trade decode error: {}", e);
                             continue;
                         }
                     };
@@ -226,7 +226,7 @@ pub async fn capture_sbe_trades_jsonl(
             }
             Message::Text(text) => {
                 if text.contains("\"error\"") {
-                    eprintln!("Server error: {}", text);
+                    tracing::info!("Server error: {}", text);
                 }
             }
             Message::Ping(p) => {

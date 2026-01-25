@@ -159,7 +159,7 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
     if let Some(ref depth_path) = cfg.depth_path {
         let depth_events = load_depth_jsonl(Path::new(depth_path))?;
-        println!("Loaded {} depth events for L2Book mode", depth_events.len());
+        tracing::info!("Loaded {} depth events for L2Book mode", depth_events.len());
         replay_events.extend(depth_events);
     }
 
@@ -346,7 +346,7 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     let report_path = out_dir.join("report.json");
     let report_json = serde_json::to_string_pretty(&report)?;
     std::fs::write(&report_path, report_json)?;
-    println!("Report written to: {}", report_path.display());
+    tracing::info!("Report written to: {}", report_path.display());
 
     // Write PnL summary
     let pnl_path = out_dir.join("pnl.json");
@@ -356,15 +356,15 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
         "legs_filled": fill.legs_filled,
     });
     std::fs::write(&pnl_path, serde_json::to_string_pretty(&pnl_json)?)?;
-    println!("PnL summary written to: {}", pnl_path.display());
+    tracing::info!("PnL summary written to: {}", pnl_path.display());
 
-    println!("\n=== KiteSim Backtest Complete (India/Zerodha) ===");
-    println!("Strategy: {}", strategy_name);
-    println!(
+    tracing::info!("\n=== KiteSim Backtest Complete (India/Zerodha) ===");
+    tracing::info!("Strategy: {}", strategy_name);
+    tracing::info!(
         "Orders: {}, Legs filled: {}/{}",
         fill.orders_total, fill.legs_filled, fill.legs_total
     );
-    println!("PnL: ₹{:.2}", pnl);
+    tracing::info!("PnL: ₹{:.2}", pnl);
 
     Ok(())
 }

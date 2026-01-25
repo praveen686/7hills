@@ -290,8 +290,8 @@ pub fn run() -> anyhow::Result<()> {
 async fn async_main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    // Initialize observability
-    init_observability("quantlaxmi-crypto");
+    // Initialize observability - guard must be held for process lifetime
+    let _tracing_guards = init_observability("quantlaxmi-crypto");
 
     match cli.command {
         Commands::CaptureBinance {
@@ -415,12 +415,12 @@ async fn run_capture_binance(symbol: &str, out: &str, duration_secs: u64) -> any
         std::fs::create_dir_all(parent)?;
     }
 
-    println!(
+    tracing::info!(
         "Capturing Binance {} bookTicker for {} seconds...",
         symbol, duration_secs
     );
     let stats = binance_capture::capture_book_ticker_jsonl(symbol, out_path, duration_secs).await?;
-    println!("Capture complete: {} ({})", out, stats);
+    tracing::info!("Capture complete: {} ({})", out, stats);
 
     // Emit RunManifest (Research profile - bookTicker is not the authoritative path)
     let manifest_dir = out_path.parent().unwrap_or(std::path::Path::new("."));
@@ -471,9 +471,9 @@ fn emit_bookticker_manifest(
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, json)?;
 
-    println!("Manifest written: {:?}", manifest_path);
-    println!("  Run ID: {}", manifest.run_id);
-    println!(
+    tracing::info!("Manifest written: {:?}", manifest_path);
+    tracing::info!("  Run ID: {}", manifest.run_id);
+    tracing::info!(
         "  ⚠️  Profile: Research (not Certified - use capture-sbe-depth for deterministic replay)"
     );
 
@@ -497,7 +497,7 @@ async fn run_capture_sbe_depth(
     let api_key = std::env::var("BINANCE_API_KEY_ED25519")
         .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
 
-    println!(
+    tracing::info!(
         "Capturing Binance SBE {} depth stream for {} seconds (price_exp={}, qty_exp={}, strict={})...",
         symbol, duration_secs, price_exponent, qty_exponent, strict
     );
@@ -512,7 +512,7 @@ async fn run_capture_sbe_depth(
     )
     .await?;
 
-    println!("Capture complete: {} ({})", out, stats);
+    tracing::info!("Capture complete: {} ({})", out, stats);
 
     // In strict mode (default), fail if any sequence gaps detected
     // Gaps break deterministic replay, so certified captures must have no gaps
@@ -609,11 +609,11 @@ fn emit_capture_manifest(
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, json)?;
 
-    println!("Manifest written: {:?}", manifest_path);
-    println!("  Run ID: {}", manifest.run_id);
-    println!("  Watermark: {}", manifest.watermark);
+    tracing::info!("Manifest written: {:?}", manifest_path);
+    tracing::info!("  Run ID: {}", manifest.run_id);
+    tracing::info!("  Watermark: {}", manifest.watermark);
     if let Some(ref hash) = manifest.determinism.input_hash {
-        println!("  Input hash: {}", &hash[..16]);
+        tracing::info!("  Input hash: {}", &hash[..16]);
     }
 
     Ok(())
@@ -635,7 +635,7 @@ async fn run_capture_trades(
     let api_key = std::env::var("BINANCE_API_KEY_ED25519")
         .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
 
-    println!(
+    tracing::info!(
         "Capturing Binance SBE {} trades stream for {} seconds (price_exp={}, qty_exp={})...",
         symbol, duration_secs, price_exponent, qty_exponent
     );
@@ -650,7 +650,7 @@ async fn run_capture_trades(
     )
     .await?;
 
-    println!("Capture complete: {} ({})", out, stats);
+    tracing::info!("Capture complete: {} ({})", out, stats);
 
     // Emit manifest for trades capture
     let manifest_dir = out_path.parent().unwrap_or(std::path::Path::new("."));
@@ -708,8 +708,8 @@ fn emit_trades_manifest(
     let json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, json)?;
 
-    println!("Trades manifest written: {:?}", manifest_path);
-    println!("  Run ID: {}", manifest.run_id);
+    tracing::info!("Trades manifest written: {:?}", manifest_path);
+    tracing::info!("  Run ID: {}", manifest.run_id);
 
     Ok(())
 }
@@ -740,12 +740,12 @@ async fn run_capture_session(
     let api_key = std::env::var("BINANCE_API_KEY_ED25519")
         .map_err(|_| anyhow::anyhow!("BINANCE_API_KEY_ED25519 env var required for SBE stream"))?;
 
-    println!("=== Session Capture ===");
-    println!("Symbols: {:?}", symbol_list);
-    println!("Duration: {} seconds", duration_secs);
-    println!("Include trades: {}", include_trades);
-    println!("Strict mode: {}", strict);
-    println!("Output: {}", out_dir);
+    tracing::info!("=== Session Capture ===");
+    tracing::info!("Symbols: {:?}", symbol_list);
+    tracing::info!("Duration: {} seconds", duration_secs);
+    tracing::info!("Include trades: {}", include_trades);
+    tracing::info!("Strict mode: {}", strict);
+    tracing::info!("Output: {}", out_dir);
 
     let config = session_capture::SessionCaptureConfig {
         symbols: symbol_list,
@@ -760,13 +760,13 @@ async fn run_capture_session(
 
     let stats = session_capture::capture_session(config).await?;
 
-    println!("\n=== Session Summary ===");
-    println!("Session ID: {}", stats.session_id);
-    println!("Duration: {:.1}s", stats.duration_secs);
-    println!("Total depth events: {}", stats.total_depth_events);
-    println!("Total trades: {}", stats.total_trades);
-    println!("Total gaps: {}", stats.total_gaps);
-    println!(
+    tracing::info!("\n=== Session Summary ===");
+    tracing::info!("Session ID: {}", stats.session_id);
+    tracing::info!("Duration: {:.1}s", stats.duration_secs);
+    tracing::info!("Total depth events: {}", stats.total_depth_events);
+    tracing::info!("Total trades: {}", stats.total_trades);
+    tracing::info!("Total gaps: {}", stats.total_gaps);
+    tracing::info!(
         "Certified: {}",
         if stats.all_symbols_clean { "YES" } else { "NO" }
     );
@@ -787,16 +787,16 @@ async fn run_exchange_info(symbols: &str) -> anyhow::Result<()> {
         ));
     }
 
-    println!(
+    tracing::info!(
         "Fetching exchange info for {} symbols...",
         symbol_list.len()
     );
 
     match binance_exchange_info::fetch_spot_specs(&symbol_list) {
         Ok(specs) => {
-            println!("\n=== Binance Exchange Info ===");
+            tracing::info!("\n=== Binance Exchange Info ===");
             for (sym, (tick_size, qty_scale)) in specs {
-                println!(
+                tracing::info!(
                     "  {}: tick_size={}, qty_scale={}",
                     sym, tick_size, qty_scale
                 );
@@ -1060,7 +1060,7 @@ async fn run_capture_perp_ticker(
         std::fs::create_dir_all(parent)?;
     }
 
-    println!(
+    tracing::info!(
         "Capturing Binance Futures {} bookTicker for {} seconds...",
         symbol, duration_secs
     );
@@ -1069,7 +1069,7 @@ async fn run_capture_perp_ticker(
         binance_perp_capture::capture_perp_bookticker_jsonl(symbol, out_path, duration_secs)
             .await?;
 
-    println!("Capture complete: {} ({})", out, stats);
+    tracing::info!("Capture complete: {} ({})", out, stats);
     Ok(())
 }
 
@@ -1085,7 +1085,7 @@ async fn run_capture_perp_depth(
         std::fs::create_dir_all(parent)?;
     }
 
-    println!(
+    tracing::info!(
         "Capturing Binance Futures {} depth for {} seconds (price_exp={}, qty_exp={})...",
         symbol, duration_secs, price_exponent, qty_exponent
     );
@@ -1099,10 +1099,10 @@ async fn run_capture_perp_depth(
     )
     .await?;
 
-    println!("Capture complete: {} ({})", out, stats);
+    tracing::info!("Capture complete: {} ({})", out, stats);
 
     if stats.sequence_gaps > 0 {
-        println!(
+        tracing::info!(
             "⚠️  Warning: {} sequence gaps detected. Replay may have issues.",
             stats.sequence_gaps
         );
@@ -1117,7 +1117,7 @@ async fn run_capture_funding(symbol: &str, out: &str, duration_secs: u64) -> any
         std::fs::create_dir_all(parent)?;
     }
 
-    println!(
+    tracing::info!(
         "Capturing Binance Futures {} funding rate for {} seconds...",
         symbol, duration_secs
     );
@@ -1125,7 +1125,7 @@ async fn run_capture_funding(symbol: &str, out: &str, duration_secs: u64) -> any
     let stats =
         binance_funding_capture::capture_funding_jsonl(symbol, out_path, duration_secs).await?;
 
-    println!("Capture complete: {} ({})", out, stats);
+    tracing::info!("Capture complete: {} ({})", out, stats);
     Ok(())
 }
 
@@ -1151,12 +1151,12 @@ async fn run_capture_perp_session(
         ));
     }
 
-    println!("=== Perp Session Capture ===");
-    println!("Symbols: {:?}", symbol_list);
-    println!("Duration: {} seconds", duration_secs);
-    println!("Include spot: {}", include_spot);
-    println!("Include depth: {}", include_depth);
-    println!("Output: {}", out_dir);
+    tracing::info!("=== Perp Session Capture ===");
+    tracing::info!("Symbols: {:?}", symbol_list);
+    tracing::info!("Duration: {} seconds", duration_secs);
+    tracing::info!("Include spot: {}", include_spot);
+    tracing::info!("Include depth: {}", include_depth);
+    tracing::info!("Output: {}", out_dir);
 
     let config = binance_perp_session::PerpSessionConfig {
         symbols: symbol_list,
@@ -1170,15 +1170,15 @@ async fn run_capture_perp_session(
 
     let stats = binance_perp_session::capture_perp_session(config).await?;
 
-    println!("\n=== Session Summary ===");
-    println!("Session ID: {}", &stats.session_id[..8]);
-    println!("Duration: {:.1}s", stats.duration_secs);
-    println!("Total spot events: {}", stats.total_spot_events);
-    println!("Total perp events: {}", stats.total_perp_events);
-    println!("Total funding events: {}", stats.total_funding_events);
+    tracing::info!("\n=== Session Summary ===");
+    tracing::info!("Session ID: {}", &stats.session_id[..8]);
+    tracing::info!("Duration: {:.1}s", stats.duration_secs);
+    tracing::info!("Total spot events: {}", stats.total_spot_events);
+    tracing::info!("Total perp events: {}", stats.total_perp_events);
+    tracing::info!("Total funding events: {}", stats.total_funding_events);
 
     for sym_stat in &stats.symbols {
-        println!(
+        tracing::info!(
             "  {}: basis={:.2}bps, funding={:.4}%",
             sym_stat.symbol,
             sym_stat.basis_bps,
