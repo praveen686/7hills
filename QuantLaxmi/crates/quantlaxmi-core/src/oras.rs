@@ -204,7 +204,12 @@ impl crate::Strategy for OrasStrategy {
         use quantlaxmi_wal::MarketPayload;
 
         // Handle Trade events for ORAS strategy (mantissa-based)
-        if let MarketPayload::Trade { price_mantissa, is_buyer_maker, .. } = &event.payload {
+        if let MarketPayload::Trade {
+            price_mantissa,
+            is_buyer_maker,
+            ..
+        } = &event.payload
+        {
             // Convert mantissa to f64 (assume exponent -2 for now)
             let price = (*price_mantissa as f64) * 0.01;
 
@@ -248,12 +253,7 @@ impl crate::Strategy for OrasStrategy {
                 } else {
                     Side::Sell
                 };
-                self.emit_signal(
-                    event.ts.timestamp_millis(),
-                    &event.symbol,
-                    side,
-                    price,
-                );
+                self.emit_signal(event.ts.timestamp_millis(), &event.symbol, side, price);
                 self.position = if final_signal > 0.0 { 0.5 } else { -0.5 };
             }
         }

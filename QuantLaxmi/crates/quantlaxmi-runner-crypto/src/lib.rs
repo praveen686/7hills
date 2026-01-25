@@ -1153,8 +1153,8 @@ async fn run_capture_perp_session(
     qty_exponent: i8,
 ) -> anyhow::Result<()> {
     use segment_manifest::{EventCounts, ManagedSegment, StopReason};
-    use std::sync::atomic::{AtomicU8, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU8, Ordering};
 
     // Parse symbols
     let symbol_list: Vec<String> = symbols

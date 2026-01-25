@@ -49,9 +49,7 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
 use async_trait::async_trait;
-use quantlaxmi_models::{
-    FillEvent, OrderEvent, RiskEvent, SignalEvent, SystemHealthEvent,
-};
+use quantlaxmi_models::{FillEvent, OrderEvent, RiskEvent, SignalEvent, SystemHealthEvent};
 // MarketEvent replaced by WalMarketRecord for canonical mantissa-based data
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -83,7 +81,7 @@ pub use mode::{ExecutionMode, ModeConfig};
 pub use portfolio::Portfolio;
 
 // Re-export canonical WAL types for consumers
-pub use quantlaxmi_wal::{WalMarketRecord, MarketPayload, WalManifest};
+pub use quantlaxmi_wal::{MarketPayload, WalManifest, WalMarketRecord};
 
 /// Unified event container for the QuantLaxmi ecosystem.
 ///
@@ -170,7 +168,10 @@ impl EventBus {
         })
     }
 
-    pub async fn publish_market(&self, event: quantlaxmi_wal::WalMarketRecord) -> anyhow::Result<()> {
+    pub async fn publish_market(
+        &self,
+        event: quantlaxmi_wal::WalMarketRecord,
+    ) -> anyhow::Result<()> {
         if let Err(e) = self.market_sender.send(event) {
             warn!("Market data channel lag or no subscribers: {}", e);
         }
@@ -259,10 +260,10 @@ impl EventBus {
 // WAL-PERSISTENT EVENT BUS (using quantlaxmi-wal)
 // ============================================================================
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use quantlaxmi_wal::WalWriter;
 pub use quantlaxmi_wal::{DecisionEvent, WalReader};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// EventBus with WAL persistence via quantlaxmi-wal.
 ///
@@ -301,7 +302,11 @@ impl WalPersistentBus {
     /// Persists and publishes a market data event.
     pub async fn publish_market(&self, event: WalMarketRecord) -> anyhow::Result<()> {
         // Persist first, then broadcast
-        self.wal_writer.lock().await.write_market(event.clone()).await?;
+        self.wal_writer
+            .lock()
+            .await
+            .write_market(event.clone())
+            .await?;
         self.bus.publish_market(event).await
     }
 
@@ -313,19 +318,31 @@ impl WalPersistentBus {
 
     /// Persists and publishes an order instruction.
     pub async fn publish_order(&self, event: OrderEvent) -> anyhow::Result<()> {
-        self.wal_writer.lock().await.write_order(event.clone()).await?;
+        self.wal_writer
+            .lock()
+            .await
+            .write_order(event.clone())
+            .await?;
         self.bus.publish_order(event).await
     }
 
     /// Persists and publishes a risk violation.
     pub async fn publish_risk(&self, event: RiskEvent) -> anyhow::Result<()> {
-        self.wal_writer.lock().await.write_risk(event.clone()).await?;
+        self.wal_writer
+            .lock()
+            .await
+            .write_risk(event.clone())
+            .await?;
         self.bus.publish_risk(event).await
     }
 
     /// Persists and publishes a trade execution record.
     pub async fn publish_fill(&self, event: FillEvent) -> anyhow::Result<()> {
-        self.wal_writer.lock().await.write_fill(event.clone()).await?;
+        self.wal_writer
+            .lock()
+            .await
+            .write_fill(event.clone())
+            .await?;
         self.bus.publish_fill(event).await
     }
 
@@ -336,7 +353,11 @@ impl WalPersistentBus {
 
     /// Publishes an order update (persisted as order event).
     pub async fn publish_order_update(&self, event: OrderEvent) -> anyhow::Result<()> {
-        self.wal_writer.lock().await.write_order(event.clone()).await?;
+        self.wal_writer
+            .lock()
+            .await
+            .write_order(event.clone())
+            .await?;
         self.bus.publish_order_update(event)
     }
 
@@ -389,8 +410,10 @@ impl WalPersistentBus {
         let manifest_json = serde_json::to_string_pretty(&manifest)?;
         tokio::fs::write(&manifest_path, manifest_json).await?;
 
-        info!("WAL finalized: {} market events, manifest written to {:?}",
-              manifest.counts.market_events, manifest_path);
+        info!(
+            "WAL finalized: {} market events, manifest written to {:?}",
+            manifest.counts.market_events, manifest_path
+        );
 
         Ok(manifest)
     }

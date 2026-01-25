@@ -18,11 +18,11 @@
 
 use crate::EventBus;
 use quantlaxmi_models::{OrderEvent, RiskEvent, SignalEvent};
-use quantlaxmi_wal::{WalMarketRecord, MarketPayload};
+use quantlaxmi_wal::{MarketPayload, WalMarketRecord};
 use std::sync::Arc;
 
 // Re-export for strategy implementors
-pub use quantlaxmi_wal::{WalMarketRecord as MarketRecord, MarketPayload as Payload};
+pub use quantlaxmi_wal::{MarketPayload as Payload, WalMarketRecord as MarketRecord};
 
 /// Core interface for systematic trading logic.
 ///
@@ -192,7 +192,12 @@ impl MomentumStrategy {
         }
     }
 
-    fn emit_signal(&self, event: &WalMarketRecord, side: quantlaxmi_models::Side, price_mantissa: i64) {
+    fn emit_signal(
+        &self,
+        event: &WalMarketRecord,
+        side: quantlaxmi_models::Side,
+        price_mantissa: i64,
+    ) {
         if let Some(bus) = &self.bus {
             // Convert mantissa to f64 for signal (SignalEvent still uses f64)
             let price = (price_mantissa as f64) * 10f64.powi(self.price_exponent as i32);
@@ -225,7 +230,13 @@ impl Strategy for MomentumStrategy {
 
     fn on_market(&mut self, event: &WalMarketRecord) {
         // Only process Quote events for momentum calculation
-        if let MarketPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } = &event.payload {
+        if let MarketPayload::Quote {
+            bid_price_mantissa,
+            ask_price_mantissa,
+            price_exponent,
+            ..
+        } = &event.payload
+        {
             // Calculate mid-price mantissa
             let mid_mantissa = (bid_price_mantissa + ask_price_mantissa) / 2;
             self.price_exponent = *price_exponent;

@@ -795,14 +795,22 @@ impl ZerodhaConnector {
                             // Publish L2 update if depth data is available
                             if !tick.bids.is_empty() || !tick.asks.is_empty() {
                                 // Convert L2Levels (float) to DepthLevels (mantissa)
-                                let bids: Vec<DepthLevel> = tick.bids.iter().map(|l| DepthLevel {
-                                    price: (l.price * 100.0) as i64, // paisa
-                                    qty: l.size as i64,
-                                }).collect();
-                                let asks: Vec<DepthLevel> = tick.asks.iter().map(|l| DepthLevel {
-                                    price: (l.price * 100.0) as i64,
-                                    qty: l.size as i64,
-                                }).collect();
+                                let bids: Vec<DepthLevel> = tick
+                                    .bids
+                                    .iter()
+                                    .map(|l| DepthLevel {
+                                        price: (l.price * 100.0) as i64, // paisa
+                                        qty: l.size as i64,
+                                    })
+                                    .collect();
+                                let asks: Vec<DepthLevel> = tick
+                                    .asks
+                                    .iter()
+                                    .map(|l| DepthLevel {
+                                        price: (l.price * 100.0) as i64,
+                                        qty: l.size as i64,
+                                    })
+                                    .collect();
 
                                 let l2_event = WalMarketRecord {
                                     ts: Utc::now(),

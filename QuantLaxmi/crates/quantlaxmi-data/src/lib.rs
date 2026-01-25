@@ -267,9 +267,9 @@ impl VpinCalculator {
 }
 
 pub mod simulator {
+    use chrono::Utc;
     use quantlaxmi_core::EventBus;
     use quantlaxmi_wal::{CorrelationContext, MarketPayload, WalMarketRecord};
-    use chrono::Utc;
     use rand::Rng;
     use std::sync::Arc;
     use tokio::time::{sleep, Duration as TokioDuration};

@@ -1,6 +1,6 @@
 use chrono::Utc;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use quantlaxmi_core::{EventBus, WalMarketRecord, MarketPayload};
+use quantlaxmi_core::{EventBus, MarketPayload, WalMarketRecord};
 use tokio::runtime::Runtime;
 
 fn bench_event_bus(c: &mut Criterion) {
@@ -14,8 +14,8 @@ fn bench_event_bus(c: &mut Criterion) {
                     ts: Utc::now(),
                     symbol: black_box("BTCUSDT".to_string()),
                     payload: MarketPayload::Quote {
-                        bid_price_mantissa: 5000000,  // 50000.00
-                        ask_price_mantissa: 5000100,  // 50001.00
+                        bid_price_mantissa: 5000000, // 50000.00
+                        ask_price_mantissa: 5000100, // 50001.00
                         bid_qty_mantissa: 100,
                         ask_qty_mantissa: 100,
                         price_exponent: -2,
@@ -62,8 +62,8 @@ fn bench_e2e_tick_to_decision(c: &mut Criterion) {
                     ts: Utc::now(),
                     symbol: black_box("BTCUSDT".to_string()),
                     payload: MarketPayload::Quote {
-                        bid_price_mantissa: 5000000,  // 50000.00
-                        ask_price_mantissa: 5000100,  // 50001.00
+                        bid_price_mantissa: 5000000, // 50000.00
+                        ask_price_mantissa: 5000100, // 50001.00
                         bid_qty_mantissa: 100,
                         ask_qty_mantissa: 100,
                         price_exponent: -2,

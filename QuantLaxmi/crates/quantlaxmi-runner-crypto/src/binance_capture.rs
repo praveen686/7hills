@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use quantlaxmi_models::events::{parse_to_mantissa_pure, CorrelationContext, QuoteEvent};
+use quantlaxmi_models::events::{CorrelationContext, QuoteEvent, parse_to_mantissa_pure};
 
 #[derive(Debug, serde::Deserialize)]
 struct BookTickerEvent {

@@ -500,11 +500,7 @@ impl WalReader {
             let path = self.session_dir.join(&info.path);
 
             if !path.exists() {
-                anyhow::bail!(
-                    "Stream file missing: {} (path: {})",
-                    name,
-                    path.display()
-                );
+                anyhow::bail!("Stream file missing: {} (path: {})", name, path.display());
             }
 
             let actual_hash = sha256_file_hex(&path)?;

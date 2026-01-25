@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
-use quantlaxmi_models::events::{parse_to_mantissa_pure, CorrelationContext, QuoteEvent};
+use quantlaxmi_models::events::{CorrelationContext, QuoteEvent, parse_to_mantissa_pure};
 
 /// Perp depth event (L2 order book update).
 /// Uses the same structure as spot DepthEvent for compatibility.

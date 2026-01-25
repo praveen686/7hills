@@ -10,7 +10,10 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use quantlaxmi_core::{EventBus, NullObserverStrategy, Portfolio, Strategy, WalMarketRecord, MarketPayload as WalMarketPayload};
+use quantlaxmi_core::{
+    EventBus, MarketPayload as WalMarketPayload, NullObserverStrategy, Portfolio, Strategy,
+    WalMarketRecord,
+};
 use quantlaxmi_executor::{CommissionModel, RiskEnvelope, SimulatedExchange};
 use quantlaxmi_models::{
     L2Level, L2Snapshot, MarketEvent, MarketPayload, OrderEvent, OrderPayload, Side,

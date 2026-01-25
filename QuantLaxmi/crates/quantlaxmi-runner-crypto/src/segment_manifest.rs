@@ -19,8 +19,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 /// Reason the segment stopped.
@@ -308,11 +308,7 @@ impl SessionInventory {
     /// Write inventory to disk.
     pub fn write(&self, out_dir: &Path) -> Result<()> {
         // Extract date from session_family (e.g., "perp_BTCUSDT_20260125" -> "20260125")
-        let date_part = self
-            .session_family
-            .split('_')
-            .last()
-            .unwrap_or("unknown");
+        let date_part = self.session_family.split('_').last().unwrap_or("unknown");
         let filename = format!("perp_{}_inventory.json", date_part);
         let inventory_path = out_dir.join(filename);
 
@@ -378,11 +374,7 @@ pub struct ManagedSegment {
 
 impl ManagedSegment {
     /// Start a new managed segment.
-    pub async fn start(
-        out_dir: &Path,
-        symbols: &[String],
-        capture_mode: &str,
-    ) -> Result<Self> {
+    pub async fn start(out_dir: &Path, symbols: &[String], capture_mode: &str) -> Result<Self> {
         let binary_hash = compute_binary_hash().unwrap_or_else(|_| "UNKNOWN".to_string());
         let start_time = Utc::now();
 
@@ -419,8 +411,8 @@ impl ManagedSegment {
         if let Some(last) = inventory.segments.last() {
             if let Some(ref last_end) = last.end_ts {
                 if let Ok(last_end_dt) = DateTime::parse_from_rfc3339(last_end) {
-                    let gap_secs = (start_time - last_end_dt.with_timezone(&Utc))
-                        .num_milliseconds() as f64
+                    let gap_secs = (start_time - last_end_dt.with_timezone(&Utc)).num_milliseconds()
+                        as f64
                         / 1000.0;
                     manifest.gap_from_prior = Some(GapInfo {
                         previous_segment_id: last.segment_id.clone(),
@@ -438,7 +430,10 @@ impl ManagedSegment {
 
         // Write initial manifest
         manifest.write(&segment_dir)?;
-        tracing::info!("Segment manifest created: {:?}", segment_dir.join("segment_manifest.json"));
+        tracing::info!(
+            "Segment manifest created: {:?}",
+            segment_dir.join("segment_manifest.json")
+        );
 
         // Add to inventory (will be updated on finalize)
         inventory.add_segment(&manifest);
@@ -505,7 +500,11 @@ impl ManagedSegment {
         let mut inventory = SessionInventory::load_or_create(
             &self.out_dir,
             &manifest.session_family_id,
-            manifest.symbols.first().map(|s| s.as_str()).unwrap_or("UNKNOWN"),
+            manifest
+                .symbols
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or("UNKNOWN"),
             &manifest.capture_mode,
             &manifest.binary_hash,
         );

@@ -102,8 +102,11 @@ impl G1ReplayParity {
                 &format!("Live session integrity check failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
-            result.summary =
-                format!("{}/{} checks passed", result.passed_count(), result.checks.len());
+            result.summary = format!(
+                "{}/{} checks passed",
+                result.passed_count(),
+                result.checks.len()
+            );
             return Ok(result);
         }
         result.add_check(CheckResult::pass(
@@ -117,8 +120,11 @@ impl G1ReplayParity {
                 &format!("Replay session integrity check failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
-            result.summary =
-                format!("{}/{} checks passed", result.passed_count(), result.checks.len());
+            result.summary = format!(
+                "{}/{} checks passed",
+                result.passed_count(),
+                result.checks.len()
+            );
             return Ok(result);
         }
         result.add_check(CheckResult::pass(
@@ -133,8 +139,11 @@ impl G1ReplayParity {
                 &format!("Live stream digest verification failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
-            result.summary =
-                format!("{}/{} checks passed", result.passed_count(), result.checks.len());
+            result.summary = format!(
+                "{}/{} checks passed",
+                result.passed_count(),
+                result.checks.len()
+            );
             return Ok(result);
         }
         result.add_check(CheckResult::pass(
@@ -148,8 +157,11 @@ impl G1ReplayParity {
                 &format!("Replay stream digest verification failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
-            result.summary =
-                format!("{}/{} checks passed", result.passed_count(), result.checks.len());
+            result.summary = format!(
+                "{}/{} checks passed",
+                result.passed_count(),
+                result.checks.len()
+            );
             return Ok(result);
         }
         result.add_check(CheckResult::pass(
@@ -206,7 +218,11 @@ impl G1ReplayParity {
         }
 
         result.duration_ms = start.elapsed().as_millis() as u64;
-        result.summary = format!("{}/{} checks passed", result.passed_count(), result.checks.len());
+        result.summary = format!(
+            "{}/{} checks passed",
+            result.passed_count(),
+            result.checks.len()
+        );
         Ok(result)
     }
 }
@@ -418,7 +434,7 @@ mod tests {
                 spread_bps: 4.0, // EXCLUDED from hash
                 book_ts_ns: 1700000000_000_000_000,
             },
-            confidence: 0.95, // EXCLUDED from hash
+            confidence: 0.95,                  // EXCLUDED from hash
             metadata: serde_json::Value::Null, // EXCLUDED from hash
             ctx,
         }
@@ -576,14 +592,18 @@ mod tests {
             (
                 "decision_id",
                 CorrelationContext {
-                    decision_id: Some(Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()),
+                    decision_id: Some(
+                        Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+                    ),
                     ..base_ctx.clone()
                 },
             ),
             (
                 "order_id",
                 CorrelationContext {
-                    order_id: Some(Uuid::parse_str("660e8400-e29b-41d4-a716-446655440000").unwrap()),
+                    order_id: Some(
+                        Uuid::parse_str("660e8400-e29b-41d4-a716-446655440000").unwrap(),
+                    ),
                     ..base_ctx.clone()
                 },
             ),
@@ -784,8 +804,7 @@ mod tests {
         assert!(
             result.passed,
             "Expected all checks to pass. Summary: {}. Checks: {:?}",
-            result.summary,
-            result.checks
+            result.summary, result.checks
         );
 
         // Should have 5 checks: live_integrity, replay_integrity, live_digests, replay_digests, decision_parity
@@ -798,11 +817,26 @@ mod tests {
 
         // Verify specific checks passed
         let check_names: Vec<_> = result.checks.iter().map(|c| c.name.as_str()).collect();
-        assert!(check_names.contains(&"live_integrity"), "Missing live_integrity check");
-        assert!(check_names.contains(&"replay_integrity"), "Missing replay_integrity check");
-        assert!(check_names.contains(&"live_digests"), "Missing live_digests check");
-        assert!(check_names.contains(&"replay_digests"), "Missing replay_digests check");
-        assert!(check_names.contains(&"decision_parity"), "Missing decision_parity check");
+        assert!(
+            check_names.contains(&"live_integrity"),
+            "Missing live_integrity check"
+        );
+        assert!(
+            check_names.contains(&"replay_integrity"),
+            "Missing replay_integrity check"
+        );
+        assert!(
+            check_names.contains(&"live_digests"),
+            "Missing live_digests check"
+        );
+        assert!(
+            check_names.contains(&"replay_digests"),
+            "Missing replay_digests check"
+        );
+        assert!(
+            check_names.contains(&"decision_parity"),
+            "Missing decision_parity check"
+        );
     }
 
     #[test]
@@ -844,7 +878,10 @@ mod tests {
 
         // Find the failing check
         let failing_check = result.checks.iter().find(|c| !c.passed);
-        assert!(failing_check.is_some(), "Expected at least one failing check");
+        assert!(
+            failing_check.is_some(),
+            "Expected at least one failing check"
+        );
         let failing = failing_check.unwrap();
         assert!(
             failing.message.contains("digest") || failing.name.contains("digest"),

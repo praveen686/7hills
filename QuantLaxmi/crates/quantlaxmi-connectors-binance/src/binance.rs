@@ -248,14 +248,22 @@ impl SymbolHandler {
                             Ok((sid, snapshot)) => {
                                 snapshot_update_id = sid;
                                 // Convert L2Snapshot (float) to mantissa-based DepthLevels
-                                let bids: Vec<DepthLevel> = snapshot.bids.iter().map(|l| DepthLevel {
-                                    price: (l.price * 100.0) as i64, // cents
-                                    qty: (l.size * 100_000_000.0) as i64, // satoshis
-                                }).collect();
-                                let asks: Vec<DepthLevel> = snapshot.asks.iter().map(|l| DepthLevel {
-                                    price: (l.price * 100.0) as i64,
-                                    qty: (l.size * 100_000_000.0) as i64,
-                                }).collect();
+                                let bids: Vec<DepthLevel> = snapshot
+                                    .bids
+                                    .iter()
+                                    .map(|l| DepthLevel {
+                                        price: (l.price * 100.0) as i64,      // cents
+                                        qty: (l.size * 100_000_000.0) as i64, // satoshis
+                                    })
+                                    .collect();
+                                let asks: Vec<DepthLevel> = snapshot
+                                    .asks
+                                    .iter()
+                                    .map(|l| DepthLevel {
+                                        price: (l.price * 100.0) as i64,
+                                        qty: (l.size * 100_000_000.0) as i64,
+                                    })
+                                    .collect();
 
                                 let _ = self
                                     .bus
@@ -510,14 +518,22 @@ impl SymbolHandler {
 
     async fn publish_depth_update(&self, update: L2Update, exchange_time: chrono::DateTime<Utc>) {
         // Convert L2Update (float) to mantissa-based DepthLevels
-        let bids: Vec<DepthLevel> = update.bids.iter().map(|l| DepthLevel {
-            price: (l.price * 100.0) as i64, // cents
-            qty: (l.size * 100_000_000.0) as i64, // satoshis
-        }).collect();
-        let asks: Vec<DepthLevel> = update.asks.iter().map(|l| DepthLevel {
-            price: (l.price * 100.0) as i64,
-            qty: (l.size * 100_000_000.0) as i64,
-        }).collect();
+        let bids: Vec<DepthLevel> = update
+            .bids
+            .iter()
+            .map(|l| DepthLevel {
+                price: (l.price * 100.0) as i64,      // cents
+                qty: (l.size * 100_000_000.0) as i64, // satoshis
+            })
+            .collect();
+        let asks: Vec<DepthLevel> = update
+            .asks
+            .iter()
+            .map(|l| DepthLevel {
+                price: (l.price * 100.0) as i64,
+                qty: (l.size * 100_000_000.0) as i64,
+            })
+            .collect();
 
         let first_update_id = update.first_update_id;
         let last_update_id = update.last_update_id;

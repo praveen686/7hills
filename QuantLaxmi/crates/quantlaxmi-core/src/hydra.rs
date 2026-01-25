@@ -4276,7 +4276,12 @@ impl crate::Strategy for HydraStrategy {
         // Extract price from WalMarketRecord (mantissa-based)
         // NOTE: Regime engine and experts need separate migration to WalMarketRecord
         let (price, exponent) = match &event.payload {
-            WalPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } => {
+            WalPayload::Quote {
+                bid_price_mantissa,
+                ask_price_mantissa,
+                price_exponent,
+                ..
+            } => {
                 // Mid-price
                 let mid = (bid_price_mantissa + ask_price_mantissa) / 2;
                 (mid, *price_exponent)
@@ -4288,7 +4293,11 @@ impl crate::Strategy for HydraStrategy {
                 // Best bid/ask mid-price
                 let bid = bids.first().map(|l| l.price).unwrap_or(0);
                 let ask = asks.first().map(|l| l.price).unwrap_or(0);
-                let mid = if bid > 0 && ask > 0 { (bid + ask) / 2 } else { bid.max(ask) };
+                let mid = if bid > 0 && ask > 0 {
+                    (bid + ask) / 2
+                } else {
+                    bid.max(ask)
+                };
                 (mid, -2)
             }
         };
@@ -4297,11 +4306,7 @@ impl crate::Strategy for HydraStrategy {
         let price_f64 = (price as f64) * 10f64.powi(exponent as i32);
 
         // Execute trading logic
-        self.execute_logic(
-            event.ts.timestamp_millis(),
-            &event.symbol,
-            price_f64,
-        );
+        self.execute_logic(event.ts.timestamp_millis(), &event.symbol, price_f64);
 
         // Periodic meta-allocator update
         if self.tick_count % 100 == 0 {

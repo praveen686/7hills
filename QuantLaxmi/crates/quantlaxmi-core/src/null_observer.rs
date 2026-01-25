@@ -362,9 +362,12 @@ impl Strategy for NullObserverStrategy {
 
         // Extract bid/ask from canonical WalMarketRecord (mantissa-based)
         let (bid, ask, exponent) = match &event.payload {
-            MarketPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } => {
-                (*bid_price_mantissa, *ask_price_mantissa, *price_exponent)
-            }
+            MarketPayload::Quote {
+                bid_price_mantissa,
+                ask_price_mantissa,
+                price_exponent,
+                ..
+            } => (*bid_price_mantissa, *ask_price_mantissa, *price_exponent),
             MarketPayload::Depth { bids, asks, .. } => {
                 let bid = bids.first().map(|l| l.price).unwrap_or(0);
                 let ask = asks.first().map(|l| l.price).unwrap_or(0);

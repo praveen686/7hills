@@ -21,9 +21,7 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
-use quantlaxmi_models::{
-    OrderEvent, OrderPayload, OrderStatus, Side, SignalEvent,
-};
+use quantlaxmi_models::{OrderEvent, OrderPayload, OrderStatus, Side, SignalEvent};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -220,17 +218,24 @@ impl Strategy for AeonStrategy {
 
         // Extract price from WalMarketRecord (mantissa-based)
         let (price_mantissa, exponent) = match &event.payload {
-            WalPayload::Quote { bid_price_mantissa, ask_price_mantissa, price_exponent, .. } => {
+            WalPayload::Quote {
+                bid_price_mantissa,
+                ask_price_mantissa,
+                price_exponent,
+                ..
+            } => {
                 let mid = (bid_price_mantissa + ask_price_mantissa) / 2;
                 (mid, *price_exponent)
             }
-            WalPayload::Trade { price_mantissa, .. } => {
-                (*price_mantissa, -2)
-            }
+            WalPayload::Trade { price_mantissa, .. } => (*price_mantissa, -2),
             WalPayload::Depth { bids, asks, .. } => {
                 let bid = bids.first().map(|l| l.price).unwrap_or(0);
                 let ask = asks.first().map(|l| l.price).unwrap_or(0);
-                let mid = if bid > 0 && ask > 0 { (bid + ask) / 2 } else { bid.max(ask) };
+                let mid = if bid > 0 && ask > 0 {
+                    (bid + ask) / 2
+                } else {
+                    bid.max(ask)
+                };
                 (mid, -2)
             }
         };
