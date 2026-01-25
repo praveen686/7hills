@@ -267,7 +267,6 @@ pub const CANONICAL_QUOTE_SCHEMA: &str = "canonical_v1";
 ///     - PERP_SESSION_MANIFEST_SCHEMA_VERSION
 ///     - load_perp_session_manifest() enforcement message
 ///     - fixtures + tests asserting against the constant
-/// =============================================================================
 pub const PERP_SESSION_MANIFEST_SCHEMA_VERSION: u32 = 3;
 
 /// Session manifest for perp capture.

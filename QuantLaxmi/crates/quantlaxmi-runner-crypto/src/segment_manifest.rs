@@ -252,25 +252,23 @@ impl SessionInventory {
     /// Add a segment to the inventory, computing gap from prior if applicable.
     pub fn add_segment(&mut self, manifest: &SegmentManifest) {
         // Check for gap from prior segment
-        if let Some(last) = self.segments.last() {
-            if let Some(ref last_end) = last.end_ts {
-                let start_ts = manifest.start_ts.to_rfc3339();
-                // Parse last_end as DateTime
-                if let Ok(last_end_dt) = DateTime::parse_from_rfc3339(last_end) {
-                    let gap_secs = (manifest.start_ts - last_end_dt.with_timezone(&Utc))
-                        .num_milliseconds() as f64
-                        / 1000.0;
-                    if gap_secs > 1.0 {
-                        // Only record gaps > 1 second
-                        self.gaps.push(InventoryGap {
-                            from_segment: last.segment_id.clone(),
-                            to_segment: manifest.segment_id.clone(),
-                            from_ts: last_end.clone(),
-                            to_ts: start_ts,
-                            duration_secs: gap_secs,
-                        });
-                    }
-                }
+        if let Some(last) = self.segments.last()
+            && let Some(ref last_end) = last.end_ts
+            && let Ok(last_end_dt) = DateTime::parse_from_rfc3339(last_end)
+        {
+            let start_ts = manifest.start_ts.to_rfc3339();
+            let gap_secs = (manifest.start_ts - last_end_dt.with_timezone(&Utc)).num_milliseconds()
+                as f64
+                / 1000.0;
+            if gap_secs > 1.0 {
+                // Only record gaps > 1 second
+                self.gaps.push(InventoryGap {
+                    from_segment: last.segment_id.clone(),
+                    to_segment: manifest.segment_id.clone(),
+                    from_ts: last_end.clone(),
+                    to_ts: start_ts,
+                    duration_secs: gap_secs,
+                });
             }
         }
 
@@ -295,20 +293,20 @@ impl SessionInventory {
 
     /// Update the last segment with finalized manifest data.
     pub fn update_last_segment(&mut self, manifest: &SegmentManifest) {
-        if let Some(last) = self.segments.last_mut() {
-            if last.segment_id == manifest.segment_id {
-                last.end_ts = manifest.end_ts.map(|t| t.to_rfc3339());
-                last.duration_secs = manifest.duration_secs;
-                last.stop_reason = manifest.stop_reason;
-                last.events = manifest.events.clone();
-            }
+        if let Some(last) = self.segments.last_mut()
+            && last.segment_id == manifest.segment_id
+        {
+            last.end_ts = manifest.end_ts.map(|t| t.to_rfc3339());
+            last.duration_secs = manifest.duration_secs;
+            last.stop_reason = manifest.stop_reason;
+            last.events = manifest.events.clone();
         }
     }
 
     /// Write inventory to disk.
     pub fn write(&self, out_dir: &Path) -> Result<()> {
         // Extract date from session_family (e.g., "perp_BTCUSDT_20260125" -> "20260125")
-        let date_part = self.session_family.split('_').last().unwrap_or("unknown");
+        let date_part = self.session_family.split('_').next_back().unwrap_or("unknown");
         let filename = format!("perp_{}_inventory.json", date_part);
         let inventory_path = out_dir.join(filename);
 
@@ -328,7 +326,7 @@ impl SessionInventory {
         binary_hash: &str,
     ) -> Self {
         // Extract date from session_family
-        let date_part = session_family.split('_').last().unwrap_or("unknown");
+        let date_part = session_family.split('_').next_back().unwrap_or("unknown");
         let filename = format!("perp_{}_inventory.json", date_part);
         let inventory_path = out_dir.join(filename);
 
@@ -408,24 +406,22 @@ impl ManagedSegment {
         );
 
         let mut manifest = manifest;
-        if let Some(last) = inventory.segments.last() {
-            if let Some(ref last_end) = last.end_ts {
-                if let Ok(last_end_dt) = DateTime::parse_from_rfc3339(last_end) {
-                    let gap_secs = (start_time - last_end_dt.with_timezone(&Utc)).num_milliseconds()
-                        as f64
-                        / 1000.0;
-                    manifest.gap_from_prior = Some(GapInfo {
-                        previous_segment_id: last.segment_id.clone(),
-                        gap_seconds: gap_secs,
-                        reason: "restart".to_string(),
-                    });
-                    tracing::info!(
-                        "Gap detected from prior segment {}: {:.1}s",
-                        last.segment_id,
-                        gap_secs
-                    );
-                }
-            }
+        if let Some(last) = inventory.segments.last()
+            && let Some(ref last_end) = last.end_ts
+            && let Ok(last_end_dt) = DateTime::parse_from_rfc3339(last_end)
+        {
+            let gap_secs =
+                (start_time - last_end_dt.with_timezone(&Utc)).num_milliseconds() as f64 / 1000.0;
+            manifest.gap_from_prior = Some(GapInfo {
+                previous_segment_id: last.segment_id.clone(),
+                gap_seconds: gap_secs,
+                reason: "restart".to_string(),
+            });
+            tracing::info!(
+                "Gap detected from prior segment {}: {:.1}s",
+                last.segment_id,
+                gap_secs
+            );
         }
 
         // Write initial manifest

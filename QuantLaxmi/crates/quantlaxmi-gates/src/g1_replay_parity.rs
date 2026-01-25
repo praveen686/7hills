@@ -99,7 +99,7 @@ impl G1ReplayParity {
         if let Err(e) = live_reader.verify_integrity(&live_manifest) {
             result.add_check(CheckResult::fail(
                 "live_integrity",
-                &format!("Live session integrity check failed: {e}"),
+                format!("Live session integrity check failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
             result.summary = format!(
@@ -117,7 +117,7 @@ impl G1ReplayParity {
         if let Err(e) = replay_reader.verify_integrity(&replay_manifest) {
             result.add_check(CheckResult::fail(
                 "replay_integrity",
-                &format!("Replay session integrity check failed: {e}"),
+                format!("Replay session integrity check failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
             result.summary = format!(
@@ -136,7 +136,7 @@ impl G1ReplayParity {
         if let Err(e) = live_reader.verify_stream_digests(&live_manifest) {
             result.add_check(CheckResult::fail(
                 "live_digests",
-                &format!("Live stream digest verification failed: {e}"),
+                format!("Live stream digest verification failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
             result.summary = format!(
@@ -154,7 +154,7 @@ impl G1ReplayParity {
         if let Err(e) = replay_reader.verify_stream_digests(&replay_manifest) {
             result.add_check(CheckResult::fail(
                 "replay_digests",
-                &format!("Replay stream digest verification failed: {e}"),
+                format!("Replay stream digest verification failed: {e}"),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
             result.summary = format!(
@@ -185,7 +185,7 @@ impl G1ReplayParity {
         if live_hash == replay_hash {
             result.add_check(CheckResult::pass(
                 "decision_parity",
-                &format!("Decision trace hashes match: {}", &live_hash[..16]),
+                format!("Decision trace hashes match: {}", &live_hash[..16]),
             ));
         } else {
             let divergence_idx = find_first_divergence_v2(&live_decisions, &replay_decisions);
@@ -207,7 +207,7 @@ impl G1ReplayParity {
 
             result.add_check(CheckResult::fail(
                 "decision_parity",
-                &format!(
+                format!(
                     "Decision trace hash mismatch at index {}{}. Live: {}..., Replay: {}...",
                     divergence_idx,
                     id_hint,
@@ -432,7 +432,7 @@ mod tests {
                 price_exponent: -2,
                 qty_exponent: -2,
                 spread_bps: 4.0, // EXCLUDED from hash
-                book_ts_ns: 1700000000_000_000_000,
+                book_ts_ns: 1_700_000_000_000_000_000,
             },
             confidence: 0.95,                  // EXCLUDED from hash
             metadata: serde_json::Value::Null, // EXCLUDED from hash

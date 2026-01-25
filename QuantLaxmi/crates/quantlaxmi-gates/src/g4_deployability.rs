@@ -77,7 +77,7 @@ impl Default for G4Config {
 }
 
 /// Deployment context for validation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DeploymentContext {
     /// Whether metrics exporter is initialized
     pub metrics_enabled: bool,
@@ -89,18 +89,6 @@ pub struct DeploymentContext {
     pub kill_switch: Option<Arc<AtomicBool>>,
     /// Run directory
     pub run_dir: Option<String>,
-}
-
-impl Default for DeploymentContext {
-    fn default() -> Self {
-        Self {
-            metrics_enabled: false,
-            tracing_enabled: false,
-            config_snapshot_path: None,
-            kill_switch: None,
-            run_dir: None,
-        }
-    }
 }
 
 /// G4 Deployability gate validator.
@@ -315,7 +303,7 @@ pub fn create_config_snapshot<T: Serialize>(
 ) -> Result<String, GateError> {
     let snapshot_path = run_dir.join("config_snapshot.json");
 
-    let json = serde_json::to_string_pretty(config).map_err(|e| GateError::Json(e))?;
+    let json = serde_json::to_string_pretty(config).map_err(GateError::Json)?;
 
     std::fs::create_dir_all(run_dir)?;
     std::fs::write(&snapshot_path, &json)?;

@@ -279,7 +279,7 @@ impl G0DataTruth {
         for entry in std::fs::read_dir(&wal_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "jsonl") {
+            if path.extension().is_some_and(|e| e == "jsonl") {
                 files_checked += 1;
                 let file_violations = self.check_file_monotonicity(&path)?;
                 events_checked += file_violations.1;
@@ -334,7 +334,7 @@ impl G0DataTruth {
                 for file in std::fs::read_dir(&path)? {
                     let file = file?;
                     let file_path = file.path();
-                    if file_path.extension().map_or(false, |e| e == "jsonl") {
+                    if file_path.extension().is_some_and(|e| e == "jsonl") {
                         files_checked += 1;
                         let file_violations = self.check_file_monotonicity(&file_path)?;
                         events_checked += file_violations.1;
@@ -383,25 +383,24 @@ impl G0DataTruth {
             count += 1;
 
             // Try to extract timestamp
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-                if let Some(ts_str) = json.get("ts").and_then(|t| t.as_str()) {
-                    if let Ok(ts) = ts_str.parse::<DateTime<Utc>>() {
-                        if let Some(prev) = last_ts {
-                            if ts < prev {
-                                let gap_ms = (prev - ts).num_milliseconds();
-                                if gap_ms.abs() > self.config.max_timestamp_gap_ms {
-                                    violations.push(format!(
-                                        "{}:{} - timestamp went backwards by {}ms",
-                                        path.file_name().unwrap_or_default().to_string_lossy(),
-                                        line_num + 1,
-                                        gap_ms.abs()
-                                    ));
-                                }
-                            }
-                        }
-                        last_ts = Some(ts);
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
+                && let Some(ts_str) = json.get("ts").and_then(|t| t.as_str())
+                && let Ok(ts) = ts_str.parse::<DateTime<Utc>>()
+            {
+                if let Some(prev) = last_ts
+                    && ts < prev
+                {
+                    let gap_ms = (prev - ts).num_milliseconds();
+                    if gap_ms.abs() > self.config.max_timestamp_gap_ms {
+                        violations.push(format!(
+                            "{}:{} - timestamp went backwards by {}ms",
+                            path.file_name().unwrap_or_default().to_string_lossy(),
+                            line_num + 1,
+                            gap_ms.abs()
+                        ));
                     }
                 }
+                last_ts = Some(ts);
             }
         }
 
@@ -481,7 +480,7 @@ impl G0DataTruth {
             for entry in std::fs::read_dir(&dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "jsonl") {
+                if path.extension().is_some_and(|e| e == "jsonl") {
                     let (file_errors, file_valid) = self.validate_file_schema(&path)?;
                     errors.extend(file_errors);
                     valid_events += file_valid;
