@@ -1926,19 +1926,64 @@ async fn run_backtest(
     println!("Strategy: {}", result.strategy_name);
     println!("Segment: {}", result.segment_path);
     println!("Events processed: {}", result.total_events);
-    println!("Fills executed: {}", result.total_fills);
     println!(
         "Duration: {:.1}s ({:.1}h)",
         result.duration_secs,
         result.duration_secs / 3600.0
     );
+
+    // Trade metrics
+    let m = &result.metrics;
     println!();
-    println!("Initial capital: ${:.2}", result.initial_cash);
-    println!("Final cash: ${:.2}", result.final_cash);
+    println!("--- Trade Statistics ---");
+    println!(
+        "Trades: {} ({}W / {}L)",
+        m.total_trades, m.winning_trades, m.losing_trades
+    );
+    println!("Win Rate: {:.1}%", m.win_rate);
+    println!("Avg Win: ${:.2} | Avg Loss: ${:.2}", m.avg_win, m.avg_loss);
+    if m.profit_factor.is_finite() {
+        println!("Profit Factor: {:.2}", m.profit_factor);
+    } else {
+        println!("Profit Factor: ∞ (no losses)");
+    }
+    println!("Expectancy: ${:.2} per trade", m.expectancy);
+    println!(
+        "Largest Win: ${:.2} | Largest Loss: ${:.2}",
+        m.largest_win, m.largest_loss
+    );
+
+    // Risk metrics
+    println!();
+    println!("--- Risk Metrics ---");
+    println!(
+        "Max Drawdown: ${:.2} ({:.2}%)",
+        m.max_drawdown, m.max_drawdown_pct
+    );
+    if m.sharpe_ratio.is_finite() {
+        println!("Sharpe Ratio: {:.2}", m.sharpe_ratio);
+    } else {
+        println!("Sharpe Ratio: N/A");
+    }
+    if m.sortino_ratio.is_finite() {
+        println!("Sortino Ratio: {:.2}", m.sortino_ratio);
+    } else {
+        println!("Sortino Ratio: N/A");
+    }
+    println!("Total Fees: ${:.2}", m.total_fees);
+    println!("Avg Trade Duration: {:.1}s", m.avg_trade_duration_secs);
+
+    // Capital summary
+    println!();
+    println!("--- Capital Summary ---");
+    println!("Initial Capital: ${:.2}", result.initial_cash);
+    println!("Final Cash: ${:.2}", result.final_cash);
     println!("Realized PnL: ${:.2}", result.realized_pnl);
     println!("Unrealized PnL: ${:.2}", result.unrealized_pnl);
-    println!("Total PnL: ${:.2}", result.total_pnl);
-    println!("Return: {:.2}%", result.return_pct);
+    println!(
+        "Total PnL: ${:.2} ({:.2}%)",
+        result.total_pnl, result.return_pct
+    );
 
     // Write JSON output if requested
     if let Some(path) = output_json {
