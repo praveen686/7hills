@@ -1,0 +1,25 @@
+[package]
+name = "quantlaxmi-events"
+version = "0.1.0"
+edition = "2024"
+description = "Canonical event types with decision trace hashing for replay parity"
+publish = false
+
+[dependencies]
+# Re-export canonical events from models
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+
+# Core dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+# Cryptographic hashing for trace parity
+sha2 = { workspace = true }
+
+# Hex encoding for hash display
+hex = { workspace = true }
+
+[dev-dependencies]

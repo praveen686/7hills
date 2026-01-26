@@ -2,6 +2,7 @@
 members = [
     # Core crates (shared trading spine)
     "crates/quantlaxmi-models",
+    "crates/quantlaxmi-events",
     "crates/quantlaxmi-core",
     "crates/quantlaxmi-data",
     "crates/quantlaxmi-risk",
