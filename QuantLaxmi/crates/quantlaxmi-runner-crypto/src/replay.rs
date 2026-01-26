@@ -203,9 +203,11 @@ impl SegmentReplayAdapter {
             }
 
             // Open spot quotes
-            if let Some(source) =
-                StreamSource::new(&path.join("spot_quotes.jsonl"), EventKind::SpotQuote, &symbol)?
-            {
+            if let Some(source) = StreamSource::new(
+                &path.join("spot_quotes.jsonl"),
+                EventKind::SpotQuote,
+                &symbol,
+            )? {
                 streams.push(source);
             }
 
@@ -250,11 +252,7 @@ impl SegmentReplayAdapter {
             }
         }
 
-        tracing::info!(
-            "Opened {} streams from {:?}",
-            streams.len(),
-            segment_dir
-        );
+        tracing::info!("Opened {} streams from {:?}", streams.len(), segment_dir);
 
         Ok(Self {
             streams,
@@ -367,13 +365,29 @@ mod tests {
 
         // Create spot quotes
         let mut spot = File::create(sym_dir.join("spot_quotes.jsonl")).unwrap();
-        writeln!(spot, r#"{{"ts":"2026-01-25T10:00:00Z","bid":100000,"ask":100001}}"#).unwrap();
-        writeln!(spot, r#"{{"ts":"2026-01-25T10:00:02Z","bid":100002,"ask":100003}}"#).unwrap();
+        writeln!(
+            spot,
+            r#"{{"ts":"2026-01-25T10:00:00Z","bid":100000,"ask":100001}}"#
+        )
+        .unwrap();
+        writeln!(
+            spot,
+            r#"{{"ts":"2026-01-25T10:00:02Z","bid":100002,"ask":100003}}"#
+        )
+        .unwrap();
 
         // Create perp quotes
         let mut perp = File::create(sym_dir.join("perp_quotes.jsonl")).unwrap();
-        writeln!(perp, r#"{{"ts":"2026-01-25T10:00:01Z","bid":100050,"ask":100051}}"#).unwrap();
-        writeln!(perp, r#"{{"ts":"2026-01-25T10:00:03Z","bid":100052,"ask":100053}}"#).unwrap();
+        writeln!(
+            perp,
+            r#"{{"ts":"2026-01-25T10:00:01Z","bid":100050,"ask":100051}}"#
+        )
+        .unwrap();
+        writeln!(
+            perp,
+            r#"{{"ts":"2026-01-25T10:00:03Z","bid":100052,"ask":100053}}"#
+        )
+        .unwrap();
 
         // Create funding
         let mut funding = File::create(sym_dir.join("funding.jsonl")).unwrap();

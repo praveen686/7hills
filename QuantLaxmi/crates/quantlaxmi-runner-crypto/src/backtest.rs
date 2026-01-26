@@ -20,6 +20,22 @@ use std::collections::HashMap;
 use std::path::Path;
 
 // =============================================================================
+// Pacing Mode
+// =============================================================================
+
+/// Pacing mode for replay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaceMode {
+    /// No delays - run as fast as possible (default).
+    #[default]
+    Fast,
+    /// Real-time pacing - sleep between events to match original timestamps.
+    #[serde(rename = "real")]
+    RealTime,
+}
+
+// =============================================================================
 // Order and Fill Types
 // =============================================================================
 
@@ -337,8 +353,7 @@ impl PaperExchange {
                 // Update position
                 if position.qty <= 0.0 {
                     // Adding to short or opening short
-                    let total_cost =
-                        position.avg_price * (-position.qty) + exec_price * intent.qty;
+                    let total_cost = position.avg_price * (-position.qty) + exec_price * intent.qty;
                     position.qty -= intent.qty;
                     position.avg_price = if position.qty < 0.0 {
                         total_cost / (-position.qty)
@@ -433,6 +448,8 @@ pub struct BacktestConfig {
     pub exchange: ExchangeConfig,
     /// Log progress every N events
     pub log_interval: usize,
+    /// Pacing mode (fast or real-time)
+    pub pace: PaceMode,
 }
 
 impl Default for BacktestConfig {
@@ -440,6 +457,7 @@ impl Default for BacktestConfig {
         Self {
             exchange: ExchangeConfig::default(),
             log_interval: 100_000,
+            pace: PaceMode::Fast,
         }
     }
 }
@@ -474,7 +492,9 @@ impl BacktestEngine {
     }
 
     /// Run backtest on a segment with a strategy.
-    pub fn run<S: Strategy>(
+    ///
+    /// This is an async method to support real-time pacing mode.
+    pub async fn run<S: Strategy>(
         &self,
         segment_dir: &Path,
         mut strategy: S,
@@ -485,11 +505,16 @@ impl BacktestEngine {
         let mut total_events = 0usize;
         let mut start_ts: Option<DateTime<Utc>> = None;
         let mut end_ts: Option<DateTime<Utc>> = None;
+        let mut last_event_ts: Option<DateTime<Utc>> = None;
+
+        let real_time = self.config.pace == PaceMode::RealTime;
+        let wall_clock_start = std::time::Instant::now();
 
         tracing::info!(
-            "Starting backtest: strategy={}, segment={:?}",
+            "Starting backtest: strategy={}, segment={:?}, pace={:?}",
             strategy.name(),
-            segment_dir
+            segment_dir,
+            self.config.pace
         );
 
         while let Some(event) = adapter.next_event()? {
@@ -498,6 +523,17 @@ impl BacktestEngine {
             if start_ts.is_none() {
                 start_ts = Some(event.ts);
             }
+
+            // Real-time pacing: sleep to match original event timing
+            if real_time && let Some(last_ts) = last_event_ts {
+                let event_delta_ms = (event.ts - last_ts).num_milliseconds();
+                if event_delta_ms > 0 && event_delta_ms < 60_000 {
+                    // Cap at 1 minute to avoid long waits on gaps
+                    tokio::time::sleep(std::time::Duration::from_millis(event_delta_ms as u64))
+                        .await;
+                }
+            }
+            last_event_ts = Some(event.ts);
             end_ts = Some(event.ts);
 
             // Update market state
@@ -514,12 +550,14 @@ impl BacktestEngine {
             }
 
             // Progress logging
-            if total_events % self.config.log_interval == 0 {
+            if total_events.is_multiple_of(self.config.log_interval) {
+                let elapsed = wall_clock_start.elapsed().as_secs_f64();
                 tracing::info!(
-                    "Progress: {} events, {} fills, PnL: {:.2}",
+                    "Progress: {} events, {} fills, PnL: {:.2}, elapsed: {:.1}s",
                     total_events,
                     exchange.fills().len(),
-                    exchange.realized_pnl() + exchange.unrealized_pnl()
+                    exchange.realized_pnl() + exchange.unrealized_pnl(),
+                    elapsed
                 );
             }
         }
@@ -558,7 +596,11 @@ impl BacktestEngine {
         tracing::info!("Duration: {:.1}s", result.duration_secs);
         tracing::info!("Realized PnL: ${:.2}", result.realized_pnl);
         tracing::info!("Unrealized PnL: ${:.2}", result.unrealized_pnl);
-        tracing::info!("Total PnL: ${:.2} ({:.2}%)", result.total_pnl, result.return_pct);
+        tracing::info!(
+            "Total PnL: ${:.2} ({:.2}%)",
+            result.total_pnl,
+            result.return_pct
+        );
 
         Ok(result)
     }
@@ -595,10 +637,10 @@ impl Strategy for FundingBiasStrategy {
 
     fn on_event(&mut self, event: &ReplayEvent) -> Vec<OrderIntent> {
         // Update funding rate
-        if event.kind == EventKind::Funding {
-            if let Some(rate) = event.payload.get("rate").and_then(|v| v.as_f64()) {
-                self.current_funding_rate = rate;
-            }
+        if event.kind == EventKind::Funding
+            && let Some(rate) = event.payload.get("rate").and_then(|v| v.as_f64())
+        {
+            self.current_funding_rate = rate;
         }
 
         // Only trade on perp quotes (to have price)
@@ -642,7 +684,7 @@ pub struct BasisCaptureStrategy {
     position_size: f64,
 
     // Position tracking (from fills, not assumptions)
-    position_qty: f64,  // Positive = long, negative = short
+    position_qty: f64, // Positive = long, negative = short
 
     // Cooldown to prevent churn
     last_trade_ts: Option<DateTime<Utc>>,
@@ -742,11 +784,14 @@ impl Strategy for BasisCaptureStrategy {
         let mut orders = vec![];
 
         // Progress logging every 1M events
-        if self.events_seen % 1_000_000 == 0 {
+        if self.events_seen.is_multiple_of(1_000_000) {
             eprintln!(
                 "[STRATEGY] events={}M, signals={}, fills={}, pos={:.4}, basis={:.2}bps",
-                self.events_seen / 1_000_000, self.signals_seen, self.fills_received,
-                self.position_qty, basis
+                self.events_seen / 1_000_000,
+                self.signals_seen,
+                self.fills_received,
+                self.position_qty,
+                basis
             );
         }
 
@@ -767,7 +812,8 @@ impl Strategy for BasisCaptureStrategy {
                 self.entries_emitted += 1;
                 tracing::debug!(
                     "ENTRY SIGNAL: SHORT at basis={:.2}bps, threshold={:.2}bps",
-                    basis, self.threshold_bps
+                    basis,
+                    self.threshold_bps
                 );
             } else if basis < -self.threshold_bps {
                 // Basis too low: long perp (expect convergence up)
@@ -779,7 +825,8 @@ impl Strategy for BasisCaptureStrategy {
                 self.entries_emitted += 1;
                 tracing::debug!(
                     "ENTRY SIGNAL: LONG at basis={:.2}bps, threshold={:.2}bps",
-                    basis, self.threshold_bps
+                    basis,
+                    self.threshold_bps
                 );
             }
         }
@@ -794,7 +841,8 @@ impl Strategy for BasisCaptureStrategy {
             self.exits_emitted += 1;
             tracing::debug!(
                 "EXIT SIGNAL: COVER SHORT at basis={:.2}bps, exit_threshold={:.2}bps",
-                basis, self.exit_threshold_bps
+                basis,
+                self.exit_threshold_bps
             );
         } else if self.is_long() && basis > -self.exit_threshold_bps {
             // Was long, basis has converged up enough - sell
@@ -806,7 +854,8 @@ impl Strategy for BasisCaptureStrategy {
             self.exits_emitted += 1;
             tracing::debug!(
                 "EXIT SIGNAL: SELL LONG at basis={:.2}bps, exit_threshold={:.2}bps",
-                basis, self.exit_threshold_bps
+                basis,
+                self.exit_threshold_bps
             );
         }
 
@@ -825,7 +874,10 @@ impl Strategy for BasisCaptureStrategy {
 
         tracing::debug!(
             "FILL RECEIVED: {} {:.6} @ {:.2}, new_pos={:.6}",
-            fill.side, fill.qty, fill.price, self.position_qty
+            fill.side,
+            fill.qty,
+            fill.price,
+            self.position_qty
         );
     }
 }
@@ -835,10 +887,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_extract_bid_ask_float_format() {
+        // Test that extract_bid_ask handles simple float format
+        let payload = serde_json::json!({"bid": 100000.0, "ask": 100010.0});
+        let (bid, ask) = extract_bid_ask(&payload, EventKind::PerpQuote);
+        assert_eq!(bid, 100000.0);
+        assert_eq!(ask, 100010.0);
+    }
+
+    #[test]
     fn test_paper_exchange_basic() {
         let mut exchange = PaperExchange::new(ExchangeConfig {
             fee_bps: 10.0,
-            initial_cash: 10_000.0,
+            initial_cash: 100_000.0, // Enough for 0.1 BTC at $100k
             use_perp_prices: true,
         });
 
@@ -851,11 +912,20 @@ mod tests {
         };
         exchange.update_market(&event);
 
-        // Execute buy
+        // Verify market state was set
+        assert!(
+            exchange.markets.contains_key("BTCUSDT"),
+            "Market state should be set"
+        );
+        let market = exchange.markets.get("BTCUSDT").unwrap();
+        assert_eq!(market.bid, 100000.0, "Bid should be 100000.0");
+        assert_eq!(market.ask, 100010.0, "Ask should be 100010.0");
+
+        // Execute buy (0.1 BTC @ $100,010 = $10,001 + ~$1 fee)
         let order = OrderIntent::market("BTCUSDT", Side::Buy, 0.1);
         let fill = exchange.execute(&order, Utc::now());
 
-        assert!(fill.is_some());
+        assert!(fill.is_some(), "Fill should not be None");
         let fill = fill.unwrap();
         assert_eq!(fill.price, 100010.0); // Bought at ask
         assert_eq!(fill.qty, 0.1);

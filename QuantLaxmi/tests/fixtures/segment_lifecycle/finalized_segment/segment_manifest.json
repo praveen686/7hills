@@ -1,0 +1,44 @@
+{
+  "schema_version": 3,
+  "quote_schema": "canonical_v1",
+  "state": "FINALIZED",
+  "session_family_id": "perp_BTCUSDT_20260125",
+  "segment_id": "finalized_segment",
+  "symbols": ["BTCUSDT"],
+  "capture_mode": "capture-perp-session",
+  "start_ts": "2026-01-25T10:00:00.000Z",
+  "end_ts": "2026-01-25T10:00:02.000Z",
+  "heartbeat_ts": "2026-01-25T10:00:02.000Z",
+  "stop_reason": "NORMAL_COMPLETION",
+  "events": {
+    "spot_quotes": 2,
+    "perp_quotes": 3,
+    "funding": 0
+  },
+  "binary_hash": "test_binary_hash_0123456789abcdef",
+  "config": {
+    "include_spot": true,
+    "include_depth": true,
+    "price_exponent": -2,
+    "qty_exponent": -8
+  },
+  "digests": {
+    "spot": {
+      "file_path": "tests/fixtures/segment_lifecycle/finalized_segment/BTCUSDT/spot_quotes.jsonl",
+      "sha256": "76302a63b6946903832ac861e0664df0bfbe82af4eacefd6320c3597393a2902",
+      "event_count": 2,
+      "size_bytes": 300,
+      "first_event_ts": "2026-01-25T10:00:00.000Z",
+      "last_event_ts": "2026-01-25T10:00:01.000Z"
+    },
+    "perp": {
+      "file_path": "tests/fixtures/segment_lifecycle/finalized_segment/BTCUSDT/perp_depth.jsonl",
+      "sha256": "62b509ecc256af6f590f6dbb851928f7de629fb10bad540f61deb06fb8733ebd",
+      "event_count": 3,
+      "size_bytes": 479,
+      "first_event_ts": "2026-01-25T10:00:00.000Z",
+      "last_event_ts": "2026-01-25T10:00:02.000Z"
+    }
+  },
+  "duration_secs": 2.0
+}
