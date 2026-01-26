@@ -35,6 +35,7 @@ quantlaxmi-executor = { path = "../quantlaxmi-executor" }
 quantlaxmi-risk = { path = "../quantlaxmi-risk" }
 quantlaxmi-options = { path = "../quantlaxmi-options" }
 quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
+quantlaxmi-strategy = { path = "../quantlaxmi-strategy" }
 
 # Async runtime
 tokio = { workspace = true }

@@ -230,8 +230,8 @@ fn test_digest_computation_validity() {
 #[test]
 fn test_schema_version_constant() {
     assert_eq!(
-        SEGMENT_MANIFEST_SCHEMA_VERSION, 4,
-        "Schema version should be 4 for Phase 1.3 (trace binding)"
+        SEGMENT_MANIFEST_SCHEMA_VERSION, 5,
+        "Schema version should be 5 for Phase 2 (strategy binding)"
     );
 }
 

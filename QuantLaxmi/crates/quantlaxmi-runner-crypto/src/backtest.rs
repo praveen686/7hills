@@ -1273,6 +1273,321 @@ impl BacktestEngine {
 
         Ok(result)
     }
+
+    /// Run backtest with Phase 2 Strategy SDK.
+    ///
+    /// This method uses the new Strategy trait from quantlaxmi-strategy:
+    /// - Strategy authors DecisionEvent AND OrderIntent together
+    /// - Engine records decisions to trace (not strategy)
+    /// - Returns strategy_binding for manifest
+    pub async fn run_with_strategy(
+        &self,
+        segment_dir: &Path,
+        mut strategy: Box<dyn quantlaxmi_strategy::Strategy>,
+        config_path: Option<&Path>,
+    ) -> Result<(
+        BacktestResult,
+        Option<crate::segment_manifest::StrategyBinding>,
+    )> {
+        let mut adapter = SegmentReplayAdapter::open(segment_dir)?;
+        let mut exchange = PaperExchange::new(self.config.exchange.clone());
+
+        // Decision trace builder for replay parity
+        let mut trace_builder = DecisionTraceBuilder::new();
+        let run_id = self
+            .config
+            .run_id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        let mut total_events = 0usize;
+        let mut start_ts: Option<DateTime<Utc>> = None;
+        let mut end_ts: Option<DateTime<Utc>> = None;
+        let mut last_event_ts: Option<DateTime<Utc>> = None;
+
+        // Fixed-point market state for Phase 2 strategy context
+        let mut market_snapshot = MarketSnapshot {
+            bid_price_mantissa: 0,
+            ask_price_mantissa: 0,
+            bid_qty_mantissa: 0,
+            ask_qty_mantissa: 0,
+            price_exponent: -2,
+            qty_exponent: -8,
+            spread_bps_mantissa: 0,
+            book_ts_ns: 0,
+        };
+
+        // Equity curve tracking
+        let mut equity_curve: Vec<EquityPoint> = Vec::new();
+        let mut peak_equity = self.config.exchange.initial_cash;
+        let mut last_fill_count = 0usize;
+
+        let real_time = self.config.pace == PaceMode::RealTime;
+        let wall_clock_start = std::time::Instant::now();
+
+        tracing::info!(
+            "Starting Phase 2 backtest: strategy={}, segment={:?}, pace={:?}, run_id={}",
+            strategy.short_id(),
+            segment_dir,
+            self.config.pace,
+            run_id
+        );
+
+        while let Some(event) = adapter.next_event()? {
+            total_events += 1;
+
+            if start_ts.is_none() {
+                start_ts = Some(event.ts);
+            }
+
+            // Real-time pacing: sleep to match original event timing
+            if real_time && let Some(last_ts) = last_event_ts {
+                let event_delta_ms = (event.ts - last_ts).num_milliseconds();
+                if event_delta_ms > 0 && event_delta_ms < 60_000 {
+                    tokio::time::sleep(std::time::Duration::from_millis(event_delta_ms as u64))
+                        .await;
+                }
+            }
+            last_event_ts = Some(event.ts);
+            end_ts = Some(event.ts);
+
+            // Update market state
+            exchange.update_market(&event);
+            let (bid, ask) = extract_bid_ask(&event.payload, event.kind);
+            if bid > 0.0 && ask > 0.0 {
+                let book_ts_ns = event.ts.timestamp_nanos_opt().unwrap_or(0);
+
+                // Update fixed-point market snapshot for strategy context
+                const PRICE_EXPONENT: i8 = -2;
+                const QTY_EXPONENT: i8 = -8;
+                let price_scale = 10f64.powi(-PRICE_EXPONENT as i32);
+                market_snapshot.bid_price_mantissa = (bid * price_scale).round() as i64;
+                market_snapshot.ask_price_mantissa = (ask * price_scale).round() as i64;
+                market_snapshot.price_exponent = PRICE_EXPONENT;
+                market_snapshot.qty_exponent = QTY_EXPONENT;
+                market_snapshot.book_ts_ns = book_ts_ns;
+
+                // Compute spread in basis points
+                let mid_price = (bid + ask) / 2.0;
+                market_snapshot.spread_bps_mantissa = if mid_price > 0.0 {
+                    MarketSnapshot::spread_bps_from_f64(((ask - bid) / mid_price) * 10_000.0)
+                } else {
+                    0
+                };
+            }
+
+            // Convert to Phase 2 ReplayEvent
+            let sdk_event = quantlaxmi_strategy::ReplayEvent {
+                ts: event.ts,
+                symbol: event.symbol.clone(),
+                kind: match event.kind {
+                    EventKind::SpotQuote => quantlaxmi_strategy::EventKind::SpotQuote,
+                    EventKind::PerpQuote => quantlaxmi_strategy::EventKind::PerpQuote,
+                    EventKind::PerpDepth => quantlaxmi_strategy::EventKind::PerpDepth,
+                    EventKind::Funding => quantlaxmi_strategy::EventKind::Funding,
+                    EventKind::Trade => quantlaxmi_strategy::EventKind::Trade,
+                    EventKind::Unknown => quantlaxmi_strategy::EventKind::Unknown,
+                },
+                payload: event.payload.clone(),
+            };
+
+            // Create strategy context
+            let ctx = quantlaxmi_strategy::StrategyContext {
+                ts: event.ts,
+                run_id: &run_id,
+                symbol: &event.symbol,
+                market: &market_snapshot,
+            };
+
+            // Strategy returns authored decisions + intents
+            let outputs = strategy.on_event(&sdk_event, &ctx);
+
+            // Process each decision output
+            for output in outputs {
+                // ENGINE records decision to trace (not strategy)
+                trace_builder.record(&output.decision);
+
+                // Execute intents (authored by strategy)
+                for intent in output.intents {
+                    // Convert Phase 2 OrderIntent to local OrderIntent
+                    let local_intent = OrderIntent {
+                        symbol: intent.symbol.clone(),
+                        side: match intent.side {
+                            quantlaxmi_strategy::Side::Buy => Side::Buy,
+                            quantlaxmi_strategy::Side::Sell => Side::Sell,
+                        },
+                        qty: intent.qty_mantissa as f64 * 10f64.powi(intent.qty_exponent as i32),
+                        limit_price: intent
+                            .limit_price_mantissa
+                            .map(|m| m as f64 * 10f64.powi(intent.price_exponent as i32)),
+                        tag: intent.tag.clone(),
+                    };
+
+                    if let Some(fill) = exchange.execute(&local_intent, event.ts) {
+                        // Convert fill to Phase 2 FillNotification
+                        let notification = quantlaxmi_strategy::FillNotification {
+                            ts: fill.ts,
+                            symbol: fill.symbol.clone(),
+                            side: match fill.side {
+                                Side::Buy => quantlaxmi_strategy::Side::Buy,
+                                Side::Sell => quantlaxmi_strategy::Side::Sell,
+                            },
+                            qty_mantissa: (fill.qty
+                                * 10f64.powi(-market_snapshot.qty_exponent as i32))
+                            .round() as i64,
+                            qty_exponent: market_snapshot.qty_exponent,
+                            price_mantissa: (fill.price
+                                * 10f64.powi(-market_snapshot.price_exponent as i32))
+                            .round() as i64,
+                            price_exponent: market_snapshot.price_exponent,
+                            fee_mantissa: (fill.fee
+                                * 10f64.powi(-market_snapshot.qty_exponent as i32))
+                            .round() as i64,
+                            fee_exponent: market_snapshot.qty_exponent,
+                            tag: fill.tag.clone(),
+                        };
+                        strategy.on_fill(&notification, &ctx);
+                    }
+                }
+            }
+
+            // Track equity curve after fills
+            let current_fill_count = exchange.fills().len();
+            if current_fill_count > last_fill_count {
+                let equity = exchange.cash() + exchange.realized_pnl() + exchange.unrealized_pnl();
+                peak_equity = peak_equity.max(equity);
+                let drawdown = peak_equity - equity;
+                let drawdown_pct = if peak_equity > 0.0 {
+                    (drawdown / peak_equity) * 100.0
+                } else {
+                    0.0
+                };
+
+                equity_curve.push(EquityPoint {
+                    ts: event.ts,
+                    equity,
+                    drawdown,
+                    drawdown_pct,
+                });
+                last_fill_count = current_fill_count;
+            }
+
+            // Progress logging
+            if total_events.is_multiple_of(self.config.log_interval) {
+                let elapsed = wall_clock_start.elapsed().as_secs_f64();
+                tracing::info!(
+                    "Progress: {} events, {} fills, {} decisions, PnL: {:.2}, elapsed: {:.1}s",
+                    total_events,
+                    exchange.fills().len(),
+                    trace_builder.len(),
+                    exchange.realized_pnl() + exchange.unrealized_pnl(),
+                    elapsed
+                );
+            }
+        }
+
+        // Finalize trace
+        let trace = trace_builder.finalize();
+        let trace_hash = trace.hash_hex();
+        let total_decisions = trace.len();
+
+        // Save trace if output path specified
+        let trace_path = if let Some(ref path) = self.config.output_trace {
+            let trace_file = Path::new(path);
+            trace
+                .save(trace_file)
+                .map_err(|e| anyhow::anyhow!("Failed to save trace: {}", e))?;
+            tracing::info!("Decision trace saved to: {}", path);
+            Some(path.clone())
+        } else {
+            None
+        };
+
+        let realized = exchange.realized_pnl();
+        let unrealized = exchange.unrealized_pnl();
+        let total_pnl = realized + unrealized;
+        let return_pct = (total_pnl / self.config.exchange.initial_cash) * 100.0;
+
+        let duration_secs = match (start_ts, end_ts) {
+            (Some(s), Some(e)) => (e - s).num_milliseconds() as f64 / 1000.0,
+            _ => 0.0,
+        };
+
+        // Extract round-trip trades and compute metrics
+        let fills = exchange.fills().to_vec();
+        let trades = extract_round_trips(&fills);
+        let metrics = TradeMetrics::compute(
+            &trades,
+            &equity_curve,
+            self.config.exchange.initial_cash,
+            duration_secs,
+        );
+
+        // Compute fixed-point PnL from fills for determinism
+        let mut pnl_fixed = PnlAccumulatorFixed::new();
+        for fill in &fills {
+            let price_mantissa = (fill.price * 100.0).round() as i64;
+            let qty_mantissa = (fill.qty * 100_000_000.0).round() as i64;
+            let fee_mantissa = (fill.fee * 100_000_000.0).round() as i64;
+            let is_buy = matches!(fill.side, Side::Buy);
+            pnl_fixed.process_fill(price_mantissa, qty_mantissa, fee_mantissa, is_buy);
+        }
+
+        // Create strategy binding for manifest
+        let strategy_binding = Some(crate::segment_manifest::StrategyBinding {
+            strategy_name: strategy.name().to_string(),
+            strategy_version: strategy.version().to_string(),
+            config_hash: strategy.config_hash(),
+            strategy_id: strategy.strategy_id(),
+            short_id: strategy.short_id(),
+            config_path: config_path.map(|p| p.display().to_string()),
+            config_snapshot: None, // Could be populated from config file
+        });
+
+        let result = BacktestResult {
+            strategy_name: strategy.short_id(),
+            segment_path: segment_dir.display().to_string(),
+            total_events,
+            total_fills: fills.len(),
+            total_decisions,
+            initial_cash: self.config.exchange.initial_cash,
+            final_cash: exchange.cash(),
+            realized_pnl: realized,
+            unrealized_pnl: unrealized,
+            total_pnl,
+            return_pct,
+            start_ts,
+            end_ts,
+            duration_secs,
+            fills,
+            trades,
+            metrics,
+            equity_curve,
+            trace_hash: trace_hash.clone(),
+            trace_path,
+            trace_encoding_version: trace.encoding_version,
+            realized_pnl_mantissa: pnl_fixed.realized_pnl_mantissa,
+            total_fees_mantissa: pnl_fixed.total_fees_mantissa,
+            pnl_exponent: PNL_EXPONENT,
+        };
+
+        tracing::info!("=== Phase 2 Backtest Complete ===");
+        tracing::info!("Strategy: {} ({})", strategy.name(), strategy.short_id());
+        tracing::info!("Events: {}", result.total_events);
+        tracing::info!("Fills: {}", result.total_fills);
+        tracing::info!("Decisions: {}", result.total_decisions);
+        tracing::info!("Trace hash: {}...", &trace_hash[..16]);
+        tracing::info!("Duration: {:.1}s", result.duration_secs);
+        tracing::info!("Realized PnL: ${:.2}", result.realized_pnl);
+        tracing::info!("Unrealized PnL: ${:.2}", result.unrealized_pnl);
+        tracing::info!(
+            "Total PnL: ${:.2} ({:.2}%)",
+            result.total_pnl,
+            result.return_pct
+        );
+
+        Ok((result, strategy_binding))
+    }
 }
 
 // =============================================================================

@@ -14,6 +14,9 @@ members = [
     "crates/quantlaxmi-gates",
     "crates/quantlaxmi-wal",
 
+    # Strategy SDK (Phase 2)
+    "crates/quantlaxmi-strategy",
+
     # Venue connectors (isolated by market)
     "crates/quantlaxmi-connectors-zerodha",
     "crates/quantlaxmi-connectors-binance",

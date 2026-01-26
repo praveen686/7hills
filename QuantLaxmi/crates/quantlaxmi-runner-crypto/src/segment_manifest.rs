@@ -173,10 +173,35 @@ pub struct TraceBinding {
     pub pnl_exponent: i8,
 }
 
+/// Strategy identity binding for manifest.
+///
+/// Records which strategy (and with what config) produced the trace.
+/// Enables reproducibility verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyBinding {
+    /// Strategy name (e.g., "funding_bias")
+    pub strategy_name: String,
+    /// Strategy version (e.g., "2.0.0")
+    pub strategy_version: String,
+    /// Full SHA-256 hash of canonical_bytes() (NOT JSON)
+    pub config_hash: String,
+    /// Full strategy_id: "{name}:{version}:{config_hash}"
+    pub strategy_id: String,
+    /// Short ID for display (first 8 chars of config_hash)
+    pub short_id: String,
+    /// Original config file path (if loaded from file)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_path: Option<String>,
+    /// JSON snapshot for human inspection ONLY (not used in hashing)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_snapshot: Option<serde_json::Value>,
+}
+
 /// Current segment manifest schema version.
 /// Bump this when manifest structure changes.
 /// Schema version 4: Added trace_binding for decision trace artifact binding.
-pub const SEGMENT_MANIFEST_SCHEMA_VERSION: u32 = 4;
+/// Schema version 5: Added strategy_binding for strategy identity (Phase 2).
+pub const SEGMENT_MANIFEST_SCHEMA_VERSION: u32 = 5;
 
 /// Segment manifest - written to segment_manifest.json in each segment directory.
 ///
@@ -225,8 +250,11 @@ pub struct SegmentManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_secs: Option<f64>,
     /// Decision trace binding (populated after backtest/replay)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_binding: Option<TraceBinding>,
+    /// Strategy identity binding (populated after backtest with strategy SDK)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy_binding: Option<StrategyBinding>,
 }
 
 impl SegmentManifest {
@@ -262,6 +290,7 @@ impl SegmentManifest {
             gap_from_prior: None,
             duration_secs: None,
             trace_binding: None,
+            strategy_binding: None,
         }
     }
 
@@ -439,6 +468,39 @@ impl SegmentManifest {
         });
 
         Ok(())
+    }
+
+    /// Bind strategy identity to manifest.
+    ///
+    /// Records the strategy that produced the decision trace for reproducibility.
+    ///
+    /// # Arguments
+    /// * `name` - Strategy name
+    /// * `version` - Strategy version
+    /// * `config_hash` - SHA-256 of canonical config bytes (NOT JSON)
+    /// * `config_path` - Original config file path (if loaded from file)
+    /// * `config_snapshot` - JSON snapshot for human inspection (optional)
+    pub fn bind_strategy(
+        &mut self,
+        name: &str,
+        version: &str,
+        config_hash: &str,
+        config_path: Option<&str>,
+        config_snapshot: Option<serde_json::Value>,
+    ) {
+        let strategy_id = format!("{}:{}:{}", name, version, config_hash);
+        let short_hash = &config_hash[..8.min(config_hash.len())];
+        let short_id = format!("{}:{}:{}", name, version, short_hash);
+
+        self.strategy_binding = Some(StrategyBinding {
+            strategy_name: name.to_string(),
+            strategy_version: version.to_string(),
+            config_hash: config_hash.to_string(),
+            strategy_id,
+            short_id,
+            config_path: config_path.map(|s| s.to_string()),
+            config_snapshot,
+        });
     }
 
     /// Write manifest to disk atomically (write temp + rename).

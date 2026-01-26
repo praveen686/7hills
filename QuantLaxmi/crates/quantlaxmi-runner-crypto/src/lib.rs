@@ -358,8 +358,19 @@ pub enum Commands {
         segment_dir: String,
 
         /// Strategy to run: "funding_bias" or "basis_capture"
+        /// With --use-sdk, this selects from the Phase 2 Strategy Registry.
         #[arg(long, default_value = "basis_capture")]
         strategy: String,
+
+        /// Path to strategy config TOML file (Phase 2 SDK only).
+        /// If not provided, default config is used.
+        #[arg(long)]
+        strategy_config: Option<String>,
+
+        /// Use Phase 2 Strategy SDK instead of legacy strategies.
+        /// When enabled, the strategy is loaded from the StrategyRegistry.
+        #[arg(long, default_value_t = false)]
+        use_sdk: bool,
 
         /// Initial capital (USD)
         #[arg(long, default_value_t = 10000.0)]
@@ -369,11 +380,11 @@ pub enum Commands {
         #[arg(long, default_value_t = 10.0)]
         fee_bps: f64,
 
-        /// Position size for strategy
+        /// Position size for strategy (legacy strategies only)
         #[arg(long, default_value_t = 0.1)]
         position_size: f64,
 
-        /// Basis threshold in bps (for basis_capture strategy)
+        /// Basis threshold in bps (for basis_capture strategy, legacy only)
         #[arg(long, default_value_t = 5.0)]
         threshold_bps: f64,
 
@@ -561,6 +572,8 @@ async fn async_main() -> anyhow::Result<()> {
         Commands::Backtest {
             segment_dir,
             strategy,
+            strategy_config,
+            use_sdk,
             initial_capital,
             fee_bps,
             position_size,
@@ -573,6 +586,8 @@ async fn async_main() -> anyhow::Result<()> {
             run_backtest(
                 &segment_dir,
                 &strategy,
+                strategy_config.as_deref(),
+                use_sdk,
                 initial_capital,
                 fee_bps,
                 position_size,
@@ -1886,6 +1901,8 @@ async fn run_replay_segment(segment_dir: &str, output: &str, limit: usize) -> an
 async fn run_backtest(
     segment_dir: &str,
     strategy_name: &str,
+    strategy_config: Option<&str>,
+    use_sdk: bool,
     initial_capital: f64,
     fee_bps: f64,
     position_size: f64,
@@ -1899,6 +1916,7 @@ async fn run_backtest(
         BacktestConfig, BacktestEngine, BasisCaptureStrategy, ExchangeConfig, FundingBiasStrategy,
         PaceMode,
     };
+    use quantlaxmi_strategy::StrategyRegistry;
 
     let segment_path = std::path::Path::new(segment_dir);
     if !segment_path.exists() {
@@ -1934,20 +1952,49 @@ async fn run_backtest(
     tracing::info!("Fee: {:.1} bps", fee_bps);
     tracing::info!("Pace: {}", pace);
 
-    let result = match strategy_name {
-        "funding_bias" => {
-            let strategy = FundingBiasStrategy::new(position_size, threshold_bps / 10_000.0);
-            engine.run(segment_path, strategy).await?
+    // Run backtest with either SDK strategy or legacy strategy
+    let result = if use_sdk {
+        // Phase 2 SDK: Create strategy from registry
+        let registry = StrategyRegistry::with_builtins();
+        let config_path = strategy_config.map(std::path::Path::new);
+
+        let strategy = registry
+            .create(strategy_name, config_path)
+            .map_err(|e| anyhow::anyhow!("Failed to create strategy '{}': {}", strategy_name, e))?;
+
+        tracing::info!(
+            "Using Phase 2 SDK strategy: {} (config: {:?})",
+            strategy.short_id(),
+            strategy_config
+        );
+
+        let (result, strategy_binding) = engine
+            .run_with_strategy(segment_path, strategy, config_path)
+            .await?;
+
+        // Log strategy binding for manifest
+        if let Some(ref binding) = strategy_binding {
+            tracing::info!("Strategy binding: {}", binding.strategy_id);
         }
-        "basis_capture" => {
-            let strategy = BasisCaptureStrategy::new(threshold_bps, position_size);
-            engine.run(segment_path, strategy).await?
-        }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unknown strategy: {}. Available: funding_bias, basis_capture",
-                strategy_name
-            ));
+
+        result
+    } else {
+        // Legacy strategies (Phase 1)
+        match strategy_name {
+            "funding_bias" => {
+                let strategy = FundingBiasStrategy::new(position_size, threshold_bps / 10_000.0);
+                engine.run(segment_path, strategy).await?
+            }
+            "basis_capture" => {
+                let strategy = BasisCaptureStrategy::new(threshold_bps, position_size);
+                engine.run(segment_path, strategy).await?
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unknown strategy: {}. Available: funding_bias, basis_capture. Use --use-sdk for Phase 2 strategies.",
+                    strategy_name
+                ));
+            }
         }
     };
 

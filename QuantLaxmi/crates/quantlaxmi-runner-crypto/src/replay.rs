@@ -32,6 +32,8 @@ pub enum EventKind {
     PerpQuote,
     PerpDepth,
     Funding,
+    Trade,
+    Unknown,
 }
 
 /// Unified event envelope for replay.
@@ -331,6 +333,7 @@ impl ReplayStats {
                 EventKind::SpotQuote => stats.spot_events += 1,
                 EventKind::PerpQuote | EventKind::PerpDepth => stats.perp_events += 1,
                 EventKind::Funding => stats.funding_events += 1,
+                EventKind::Trade | EventKind::Unknown => {} // Not tracked in stats
             }
 
             if stats.first_ts.is_none() {
