@@ -20,6 +20,22 @@ use std::collections::HashMap;
 use std::path::Path;
 
 // =============================================================================
+// Pacing Mode
+// =============================================================================
+
+/// Pacing mode for replay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaceMode {
+    /// No delays - run as fast as possible (default).
+    #[default]
+    Fast,
+    /// Real-time pacing - sleep between events to match original timestamps.
+    #[serde(rename = "real")]
+    RealTime,
+}
+
+// =============================================================================
 // Order and Fill Types
 // =============================================================================
 
@@ -79,6 +95,276 @@ pub struct Fill {
     pub price: f64,
     pub fee: f64,
     pub tag: Option<String>,
+}
+
+// =============================================================================
+// Trade Metrics
+// =============================================================================
+
+/// A completed round-trip trade (entry + exit).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoundTrip {
+    pub symbol: String,
+    pub side: Side, // Entry side (Buy = long trade, Sell = short trade)
+    pub entry_ts: DateTime<Utc>,
+    pub exit_ts: DateTime<Utc>,
+    pub entry_price: f64,
+    pub exit_price: f64,
+    pub qty: f64,
+    pub entry_fee: f64,
+    pub exit_fee: f64,
+    pub pnl: f64,     // Net PnL after fees
+    pub pnl_pct: f64, // PnL as percentage of entry notional
+    pub duration_secs: f64,
+}
+
+/// Point on the equity curve.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EquityPoint {
+    pub ts: DateTime<Utc>,
+    pub equity: f64,
+    pub drawdown: f64,     // Current drawdown from peak
+    pub drawdown_pct: f64, // Drawdown as percentage
+}
+
+/// Aggregated trade metrics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TradeMetrics {
+    // Trade counts
+    pub total_trades: usize,
+    pub winning_trades: usize,
+    pub losing_trades: usize,
+    pub win_rate: f64,
+
+    // PnL stats
+    pub gross_profit: f64,
+    pub gross_loss: f64,
+    pub net_pnl: f64,
+    pub profit_factor: f64, // gross_profit / |gross_loss|
+    pub expectancy: f64,    // Average PnL per trade
+
+    // Win/loss averages
+    pub avg_win: f64,
+    pub avg_loss: f64,
+    pub avg_win_loss_ratio: f64, // avg_win / |avg_loss|
+    pub largest_win: f64,
+    pub largest_loss: f64,
+
+    // Risk metrics
+    pub max_drawdown: f64,
+    pub max_drawdown_pct: f64,
+    pub sharpe_ratio: f64,  // Annualized, assumes 365 days
+    pub sortino_ratio: f64, // Downside deviation only
+
+    // Trade timing
+    pub avg_trade_duration_secs: f64,
+    pub total_fees: f64,
+}
+
+impl TradeMetrics {
+    /// Compute metrics from round-trip trades and equity curve.
+    pub fn compute(
+        trades: &[RoundTrip],
+        equity_curve: &[EquityPoint],
+        _initial_capital: f64,
+        duration_secs: f64,
+    ) -> Self {
+        if trades.is_empty() {
+            return Self::default();
+        }
+
+        let total_trades = trades.len();
+        let mut winning_trades = 0usize;
+        let mut losing_trades = 0usize;
+        let mut gross_profit = 0.0;
+        let mut gross_loss = 0.0;
+        let mut largest_win = 0.0f64;
+        let mut largest_loss = 0.0f64;
+        let mut total_duration = 0.0;
+        let mut total_fees = 0.0;
+        let mut returns: Vec<f64> = Vec::with_capacity(trades.len());
+
+        for trade in trades {
+            let pnl = trade.pnl;
+            returns.push(trade.pnl_pct);
+            total_duration += trade.duration_secs;
+            total_fees += trade.entry_fee + trade.exit_fee;
+
+            if pnl >= 0.0 {
+                winning_trades += 1;
+                gross_profit += pnl;
+                largest_win = largest_win.max(pnl);
+            } else {
+                losing_trades += 1;
+                gross_loss += pnl.abs();
+                largest_loss = largest_loss.max(pnl.abs());
+            }
+        }
+
+        let net_pnl = gross_profit - gross_loss;
+        let win_rate = if total_trades > 0 {
+            (winning_trades as f64 / total_trades as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let avg_win = if winning_trades > 0 {
+            gross_profit / winning_trades as f64
+        } else {
+            0.0
+        };
+
+        let avg_loss = if losing_trades > 0 {
+            gross_loss / losing_trades as f64
+        } else {
+            0.0
+        };
+
+        let profit_factor = if gross_loss > 0.0 {
+            gross_profit / gross_loss
+        } else if gross_profit > 0.0 {
+            f64::INFINITY
+        } else {
+            0.0
+        };
+
+        let expectancy = net_pnl / total_trades as f64;
+
+        let avg_win_loss_ratio = if avg_loss > 0.0 {
+            avg_win / avg_loss
+        } else if avg_win > 0.0 {
+            f64::INFINITY
+        } else {
+            0.0
+        };
+
+        // Max drawdown from equity curve
+        let (max_drawdown, max_drawdown_pct) = equity_curve
+            .iter()
+            .map(|p| (p.drawdown, p.drawdown_pct))
+            .fold((0.0f64, 0.0f64), |(max_dd, max_pct), (dd, pct)| {
+                (max_dd.max(dd), max_pct.max(pct))
+            });
+
+        // Sharpe ratio (annualized)
+        // Minimum std_dev threshold to avoid blow-up from near-identical returns
+        const MIN_STD_DEV: f64 = 0.01; // 0.01% minimum standard deviation
+        const MAX_RATIO: f64 = 99.0; // Clamp to reasonable bounds
+
+        let (sharpe_ratio, sortino_ratio) = if returns.len() > 1 && duration_secs > 0.0 {
+            let mean_return: f64 = returns.iter().sum::<f64>() / returns.len() as f64;
+            let variance: f64 = returns
+                .iter()
+                .map(|r| (r - mean_return).powi(2))
+                .sum::<f64>()
+                / (returns.len() - 1) as f64;
+            let std_dev = variance.sqrt();
+
+            // Downside deviation (only negative returns)
+            let downside_variance: f64 = returns
+                .iter()
+                .filter(|&&r| r < 0.0)
+                .map(|r| r.powi(2))
+                .sum::<f64>()
+                / returns.len() as f64;
+            let downside_dev = downside_variance.sqrt();
+
+            // Annualize: assume trades are spread over duration_secs
+            // trades_per_year = total_trades * (365 * 24 * 3600 / duration_secs)
+            let annual_factor = (365.0 * 24.0 * 3600.0 / duration_secs).sqrt();
+
+            let sharpe = if std_dev >= MIN_STD_DEV {
+                ((mean_return / std_dev) * annual_factor).clamp(-MAX_RATIO, MAX_RATIO)
+            } else {
+                0.0 // Insufficient variance for meaningful Sharpe
+            };
+
+            let sortino = if downside_dev >= MIN_STD_DEV {
+                ((mean_return / downside_dev) * annual_factor).clamp(-MAX_RATIO, MAX_RATIO)
+            } else if mean_return > 0.0 {
+                MAX_RATIO // All positive returns, cap at max
+            } else {
+                0.0
+            };
+
+            (sharpe, sortino)
+        } else {
+            (0.0, 0.0)
+        };
+
+        Self {
+            total_trades,
+            winning_trades,
+            losing_trades,
+            win_rate,
+            gross_profit,
+            gross_loss,
+            net_pnl,
+            profit_factor,
+            expectancy,
+            avg_win,
+            avg_loss,
+            avg_win_loss_ratio,
+            largest_win,
+            largest_loss,
+            max_drawdown,
+            max_drawdown_pct,
+            sharpe_ratio,
+            sortino_ratio,
+            avg_trade_duration_secs: total_duration / total_trades as f64,
+            total_fees,
+        }
+    }
+}
+
+/// Extract round-trip trades from a list of fills.
+///
+/// Matches entry fills to exit fills based on tags (entry/exit pairs).
+pub fn extract_round_trips(fills: &[Fill]) -> Vec<RoundTrip> {
+    let mut trades = Vec::new();
+    let mut pending_entries: Vec<&Fill> = Vec::new();
+
+    for fill in fills {
+        let tag = fill.tag.as_deref().unwrap_or("");
+
+        if tag.contains("entry") {
+            pending_entries.push(fill);
+        } else if tag.contains("exit") && !pending_entries.is_empty() {
+            // Match with the oldest pending entry for the same symbol
+            if let Some(idx) = pending_entries.iter().position(|e| e.symbol == fill.symbol) {
+                let entry = pending_entries.remove(idx);
+                let entry_notional = entry.price * entry.qty;
+                let exit_notional = fill.price * fill.qty;
+
+                // Calculate PnL based on trade direction
+                let gross_pnl = match entry.side {
+                    Side::Buy => exit_notional - entry_notional, // Long: sell high - buy low
+                    Side::Sell => entry_notional - exit_notional, // Short: sell high - buy low
+                };
+                let net_pnl = gross_pnl - entry.fee - fill.fee;
+                let pnl_pct = (net_pnl / entry_notional) * 100.0;
+
+                let duration_secs = (fill.ts - entry.ts).num_milliseconds() as f64 / 1000.0;
+
+                trades.push(RoundTrip {
+                    symbol: entry.symbol.clone(),
+                    side: entry.side,
+                    entry_ts: entry.ts,
+                    exit_ts: fill.ts,
+                    entry_price: entry.price,
+                    exit_price: fill.price,
+                    qty: entry.qty,
+                    entry_fee: entry.fee,
+                    exit_fee: fill.fee,
+                    pnl: net_pnl,
+                    pnl_pct,
+                    duration_secs,
+                });
+            }
+        }
+    }
+
+    trades
 }
 
 // =============================================================================
@@ -337,8 +623,7 @@ impl PaperExchange {
                 // Update position
                 if position.qty <= 0.0 {
                     // Adding to short or opening short
-                    let total_cost =
-                        position.avg_price * (-position.qty) + exec_price * intent.qty;
+                    let total_cost = position.avg_price * (-position.qty) + exec_price * intent.qty;
                     position.qty -= intent.qty;
                     position.avg_price = if position.qty < 0.0 {
                         total_cost / (-position.qty)
@@ -433,6 +718,8 @@ pub struct BacktestConfig {
     pub exchange: ExchangeConfig,
     /// Log progress every N events
     pub log_interval: usize,
+    /// Pacing mode (fast or real-time)
+    pub pace: PaceMode,
 }
 
 impl Default for BacktestConfig {
@@ -440,6 +727,7 @@ impl Default for BacktestConfig {
         Self {
             exchange: ExchangeConfig::default(),
             log_interval: 100_000,
+            pace: PaceMode::Fast,
         }
     }
 }
@@ -461,6 +749,9 @@ pub struct BacktestResult {
     pub end_ts: Option<DateTime<Utc>>,
     pub duration_secs: f64,
     pub fills: Vec<Fill>,
+    pub trades: Vec<RoundTrip>,
+    pub metrics: TradeMetrics,
+    pub equity_curve: Vec<EquityPoint>,
 }
 
 /// Backtest engine.
@@ -474,7 +765,9 @@ impl BacktestEngine {
     }
 
     /// Run backtest on a segment with a strategy.
-    pub fn run<S: Strategy>(
+    ///
+    /// This is an async method to support real-time pacing mode.
+    pub async fn run<S: Strategy>(
         &self,
         segment_dir: &Path,
         mut strategy: S,
@@ -485,11 +778,21 @@ impl BacktestEngine {
         let mut total_events = 0usize;
         let mut start_ts: Option<DateTime<Utc>> = None;
         let mut end_ts: Option<DateTime<Utc>> = None;
+        let mut last_event_ts: Option<DateTime<Utc>> = None;
+
+        // Equity curve tracking
+        let mut equity_curve: Vec<EquityPoint> = Vec::new();
+        let mut peak_equity = self.config.exchange.initial_cash;
+        let mut last_fill_count = 0usize;
+
+        let real_time = self.config.pace == PaceMode::RealTime;
+        let wall_clock_start = std::time::Instant::now();
 
         tracing::info!(
-            "Starting backtest: strategy={}, segment={:?}",
+            "Starting backtest: strategy={}, segment={:?}, pace={:?}",
             strategy.name(),
-            segment_dir
+            segment_dir,
+            self.config.pace
         );
 
         while let Some(event) = adapter.next_event()? {
@@ -498,6 +801,17 @@ impl BacktestEngine {
             if start_ts.is_none() {
                 start_ts = Some(event.ts);
             }
+
+            // Real-time pacing: sleep to match original event timing
+            if real_time && let Some(last_ts) = last_event_ts {
+                let event_delta_ms = (event.ts - last_ts).num_milliseconds();
+                if event_delta_ms > 0 && event_delta_ms < 60_000 {
+                    // Cap at 1 minute to avoid long waits on gaps
+                    tokio::time::sleep(std::time::Duration::from_millis(event_delta_ms as u64))
+                        .await;
+                }
+            }
+            last_event_ts = Some(event.ts);
             end_ts = Some(event.ts);
 
             // Update market state
@@ -513,13 +827,36 @@ impl BacktestEngine {
                 }
             }
 
+            // Track equity curve after fills
+            let current_fill_count = exchange.fills().len();
+            if current_fill_count > last_fill_count {
+                let equity = exchange.cash() + exchange.realized_pnl() + exchange.unrealized_pnl();
+                peak_equity = peak_equity.max(equity);
+                let drawdown = peak_equity - equity;
+                let drawdown_pct = if peak_equity > 0.0 {
+                    (drawdown / peak_equity) * 100.0
+                } else {
+                    0.0
+                };
+
+                equity_curve.push(EquityPoint {
+                    ts: event.ts,
+                    equity,
+                    drawdown,
+                    drawdown_pct,
+                });
+                last_fill_count = current_fill_count;
+            }
+
             // Progress logging
-            if total_events % self.config.log_interval == 0 {
+            if total_events.is_multiple_of(self.config.log_interval) {
+                let elapsed = wall_clock_start.elapsed().as_secs_f64();
                 tracing::info!(
-                    "Progress: {} events, {} fills, PnL: {:.2}",
+                    "Progress: {} events, {} fills, PnL: {:.2}, elapsed: {:.1}s",
                     total_events,
                     exchange.fills().len(),
-                    exchange.realized_pnl() + exchange.unrealized_pnl()
+                    exchange.realized_pnl() + exchange.unrealized_pnl(),
+                    elapsed
                 );
             }
         }
@@ -534,11 +871,21 @@ impl BacktestEngine {
             _ => 0.0,
         };
 
+        // Extract round-trip trades and compute metrics
+        let fills = exchange.fills().to_vec();
+        let trades = extract_round_trips(&fills);
+        let metrics = TradeMetrics::compute(
+            &trades,
+            &equity_curve,
+            self.config.exchange.initial_cash,
+            duration_secs,
+        );
+
         let result = BacktestResult {
             strategy_name: strategy.name().to_string(),
             segment_path: segment_dir.display().to_string(),
             total_events,
-            total_fills: exchange.fills().len(),
+            total_fills: fills.len(),
             initial_cash: self.config.exchange.initial_cash,
             final_cash: exchange.cash(),
             realized_pnl: realized,
@@ -548,7 +895,10 @@ impl BacktestEngine {
             start_ts,
             end_ts,
             duration_secs,
-            fills: exchange.fills().to_vec(),
+            fills,
+            trades,
+            metrics,
+            equity_curve,
         };
 
         tracing::info!("=== Backtest Complete ===");
@@ -558,7 +908,11 @@ impl BacktestEngine {
         tracing::info!("Duration: {:.1}s", result.duration_secs);
         tracing::info!("Realized PnL: ${:.2}", result.realized_pnl);
         tracing::info!("Unrealized PnL: ${:.2}", result.unrealized_pnl);
-        tracing::info!("Total PnL: ${:.2} ({:.2}%)", result.total_pnl, result.return_pct);
+        tracing::info!(
+            "Total PnL: ${:.2} ({:.2}%)",
+            result.total_pnl,
+            result.return_pct
+        );
 
         Ok(result)
     }
@@ -595,10 +949,10 @@ impl Strategy for FundingBiasStrategy {
 
     fn on_event(&mut self, event: &ReplayEvent) -> Vec<OrderIntent> {
         // Update funding rate
-        if event.kind == EventKind::Funding {
-            if let Some(rate) = event.payload.get("rate").and_then(|v| v.as_f64()) {
-                self.current_funding_rate = rate;
-            }
+        if event.kind == EventKind::Funding
+            && let Some(rate) = event.payload.get("rate").and_then(|v| v.as_f64())
+        {
+            self.current_funding_rate = rate;
         }
 
         // Only trade on perp quotes (to have price)
@@ -642,7 +996,7 @@ pub struct BasisCaptureStrategy {
     position_size: f64,
 
     // Position tracking (from fills, not assumptions)
-    position_qty: f64,  // Positive = long, negative = short
+    position_qty: f64, // Positive = long, negative = short
 
     // Cooldown to prevent churn
     last_trade_ts: Option<DateTime<Utc>>,
@@ -742,11 +1096,14 @@ impl Strategy for BasisCaptureStrategy {
         let mut orders = vec![];
 
         // Progress logging every 1M events
-        if self.events_seen % 1_000_000 == 0 {
+        if self.events_seen.is_multiple_of(1_000_000) {
             eprintln!(
                 "[STRATEGY] events={}M, signals={}, fills={}, pos={:.4}, basis={:.2}bps",
-                self.events_seen / 1_000_000, self.signals_seen, self.fills_received,
-                self.position_qty, basis
+                self.events_seen / 1_000_000,
+                self.signals_seen,
+                self.fills_received,
+                self.position_qty,
+                basis
             );
         }
 
@@ -767,7 +1124,8 @@ impl Strategy for BasisCaptureStrategy {
                 self.entries_emitted += 1;
                 tracing::debug!(
                     "ENTRY SIGNAL: SHORT at basis={:.2}bps, threshold={:.2}bps",
-                    basis, self.threshold_bps
+                    basis,
+                    self.threshold_bps
                 );
             } else if basis < -self.threshold_bps {
                 // Basis too low: long perp (expect convergence up)
@@ -779,7 +1137,8 @@ impl Strategy for BasisCaptureStrategy {
                 self.entries_emitted += 1;
                 tracing::debug!(
                     "ENTRY SIGNAL: LONG at basis={:.2}bps, threshold={:.2}bps",
-                    basis, self.threshold_bps
+                    basis,
+                    self.threshold_bps
                 );
             }
         }
@@ -794,7 +1153,8 @@ impl Strategy for BasisCaptureStrategy {
             self.exits_emitted += 1;
             tracing::debug!(
                 "EXIT SIGNAL: COVER SHORT at basis={:.2}bps, exit_threshold={:.2}bps",
-                basis, self.exit_threshold_bps
+                basis,
+                self.exit_threshold_bps
             );
         } else if self.is_long() && basis > -self.exit_threshold_bps {
             // Was long, basis has converged up enough - sell
@@ -806,7 +1166,8 @@ impl Strategy for BasisCaptureStrategy {
             self.exits_emitted += 1;
             tracing::debug!(
                 "EXIT SIGNAL: SELL LONG at basis={:.2}bps, exit_threshold={:.2}bps",
-                basis, self.exit_threshold_bps
+                basis,
+                self.exit_threshold_bps
             );
         }
 
@@ -825,7 +1186,10 @@ impl Strategy for BasisCaptureStrategy {
 
         tracing::debug!(
             "FILL RECEIVED: {} {:.6} @ {:.2}, new_pos={:.6}",
-            fill.side, fill.qty, fill.price, self.position_qty
+            fill.side,
+            fill.qty,
+            fill.price,
+            self.position_qty
         );
     }
 }
@@ -835,10 +1199,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_extract_bid_ask_float_format() {
+        // Test that extract_bid_ask handles simple float format
+        let payload = serde_json::json!({"bid": 100000.0, "ask": 100010.0});
+        let (bid, ask) = extract_bid_ask(&payload, EventKind::PerpQuote);
+        assert_eq!(bid, 100000.0);
+        assert_eq!(ask, 100010.0);
+    }
+
+    #[test]
     fn test_paper_exchange_basic() {
         let mut exchange = PaperExchange::new(ExchangeConfig {
             fee_bps: 10.0,
-            initial_cash: 10_000.0,
+            initial_cash: 100_000.0, // Enough for 0.1 BTC at $100k
             use_perp_prices: true,
         });
 
@@ -851,11 +1224,20 @@ mod tests {
         };
         exchange.update_market(&event);
 
-        // Execute buy
+        // Verify market state was set
+        assert!(
+            exchange.markets.contains_key("BTCUSDT"),
+            "Market state should be set"
+        );
+        let market = exchange.markets.get("BTCUSDT").unwrap();
+        assert_eq!(market.bid, 100000.0, "Bid should be 100000.0");
+        assert_eq!(market.ask, 100010.0, "Ask should be 100010.0");
+
+        // Execute buy (0.1 BTC @ $100,010 = $10,001 + ~$1 fee)
         let order = OrderIntent::market("BTCUSDT", Side::Buy, 0.1);
         let fill = exchange.execute(&order, Utc::now());
 
-        assert!(fill.is_some());
+        assert!(fill.is_some(), "Fill should not be None");
         let fill = fill.unwrap();
         assert_eq!(fill.price, 100010.0); // Bought at ask
         assert_eq!(fill.qty, 0.1);

@@ -66,7 +66,7 @@ pub struct EventCounts {
     pub spot_quotes: usize,
     pub perp_quotes: usize,
     pub funding: usize,
-    #[serde(skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub depth: usize,
 }
 
@@ -88,11 +88,83 @@ pub struct GapInfo {
     pub reason: String,
 }
 
+/// Segment lifecycle state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SegmentState {
+    /// Manifest written at start, capture in progress
+    #[default]
+    Bootstrap,
+    /// Graceful shutdown with digests computed
+    Finalized,
+    /// Retroactively finalized from crashed segment
+    FinalizedRetro,
+}
+
+/// Per-stream digest for integrity verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamDigest {
+    pub file_path: String,
+    pub sha256: String,
+    pub event_count: usize,
+    pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_event_ts: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_event_ts: Option<String>,
+}
+
+/// All stream digests for a segment.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SegmentDigests {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spot: Option<StreamDigest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub perp: Option<StreamDigest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub funding: Option<StreamDigest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<StreamDigest>,
+}
+
+/// Capture configuration snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureConfig {
+    pub include_spot: bool,
+    pub include_depth: bool,
+    pub price_exponent: i32,
+    pub qty_exponent: i32,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            include_spot: true,
+            include_depth: false,
+            price_exponent: -2,
+            qty_exponent: -8,
+        }
+    }
+}
+
+/// Current segment manifest schema version.
+/// Bump this when manifest structure changes.
+pub const SEGMENT_MANIFEST_SCHEMA_VERSION: u32 = 3;
+
 /// Segment manifest - written to segment_manifest.json in each segment directory.
+///
+/// ## Lifecycle
+/// 1. BOOTSTRAP: Written immediately at segment start with schema assertions
+/// 2. FINALIZED: Updated on graceful shutdown with digests and counts
+/// 3. FINALIZED_RETRO: Created by retro-finalize for crashed segments
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SegmentManifest {
-    /// Schema version for this manifest format
+    /// Schema version for this manifest format (must match SEGMENT_MANIFEST_SCHEMA_VERSION)
     pub schema_version: u32,
+    /// Quote schema identifier (must be "canonical_v1" for valid captures)
+    pub quote_schema: String,
+    /// Segment lifecycle state
+    pub state: SegmentState,
     /// Family ID (e.g., "perp_BTCUSDT_20260125")
     pub session_family_id: String,
     /// Segment ID (typically the folder name, e.g., "perp_20260125_051437")
@@ -114,9 +186,11 @@ pub struct SegmentManifest {
     pub events: EventCounts,
     /// Binary hash (SHA256 of the capture binary)
     pub binary_hash: String,
-    /// Configuration hash (SHA256 of capture config)
+    /// Capture configuration snapshot
+    pub config: CaptureConfig,
+    /// Per-stream digests (populated on finalization)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub config_hash: Option<String>,
+    pub digests: Option<SegmentDigests>,
     /// Gap info if this segment follows a prior segment
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gap_from_prior: Option<GapInfo>,
@@ -126,17 +200,23 @@ pub struct SegmentManifest {
 }
 
 impl SegmentManifest {
-    /// Create a new manifest at segment start.
+    /// Create a new bootstrap manifest at segment start.
+    ///
+    /// This is written immediately when capture begins, ensuring every segment
+    /// has a manifest with schema assertions even if killed ungracefully.
     pub fn new(
         session_family_id: String,
         segment_id: String,
         symbols: Vec<String>,
         capture_mode: String,
         binary_hash: String,
+        config: CaptureConfig,
     ) -> Self {
         let now = Utc::now();
         Self {
-            schema_version: 1,
+            schema_version: SEGMENT_MANIFEST_SCHEMA_VERSION,
+            quote_schema: "canonical_v1".to_string(),
+            state: SegmentState::Bootstrap,
             session_family_id,
             segment_id,
             symbols,
@@ -147,7 +227,8 @@ impl SegmentManifest {
             stop_reason: StopReason::Running,
             events: EventCounts::default(),
             binary_hash,
-            config_hash: None,
+            config,
+            digests: None,
             gap_from_prior: None,
             duration_secs: None,
         }
@@ -158,21 +239,102 @@ impl SegmentManifest {
         self.heartbeat_ts = Utc::now();
     }
 
-    /// Finalize the manifest with stop reason and final counts.
-    pub fn finalize(&mut self, stop_reason: StopReason, events: EventCounts) {
+    /// Finalize the manifest with stop reason, counts, and digests.
+    ///
+    /// Called on graceful shutdown. Sets state to FINALIZED.
+    pub fn finalize(
+        &mut self,
+        stop_reason: StopReason,
+        events: EventCounts,
+        digests: Option<SegmentDigests>,
+    ) {
         let now = Utc::now();
         self.end_ts = Some(now);
         self.stop_reason = stop_reason;
         self.events = events;
+        self.digests = digests;
+        self.state = SegmentState::Finalized;
         self.duration_secs = Some((now - self.start_ts).num_milliseconds() as f64 / 1000.0);
     }
 
-    /// Write manifest to disk.
+    /// Retroactively finalize a crashed segment.
+    ///
+    /// Called by the retro-finalize command. Sets state to FINALIZED_RETRO.
+    /// Infers start/end timestamps and duration from actual data in digests.
+    pub fn retro_finalize(&mut self, events: EventCounts, digests: SegmentDigests) {
+        // Infer actual data time range from digests
+        let mut first_ts: Option<DateTime<Utc>> = None;
+        let mut last_ts: Option<DateTime<Utc>> = None;
+
+        // Check all digest sources for earliest/latest timestamps
+        for d in [
+            &digests.spot,
+            &digests.perp,
+            &digests.funding,
+            &digests.depth,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let (Some(first_str), Some(last_str)) = (&d.first_event_ts, &d.last_event_ts) {
+                // Parse timestamp strings
+                if let (Ok(first), Ok(last)) = (
+                    DateTime::parse_from_rfc3339(first_str).map(|t| t.with_timezone(&Utc)),
+                    DateTime::parse_from_rfc3339(last_str).map(|t| t.with_timezone(&Utc)),
+                ) {
+                    first_ts = Some(first_ts.map_or(first, |t| t.min(first)));
+                    last_ts = Some(last_ts.map_or(last, |t| t.max(last)));
+                }
+            }
+        }
+
+        // Update timestamps from actual data range
+        if let Some(first) = first_ts {
+            self.start_ts = first;
+        }
+        if let Some(last) = last_ts {
+            self.end_ts = Some(last);
+        } else if self.end_ts.is_none() {
+            self.end_ts = Some(self.heartbeat_ts);
+        }
+
+        if self.stop_reason == StopReason::Running {
+            self.stop_reason = StopReason::Unknown;
+        }
+        self.events = events;
+        self.digests = Some(digests);
+        self.state = SegmentState::FinalizedRetro;
+
+        // Compute duration from actual data time range
+        if let Some(end) = self.end_ts {
+            self.duration_secs = Some((end - self.start_ts).num_milliseconds() as f64 / 1000.0);
+        }
+    }
+
+    /// Check if this manifest is finalized (either gracefully or retro).
+    pub fn is_finalized(&self) -> bool {
+        matches!(
+            self.state,
+            SegmentState::Finalized | SegmentState::FinalizedRetro
+        )
+    }
+
+    /// Write manifest to disk atomically (write temp + rename).
+    ///
+    /// This ensures crash safety - the manifest is either fully written or not at all.
     pub fn write(&self, segment_dir: &Path) -> Result<()> {
         let manifest_path = segment_dir.join("segment_manifest.json");
+        let temp_path = segment_dir.join(".segment_manifest.json.tmp");
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&manifest_path, json)
-            .with_context(|| format!("write segment manifest: {:?}", manifest_path))?;
+
+        // Write to temp file
+        std::fs::write(&temp_path, &json)
+            .with_context(|| format!("write temp manifest: {:?}", temp_path))?;
+
+        // Atomic rename
+        std::fs::rename(&temp_path, &manifest_path)
+            .with_context(|| format!("rename manifest: {:?} -> {:?}", temp_path, manifest_path))?;
+
         Ok(())
     }
 
@@ -227,7 +389,7 @@ pub struct SessionInventory {
     /// Ordered list of segments
     pub segments: Vec<InventorySegment>,
     /// Gaps between segments
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gaps: Vec<InventoryGap>,
     /// Notes
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -365,6 +527,134 @@ pub fn compute_binary_hash() -> Result<String> {
     Ok(hex::encode(hash))
 }
 
+/// Compute digest for a stream file (JSONL format).
+///
+/// Returns None if the file doesn't exist or is empty.
+pub fn compute_stream_digest(file_path: &Path) -> Result<Option<StreamDigest>> {
+    use std::io::{BufRead, BufReader};
+
+    if !file_path.exists() {
+        return Ok(None);
+    }
+
+    let metadata = std::fs::metadata(file_path)?;
+    let size_bytes = metadata.len();
+    if size_bytes == 0 {
+        return Ok(None);
+    }
+
+    let file = std::fs::File::open(file_path)?;
+    let reader = BufReader::new(file);
+
+    let mut hasher = Sha256::new();
+    let mut event_count = 0usize;
+    let mut first_ts: Option<String> = None;
+    let mut last_ts: Option<String> = None;
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.is_empty() {
+            continue;
+        }
+        hasher.update(line.as_bytes());
+        hasher.update(b"\n");
+        event_count += 1;
+
+        // Try to extract timestamp from JSONL (look for "ts" field)
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line)
+            && let Some(ts) = json.get("ts").and_then(|v| v.as_str())
+        {
+            if first_ts.is_none() {
+                first_ts = Some(ts.to_string());
+            }
+            last_ts = Some(ts.to_string());
+        }
+    }
+
+    if event_count == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(StreamDigest {
+        file_path: file_path.display().to_string(),
+        sha256: hex::encode(hasher.finalize()),
+        event_count,
+        size_bytes,
+        first_event_ts: first_ts,
+        last_event_ts: last_ts,
+    }))
+}
+
+/// Compute all stream digests for a segment directory.
+///
+/// Handles the actual directory structure where files are in symbol subdirectories:
+/// ```text
+/// segment_dir/
+/// └── BTCUSDT/
+///     ├── spot_quotes.jsonl
+///     ├── perp_quotes.jsonl (or perp_depth.jsonl)
+///     ├── funding.jsonl
+///     └── perp_depth.jsonl (optional)
+/// ```
+pub fn compute_segment_digests(segment_dir: &Path) -> Result<SegmentDigests> {
+    let mut spot_digest: Option<StreamDigest> = None;
+    let mut perp_digest: Option<StreamDigest> = None;
+    let mut funding_digest: Option<StreamDigest> = None;
+    let mut depth_digest: Option<StreamDigest> = None;
+
+    // Iterate through symbol subdirectories
+    for entry in std::fs::read_dir(segment_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        // Skip non-symbol directories (like .tmp files)
+        let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !dir_name.chars().all(|c| c.is_alphanumeric()) {
+            continue;
+        }
+
+        // Check for spot quotes
+        let spot_path = path.join("spot_quotes.jsonl");
+        if spot_path.exists()
+            && let Some(digest) = compute_stream_digest(&spot_path)?
+        {
+            spot_digest = Some(digest);
+        }
+
+        // Check for perp quotes (prefer perp_depth if exists)
+        let perp_depth_path = path.join("perp_depth.jsonl");
+        let perp_quotes_path = path.join("perp_quotes.jsonl");
+        if perp_depth_path.exists()
+            && let Some(digest) = compute_stream_digest(&perp_depth_path)?
+        {
+            perp_digest = Some(digest.clone());
+            depth_digest = Some(digest);
+        } else if perp_quotes_path.exists()
+            && let Some(digest) = compute_stream_digest(&perp_quotes_path)?
+        {
+            perp_digest = Some(digest);
+        }
+
+        // Check for funding
+        let funding_path = path.join("funding.jsonl");
+        if funding_path.exists()
+            && let Some(digest) = compute_stream_digest(&funding_path)?
+        {
+            funding_digest = Some(digest);
+        }
+    }
+
+    Ok(SegmentDigests {
+        spot: spot_digest,
+        perp: perp_digest,
+        funding: funding_digest,
+        depth: depth_digest,
+    })
+}
+
 /// Managed segment capture with automatic manifest handling.
 pub struct ManagedSegment {
     pub manifest: Arc<Mutex<SegmentManifest>>,
@@ -376,7 +666,12 @@ pub struct ManagedSegment {
 
 impl ManagedSegment {
     /// Start a new managed segment.
-    pub async fn start(out_dir: &Path, symbols: &[String], capture_mode: &str) -> Result<Self> {
+    pub async fn start(
+        out_dir: &Path,
+        symbols: &[String],
+        capture_mode: &str,
+        config: CaptureConfig,
+    ) -> Result<Self> {
         let binary_hash = compute_binary_hash().unwrap_or_else(|_| "UNKNOWN".to_string());
         let start_time = Utc::now();
 
@@ -398,6 +693,7 @@ impl ManagedSegment {
             symbols.to_vec(),
             capture_mode.to_string(),
             binary_hash.clone(),
+            config,
         );
 
         // Check for prior segment and compute gap
@@ -488,10 +784,13 @@ impl ManagedSegment {
             handle.abort();
         }
 
+        // Compute stream digests
+        let digests = compute_segment_digests(&self.segment_dir).ok();
+
         // Update manifest
         {
             let mut m = self.manifest.lock().await;
-            m.finalize(stop_reason, events);
+            m.finalize(stop_reason, events, digests);
             m.write(&self.segment_dir)?;
         }
 
@@ -554,10 +853,14 @@ mod tests {
             vec!["BTCUSDT".to_string()],
             "capture-perp-session".to_string(),
             "abc123".to_string(),
+            CaptureConfig::default(),
         );
 
         assert_eq!(manifest.stop_reason, StopReason::Running);
         assert!(manifest.end_ts.is_none());
+        assert_eq!(manifest.state, SegmentState::Bootstrap);
+        assert_eq!(manifest.schema_version, SEGMENT_MANIFEST_SCHEMA_VERSION);
+        assert_eq!(manifest.quote_schema, "canonical_v1");
 
         manifest.heartbeat();
         assert!(manifest.heartbeat_ts >= manifest.start_ts);
@@ -568,11 +871,41 @@ mod tests {
             funding: 50,
             depth: 0,
         };
-        manifest.finalize(StopReason::NormalCompletion, events);
+        manifest.finalize(StopReason::NormalCompletion, events, None);
 
         assert_eq!(manifest.stop_reason, StopReason::NormalCompletion);
         assert!(manifest.end_ts.is_some());
         assert!(manifest.duration_secs.is_some());
         assert_eq!(manifest.events.total(), 3050);
+        assert_eq!(manifest.state, SegmentState::Finalized);
+    }
+
+    #[test]
+    fn test_retro_finalize() {
+        let mut manifest = SegmentManifest::new(
+            "perp_BTCUSDT_20260125".to_string(),
+            "perp_20260125_120000".to_string(),
+            vec!["BTCUSDT".to_string()],
+            "capture-perp-session".to_string(),
+            "abc123".to_string(),
+            CaptureConfig::default(),
+        );
+
+        assert_eq!(manifest.state, SegmentState::Bootstrap);
+        assert_eq!(manifest.stop_reason, StopReason::Running);
+
+        let events = EventCounts {
+            spot_quotes: 500,
+            perp_quotes: 1000,
+            funding: 25,
+            depth: 0,
+        };
+        let digests = SegmentDigests::default();
+        manifest.retro_finalize(events, digests);
+
+        assert_eq!(manifest.state, SegmentState::FinalizedRetro);
+        assert_eq!(manifest.stop_reason, StopReason::Unknown);
+        assert!(manifest.end_ts.is_some());
+        assert!(manifest.digests.is_some());
     }
 }

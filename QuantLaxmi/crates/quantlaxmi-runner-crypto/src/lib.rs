@@ -16,6 +16,7 @@
 //! - `paper` - Run paper trading
 //! - `live` - Run live trading
 
+pub mod backtest;
 pub mod binance_capture;
 pub mod binance_exchange_info;
 pub mod binance_funding_capture;
@@ -23,7 +24,6 @@ pub mod binance_perp_capture;
 pub mod binance_perp_session;
 pub mod binance_sbe_depth_capture;
 pub mod binance_trades_capture;
-pub mod backtest;
 pub mod experiment;
 pub mod features;
 pub mod paper_trading;
@@ -288,6 +288,9 @@ pub enum Commands {
     /// For segments that were killed ungracefully (SIGHUP, power loss, etc.),
     /// this command computes digests from the raw data files and updates
     /// the segment manifest to FINALIZED_RETRO state.
+    ///
+    /// For legacy segments without any manifest, use --create-bootstrap first
+    /// to create a minimal manifest with default configuration.
     FinalizeSegment {
         /// Path to segment directory (e.g., data/perp_sessions/perp_20260125_120000)
         #[arg(long)]
@@ -296,6 +299,14 @@ pub enum Commands {
         /// Force re-finalization even if already finalized
         #[arg(long, default_value_t = false)]
         force: bool,
+
+        /// Override stop reason (default: UNKNOWN)
+        #[arg(long)]
+        stop_reason: Option<String>,
+
+        /// Create bootstrap manifest for legacy/orphaned segments that have no manifest
+        #[arg(long, default_value_t = false)]
+        create_bootstrap: bool,
     },
 
     /// Extract features from captured segment (Phase 2C.1)
@@ -365,6 +376,10 @@ pub enum Commands {
         /// Basis threshold in bps (for basis_capture strategy)
         #[arg(long, default_value_t = 5.0)]
         threshold_bps: f64,
+
+        /// Pacing mode: "fast" (no delays, default) or "real" (real-time pacing)
+        #[arg(long, default_value = "fast")]
+        pace: String,
 
         /// Output results to JSON file
         #[arg(long)]
@@ -497,8 +512,19 @@ async fn async_main() -> anyhow::Result<()> {
             )
             .await
         }
-        Commands::FinalizeSegment { segment_dir, force } => {
-            run_finalize_segment(&segment_dir, force).await
+        Commands::FinalizeSegment {
+            segment_dir,
+            force,
+            stop_reason,
+            create_bootstrap,
+        } => {
+            run_finalize_segment(
+                &segment_dir,
+                force,
+                stop_reason.as_deref(),
+                create_bootstrap,
+            )
+            .await
         }
         Commands::ExtractFeatures {
             segment_dir,
@@ -518,6 +544,7 @@ async fn async_main() -> anyhow::Result<()> {
             fee_bps,
             position_size,
             threshold_bps,
+            pace,
             output_json,
         } => {
             run_backtest(
@@ -527,6 +554,7 @@ async fn async_main() -> anyhow::Result<()> {
                 fee_bps,
                 position_size,
                 threshold_bps,
+                &pace,
                 output_json.as_deref(),
             )
             .await
@@ -1469,9 +1497,15 @@ async fn run_capture_perp_session(
 ///
 /// This command is used to create valid manifests for segments that were
 /// killed ungracefully (SIGHUP, power loss, etc.) and only have raw data files.
-async fn run_finalize_segment(segment_dir: &str, force: bool) -> anyhow::Result<()> {
+async fn run_finalize_segment(
+    segment_dir: &str,
+    force: bool,
+    stop_reason_override: Option<&str>,
+    create_bootstrap: bool,
+) -> anyhow::Result<()> {
     use segment_manifest::{
-        EventCounts, SEGMENT_MANIFEST_SCHEMA_VERSION, SegmentManifest, compute_segment_digests,
+        CaptureConfig, EventCounts, SEGMENT_MANIFEST_SCHEMA_VERSION, SegmentManifest, StopReason,
+        compute_binary_hash, compute_segment_digests,
     };
 
     let segment_path = std::path::Path::new(segment_dir);
@@ -1484,6 +1518,82 @@ async fn run_finalize_segment(segment_dir: &str, force: bool) -> anyhow::Result<
 
     // Check for existing manifest
     let manifest_path = segment_path.join("segment_manifest.json");
+
+    // Create bootstrap manifest for legacy segments if requested
+    if create_bootstrap && !manifest_path.exists() {
+        tracing::info!("Creating bootstrap manifest for legacy segment...");
+
+        // Infer segment ID from directory name
+        let segment_id = segment_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        // Detect symbols from subdirectories
+        let mut symbols: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(segment_path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name.chars().all(|c| c.is_alphanumeric()) && !name.is_empty() {
+                    symbols.push(name.to_string());
+                }
+            }
+        }
+
+        if symbols.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No symbol directories found in segment. Cannot create bootstrap manifest."
+            ));
+        }
+
+        // Detect if depth was captured
+        let first_sym = &symbols[0];
+        let include_depth = segment_path
+            .join(first_sym)
+            .join("perp_depth.jsonl")
+            .exists();
+        let include_spot = segment_path
+            .join(first_sym)
+            .join("spot_quotes.jsonl")
+            .exists();
+
+        // Create session family ID
+        let date_part = segment_id
+            .split('_')
+            .nth(1)
+            .unwrap_or("unknown")
+            .chars()
+            .take(8)
+            .collect::<String>();
+        let session_family_id = format!("perp_{}_{}", symbols[0], date_part);
+
+        let binary_hash = compute_binary_hash().unwrap_or_else(|_| "LEGACY".to_string());
+
+        let manifest = SegmentManifest::new(
+            session_family_id,
+            segment_id.clone(),
+            symbols.clone(),
+            "capture-perp-session".to_string(),
+            binary_hash,
+            CaptureConfig {
+                include_spot,
+                include_depth,
+                price_exponent: -2,
+                qty_exponent: -8,
+            },
+        );
+
+        manifest.write(segment_path)?;
+        tracing::info!(
+            "Bootstrap manifest created for legacy segment: {} (symbols: {:?})",
+            segment_id,
+            symbols
+        );
+    }
+
     if manifest_path.exists() {
         let manifest = SegmentManifest::load(segment_path)?;
 
@@ -1519,6 +1629,20 @@ async fn run_finalize_segment(segment_dir: &str, force: bool) -> anyhow::Result<
 
         // Update manifest
         let mut manifest = manifest;
+
+        // Apply stop reason override if provided
+        if let Some(reason_str) = stop_reason_override {
+            manifest.stop_reason = match reason_str.to_uppercase().as_str() {
+                "NORMAL_COMPLETION" => StopReason::NormalCompletion,
+                "USER_INTERRUPT" => StopReason::UserInterrupt,
+                "EXTERNAL_KILL_SIGTERM" => StopReason::ExternalKillSigterm,
+                "EXTERNAL_KILL_SIGHUP" => StopReason::ExternalKillSighup,
+                "PANIC" => StopReason::Panic,
+                "NETWORK_ERROR" => StopReason::NetworkError,
+                _ => StopReason::Unknown,
+            };
+        }
+
         manifest.retro_finalize(events.clone(), digests);
         manifest.write(segment_path)?;
 
@@ -1692,7 +1816,11 @@ async fn run_replay_segment(segment_dir: &str, output: &str, limit: usize) -> an
             if let Some(last) = stats.last_ts {
                 println!("Last event: {}", last);
             }
-            println!("Duration: {:.1}s ({:.1}h)", stats.duration_secs, stats.duration_secs / 3600.0);
+            println!(
+                "Duration: {:.1}s ({:.1}h)",
+                stats.duration_secs,
+                stats.duration_secs / 3600.0
+            );
         }
         "stream" => {
             let mut adapter = SegmentReplayAdapter::open(segment_path)?;
@@ -1728,6 +1856,7 @@ async fn run_replay_segment(segment_dir: &str, output: &str, limit: usize) -> an
 }
 
 /// Run backtest on a captured segment.
+#[allow(clippy::too_many_arguments)]
 async fn run_backtest(
     segment_dir: &str,
     strategy_name: &str,
@@ -1735,10 +1864,12 @@ async fn run_backtest(
     fee_bps: f64,
     position_size: f64,
     threshold_bps: f64,
+    pace: &str,
     output_json: Option<&str>,
 ) -> anyhow::Result<()> {
     use backtest::{
         BacktestConfig, BacktestEngine, BasisCaptureStrategy, ExchangeConfig, FundingBiasStrategy,
+        PaceMode,
     };
 
     let segment_path = std::path::Path::new(segment_dir);
@@ -1749,6 +1880,11 @@ async fn run_backtest(
         ));
     }
 
+    let pace_mode = match pace {
+        "real" => PaceMode::RealTime,
+        _ => PaceMode::Fast,
+    };
+
     let config = BacktestConfig {
         exchange: ExchangeConfig {
             fee_bps,
@@ -1756,6 +1892,7 @@ async fn run_backtest(
             use_perp_prices: true,
         },
         log_interval: 500_000,
+        pace: pace_mode,
     };
 
     let engine = BacktestEngine::new(config);
@@ -1765,15 +1902,16 @@ async fn run_backtest(
     tracing::info!("Strategy: {}", strategy_name);
     tracing::info!("Initial capital: ${:.2}", initial_capital);
     tracing::info!("Fee: {:.1} bps", fee_bps);
+    tracing::info!("Pace: {}", pace);
 
     let result = match strategy_name {
         "funding_bias" => {
             let strategy = FundingBiasStrategy::new(position_size, threshold_bps / 10_000.0);
-            engine.run(segment_path, strategy)?
+            engine.run(segment_path, strategy).await?
         }
         "basis_capture" => {
             let strategy = BasisCaptureStrategy::new(threshold_bps, position_size);
-            engine.run(segment_path, strategy)?
+            engine.run(segment_path, strategy).await?
         }
         _ => {
             return Err(anyhow::anyhow!(
@@ -1788,15 +1926,64 @@ async fn run_backtest(
     println!("Strategy: {}", result.strategy_name);
     println!("Segment: {}", result.segment_path);
     println!("Events processed: {}", result.total_events);
-    println!("Fills executed: {}", result.total_fills);
-    println!("Duration: {:.1}s ({:.1}h)", result.duration_secs, result.duration_secs / 3600.0);
+    println!(
+        "Duration: {:.1}s ({:.1}h)",
+        result.duration_secs,
+        result.duration_secs / 3600.0
+    );
+
+    // Trade metrics
+    let m = &result.metrics;
     println!();
-    println!("Initial capital: ${:.2}", result.initial_cash);
-    println!("Final cash: ${:.2}", result.final_cash);
+    println!("--- Trade Statistics ---");
+    println!(
+        "Trades: {} ({}W / {}L)",
+        m.total_trades, m.winning_trades, m.losing_trades
+    );
+    println!("Win Rate: {:.1}%", m.win_rate);
+    println!("Avg Win: ${:.2} | Avg Loss: ${:.2}", m.avg_win, m.avg_loss);
+    if m.profit_factor.is_finite() {
+        println!("Profit Factor: {:.2}", m.profit_factor);
+    } else {
+        println!("Profit Factor: ∞ (no losses)");
+    }
+    println!("Expectancy: ${:.2} per trade", m.expectancy);
+    println!(
+        "Largest Win: ${:.2} | Largest Loss: ${:.2}",
+        m.largest_win, m.largest_loss
+    );
+
+    // Risk metrics
+    println!();
+    println!("--- Risk Metrics ---");
+    println!(
+        "Max Drawdown: ${:.2} ({:.2}%)",
+        m.max_drawdown, m.max_drawdown_pct
+    );
+    if m.sharpe_ratio.is_finite() {
+        println!("Sharpe Ratio: {:.2}", m.sharpe_ratio);
+    } else {
+        println!("Sharpe Ratio: N/A");
+    }
+    if m.sortino_ratio.is_finite() {
+        println!("Sortino Ratio: {:.2}", m.sortino_ratio);
+    } else {
+        println!("Sortino Ratio: N/A");
+    }
+    println!("Total Fees: ${:.2}", m.total_fees);
+    println!("Avg Trade Duration: {:.1}s", m.avg_trade_duration_secs);
+
+    // Capital summary
+    println!();
+    println!("--- Capital Summary ---");
+    println!("Initial Capital: ${:.2}", result.initial_cash);
+    println!("Final Cash: ${:.2}", result.final_cash);
     println!("Realized PnL: ${:.2}", result.realized_pnl);
     println!("Unrealized PnL: ${:.2}", result.unrealized_pnl);
-    println!("Total PnL: ${:.2}", result.total_pnl);
-    println!("Return: {:.2}%", result.return_pct);
+    println!(
+        "Total PnL: ${:.2} ({:.2}%)",
+        result.total_pnl, result.return_pct
+    );
 
     // Write JSON output if requested
     if let Some(path) = output_json {
