@@ -23,7 +23,11 @@ pub mod binance_perp_capture;
 pub mod binance_perp_session;
 pub mod binance_sbe_depth_capture;
 pub mod binance_trades_capture;
+pub mod backtest;
+pub mod experiment;
+pub mod features;
 pub mod paper_trading;
+pub mod replay;
 pub mod segment_manifest;
 pub mod session_capture;
 
@@ -278,6 +282,94 @@ pub enum Commands {
         #[arg(long, default_value_t = 10000.0)]
         initial_capital: f64,
     },
+
+    /// Retroactively finalize a crashed/incomplete segment
+    ///
+    /// For segments that were killed ungracefully (SIGHUP, power loss, etc.),
+    /// this command computes digests from the raw data files and updates
+    /// the segment manifest to FINALIZED_RETRO state.
+    FinalizeSegment {
+        /// Path to segment directory (e.g., data/perp_sessions/perp_20260125_120000)
+        #[arg(long)]
+        segment_dir: String,
+
+        /// Force re-finalization even if already finalized
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
+
+    /// Extract features from captured segment (Phase 2C.1)
+    ///
+    /// Computes FeatureSet v1 from quote streams and produces a deterministic
+    /// features.jsonl file with full audit trail in run_manifest.json.
+    ExtractFeatures {
+        /// Path to segment directory (must have segment_manifest.json)
+        #[arg(long)]
+        segment_dir: String,
+
+        /// Output directory for run (default: runs/)
+        #[arg(long, default_value = "runs")]
+        out_dir: String,
+
+        /// Update rate window in milliseconds
+        #[arg(long, default_value_t = 1000)]
+        update_rate_window_ms: u64,
+
+        /// Volatility EWMA decay factor (0-1)
+        #[arg(long, default_value_t = 0.1)]
+        vol_decay: f64,
+    },
+
+    /// Replay a captured segment (print stats or stream events)
+    ///
+    /// Reads all JSONL streams from a segment, merges by timestamp,
+    /// and emits a unified event stream.
+    ReplaySegment {
+        /// Path to segment directory
+        #[arg(long)]
+        segment_dir: String,
+
+        /// Output mode: "stats" (default) or "stream" (prints events)
+        #[arg(long, default_value = "stats")]
+        output: String,
+
+        /// Limit number of events (0 = unlimited)
+        #[arg(long, default_value_t = 0)]
+        limit: usize,
+    },
+
+    /// Run backtest on a captured segment
+    ///
+    /// Replays a segment through a strategy with paper execution.
+    Backtest {
+        /// Path to segment directory
+        #[arg(long)]
+        segment_dir: String,
+
+        /// Strategy to run: "funding_bias" or "basis_capture"
+        #[arg(long, default_value = "basis_capture")]
+        strategy: String,
+
+        /// Initial capital (USD)
+        #[arg(long, default_value_t = 10000.0)]
+        initial_capital: f64,
+
+        /// Fee in basis points (e.g., 10 = 0.1%)
+        #[arg(long, default_value_t = 10.0)]
+        fee_bps: f64,
+
+        /// Position size for strategy
+        #[arg(long, default_value_t = 0.1)]
+        position_size: f64,
+
+        /// Basis threshold in bps (for basis_capture strategy)
+        #[arg(long, default_value_t = 5.0)]
+        threshold_bps: f64,
+
+        /// Output results to JSON file
+        #[arg(long)]
+        output_json: Option<String>,
+    },
 }
 
 /// Main entry point for the Crypto runner
@@ -402,6 +494,40 @@ async fn async_main() -> anyhow::Result<()> {
                 include_depth,
                 price_exponent,
                 qty_exponent,
+            )
+            .await
+        }
+        Commands::FinalizeSegment { segment_dir, force } => {
+            run_finalize_segment(&segment_dir, force).await
+        }
+        Commands::ExtractFeatures {
+            segment_dir,
+            out_dir,
+            update_rate_window_ms,
+            vol_decay,
+        } => run_extract_features(&segment_dir, &out_dir, update_rate_window_ms, vol_decay).await,
+        Commands::ReplaySegment {
+            segment_dir,
+            output,
+            limit,
+        } => run_replay_segment(&segment_dir, &output, limit).await,
+        Commands::Backtest {
+            segment_dir,
+            strategy,
+            initial_capital,
+            fee_bps,
+            position_size,
+            threshold_bps,
+            output_json,
+        } => {
+            run_backtest(
+                &segment_dir,
+                &strategy,
+                initial_capital,
+                fee_bps,
+                position_size,
+                threshold_bps,
+                output_json.as_deref(),
             )
             .await
         }
@@ -1152,7 +1278,7 @@ async fn run_capture_perp_session(
     price_exponent: i8,
     qty_exponent: i8,
 ) -> anyhow::Result<()> {
-    use segment_manifest::{EventCounts, ManagedSegment, StopReason};
+    use segment_manifest::{CaptureConfig, EventCounts, ManagedSegment, StopReason};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -1172,8 +1298,22 @@ async fn run_capture_perp_session(
     let out_path = std::path::Path::new(out_dir);
     std::fs::create_dir_all(out_path)?;
 
+    // Build capture config for manifest
+    let capture_config = CaptureConfig {
+        include_spot,
+        include_depth,
+        price_exponent: price_exponent as i32,
+        qty_exponent: qty_exponent as i32,
+    };
+
     // Start managed segment with manifest
-    let mut managed = ManagedSegment::start(out_path, &symbol_list, "capture-perp-session").await?;
+    let mut managed = ManagedSegment::start(
+        out_path,
+        &symbol_list,
+        "capture-perp-session",
+        capture_config,
+    )
+    .await?;
     let segment_dir = managed.segment_dir().to_path_buf();
     let segment_id = managed.segment_id().await;
 
@@ -1217,10 +1357,10 @@ async fn run_capture_perp_session(
     }
 
     // Run capture with signal monitoring
-    // Capture runs in the segment directory (not out_dir)
+    // Capture runs directly in the managed segment directory
     let capture_config = binance_perp_session::PerpSessionConfig {
         symbols: symbol_list.clone(),
-        out_dir: segment_dir.parent().unwrap_or(out_path).to_path_buf(),
+        out_dir: segment_dir.clone(), // Not used by capture_to_segment, but kept for config
         duration_secs,
         include_spot,
         include_depth,
@@ -1231,7 +1371,7 @@ async fn run_capture_perp_session(
     // Run capture with signal checking
     let signal_check = Arc::clone(&signal_received);
     let capture_result = tokio::select! {
-        result = binance_perp_session::capture_perp_session(capture_config) => {
+        result = binance_perp_session::capture_to_segment(&segment_dir, &capture_config) => {
             result
         }
         _ = async {
@@ -1320,6 +1460,349 @@ async fn run_capture_perp_session(
                 sym_stat.last_funding_rate * 100.0
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Retroactively finalize a crashed/incomplete segment.
+///
+/// This command is used to create valid manifests for segments that were
+/// killed ungracefully (SIGHUP, power loss, etc.) and only have raw data files.
+async fn run_finalize_segment(segment_dir: &str, force: bool) -> anyhow::Result<()> {
+    use segment_manifest::{
+        EventCounts, SEGMENT_MANIFEST_SCHEMA_VERSION, SegmentManifest, compute_segment_digests,
+    };
+
+    let segment_path = std::path::Path::new(segment_dir);
+    if !segment_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Segment directory not found: {}",
+            segment_dir
+        ));
+    }
+
+    // Check for existing manifest
+    let manifest_path = segment_path.join("segment_manifest.json");
+    if manifest_path.exists() {
+        let manifest = SegmentManifest::load(segment_path)?;
+
+        if manifest.is_finalized() && !force {
+            tracing::info!(
+                "Segment already finalized (state: {:?}). Use --force to re-finalize.",
+                manifest.state
+            );
+            return Ok(());
+        }
+
+        // Validate schema version
+        if manifest.schema_version != SEGMENT_MANIFEST_SCHEMA_VERSION {
+            return Err(anyhow::anyhow!(
+                "Schema version mismatch: manifest has v{}, expected v{}. Cannot retro-finalize.",
+                manifest.schema_version,
+                SEGMENT_MANIFEST_SCHEMA_VERSION
+            ));
+        }
+
+        tracing::info!("Retro-finalizing existing manifest...");
+
+        // Compute digests
+        let digests = compute_segment_digests(segment_path)?;
+
+        // Count events from digests
+        let events = EventCounts {
+            spot_quotes: digests.spot.as_ref().map_or(0, |d| d.event_count),
+            perp_quotes: digests.perp.as_ref().map_or(0, |d| d.event_count),
+            funding: digests.funding.as_ref().map_or(0, |d| d.event_count),
+            depth: digests.depth.as_ref().map_or(0, |d| d.event_count),
+        };
+
+        // Update manifest
+        let mut manifest = manifest;
+        manifest.retro_finalize(events.clone(), digests);
+        manifest.write(segment_path)?;
+
+        tracing::info!("=== Retro-finalization Complete ===");
+        tracing::info!("Segment: {}", manifest.segment_id);
+        tracing::info!("State: {:?}", manifest.state);
+        tracing::info!(
+            "Events: spot={}, perp={}, funding={}, depth={}",
+            events.spot_quotes,
+            events.perp_quotes,
+            events.funding,
+            events.depth
+        );
+        if let Some(ref digests) = manifest.digests
+            && let Some(ref perp) = digests.perp
+        {
+            tracing::info!("Perp digest: {}...", &perp.sha256[..16]);
+        }
+    } else {
+        // No manifest exists - this is an orphaned segment
+        // We can't retro-finalize without knowing the capture configuration
+        return Err(anyhow::anyhow!(
+            "No segment_manifest.json found in {}. Cannot retro-finalize without bootstrap manifest.",
+            segment_dir
+        ));
+    }
+
+    Ok(())
+}
+
+/// Extract features from a captured segment (Phase 2C.1)
+async fn run_extract_features(
+    segment_dir: &str,
+    out_dir: &str,
+    update_rate_window_ms: u64,
+    vol_decay: f64,
+) -> anyhow::Result<()> {
+    use experiment::{RunManifest, SegmentInput, generate_run_dir};
+    use features::{FeatureConfig, extract_features};
+    use segment_manifest::SegmentManifest;
+
+    let segment_path = std::path::Path::new(segment_dir);
+    if !segment_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Segment directory not found: {}",
+            segment_dir
+        ));
+    }
+
+    // Load segment manifest
+    let manifest = SegmentManifest::load(segment_path)?;
+    tracing::info!("Loaded segment: {}", manifest.segment_id);
+    tracing::info!("State: {:?}", manifest.state);
+
+    // Warn if not finalized
+    if !manifest.is_finalized() {
+        tracing::warn!(
+            "Segment is not finalized (state: {:?}). Consider running finalize-segment first.",
+            manifest.state
+        );
+    }
+
+    // Create segment input reference
+    let segment_input = SegmentInput::from_manifest(&manifest, segment_path);
+
+    // Build feature config
+    let feature_config = FeatureConfig {
+        update_rate_window_ms,
+        vol_ewma_decay: vol_decay,
+        min_spread: 0,
+        max_spread: 0,
+    };
+
+    // Generate run directory
+    let base_out = std::path::Path::new(out_dir);
+    let run_dir = generate_run_dir(base_out, std::slice::from_ref(&segment_input));
+    std::fs::create_dir_all(&run_dir)?;
+
+    tracing::info!("Run directory: {:?}", run_dir);
+
+    // Create run manifest
+    let mut run_manifest = RunManifest::new(&run_dir, vec![segment_input], feature_config.clone());
+    run_manifest.write(&run_dir)?;
+
+    // Find input files - try per-symbol structure first, then flat structure
+    let perp_path = {
+        // Try flat structure: segment_dir/perp.jsonl
+        let flat = segment_path.join("perp.jsonl");
+        if flat.exists() {
+            flat
+        } else {
+            // Try per-symbol structure: segment_dir/BTCUSDT/perp_quotes.jsonl
+            let symbol = manifest
+                .symbols
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or("BTCUSDT");
+            let per_symbol = segment_path.join(symbol).join("perp_quotes.jsonl");
+            if per_symbol.exists() {
+                per_symbol
+            } else {
+                return Err(anyhow::anyhow!(
+                    "No perp quote file found. Tried:\n  {:?}\n  {:?}",
+                    flat,
+                    per_symbol
+                ));
+            }
+        }
+    };
+
+    tracing::info!("Input: {:?}", perp_path);
+
+    // Extract features
+    let output_path = run_dir.join("features.jsonl");
+    let result = extract_features(&perp_path, &output_path, &feature_config)?;
+
+    tracing::info!("=== Feature Extraction Complete ===");
+    tracing::info!("Input events: {}", result.input_events);
+    tracing::info!("Output events: {}", result.output_events);
+    tracing::info!("Output digest: {}...", &result.output_digest[..16]);
+
+    // Update run manifest
+    run_manifest.add_feature_result(&result);
+    run_manifest.complete();
+    run_manifest.write(&run_dir)?;
+
+    tracing::info!("Run manifest: {:?}", run_dir.join("run_manifest.json"));
+
+    // Print summary
+    println!("\n=== Run Summary ===");
+    println!("Run ID: {}", run_manifest.run_id);
+    println!("Input: {} ({} events)", segment_dir, result.input_events);
+    println!(
+        "Output: {:?} ({} events)",
+        output_path, result.output_events
+    );
+    println!("Output digest: {}", result.output_digest);
+    println!("Run manifest: {:?}", run_dir.join("run_manifest.json"));
+
+    Ok(())
+}
+
+/// Replay a captured segment (stats or stream mode).
+async fn run_replay_segment(segment_dir: &str, output: &str, limit: usize) -> anyhow::Result<()> {
+    use replay::{ReplayStats, SegmentReplayAdapter};
+
+    let segment_path = std::path::Path::new(segment_dir);
+    if !segment_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Segment directory not found: {}",
+            segment_dir
+        ));
+    }
+
+    match output {
+        "stats" => {
+            tracing::info!("Computing replay stats for {:?}...", segment_path);
+            let mut adapter = SegmentReplayAdapter::open(segment_path)?;
+            let stats = ReplayStats::from_adapter(&mut adapter)?;
+
+            println!("\n=== Segment Replay Stats ===");
+            println!("Path: {}", segment_dir);
+            println!("Symbols: {:?}", stats.symbols);
+            println!("Total events: {}", stats.total_events);
+            println!("  Spot quotes: {}", stats.spot_events);
+            println!("  Perp quotes: {}", stats.perp_events);
+            println!("  Funding: {}", stats.funding_events);
+            if let Some(first) = stats.first_ts {
+                println!("First event: {}", first);
+            }
+            if let Some(last) = stats.last_ts {
+                println!("Last event: {}", last);
+            }
+            println!("Duration: {:.1}s ({:.1}h)", stats.duration_secs, stats.duration_secs / 3600.0);
+        }
+        "stream" => {
+            let mut adapter = SegmentReplayAdapter::open(segment_path)?;
+            let mut count = 0usize;
+
+            while let Some(event) = adapter.next_event()? {
+                println!(
+                    "{} {} {:?} {}",
+                    event.ts.format("%H:%M:%S%.3f"),
+                    event.symbol,
+                    event.kind,
+                    serde_json::to_string(&event.payload)?
+                );
+
+                count += 1;
+                if limit > 0 && count >= limit {
+                    tracing::info!("Reached limit of {} events", limit);
+                    break;
+                }
+            }
+
+            tracing::info!("Streamed {} events", count);
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unknown output mode: {}. Use 'stats' or 'stream'",
+                output
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Run backtest on a captured segment.
+async fn run_backtest(
+    segment_dir: &str,
+    strategy_name: &str,
+    initial_capital: f64,
+    fee_bps: f64,
+    position_size: f64,
+    threshold_bps: f64,
+    output_json: Option<&str>,
+) -> anyhow::Result<()> {
+    use backtest::{
+        BacktestConfig, BacktestEngine, BasisCaptureStrategy, ExchangeConfig, FundingBiasStrategy,
+    };
+
+    let segment_path = std::path::Path::new(segment_dir);
+    if !segment_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Segment directory not found: {}",
+            segment_dir
+        ));
+    }
+
+    let config = BacktestConfig {
+        exchange: ExchangeConfig {
+            fee_bps,
+            initial_cash: initial_capital,
+            use_perp_prices: true,
+        },
+        log_interval: 500_000,
+    };
+
+    let engine = BacktestEngine::new(config);
+
+    tracing::info!("=== Starting Backtest ===");
+    tracing::info!("Segment: {}", segment_dir);
+    tracing::info!("Strategy: {}", strategy_name);
+    tracing::info!("Initial capital: ${:.2}", initial_capital);
+    tracing::info!("Fee: {:.1} bps", fee_bps);
+
+    let result = match strategy_name {
+        "funding_bias" => {
+            let strategy = FundingBiasStrategy::new(position_size, threshold_bps / 10_000.0);
+            engine.run(segment_path, strategy)?
+        }
+        "basis_capture" => {
+            let strategy = BasisCaptureStrategy::new(threshold_bps, position_size);
+            engine.run(segment_path, strategy)?
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unknown strategy: {}. Available: funding_bias, basis_capture",
+                strategy_name
+            ));
+        }
+    };
+
+    // Print results
+    println!("\n=== Backtest Results ===");
+    println!("Strategy: {}", result.strategy_name);
+    println!("Segment: {}", result.segment_path);
+    println!("Events processed: {}", result.total_events);
+    println!("Fills executed: {}", result.total_fills);
+    println!("Duration: {:.1}s ({:.1}h)", result.duration_secs, result.duration_secs / 3600.0);
+    println!();
+    println!("Initial capital: ${:.2}", result.initial_cash);
+    println!("Final cash: ${:.2}", result.final_cash);
+    println!("Realized PnL: ${:.2}", result.realized_pnl);
+    println!("Unrealized PnL: ${:.2}", result.unrealized_pnl);
+    println!("Total PnL: ${:.2}", result.total_pnl);
+    println!("Return: {:.2}%", result.return_pct);
+
+    // Write JSON output if requested
+    if let Some(path) = output_json {
+        let json = serde_json::to_string_pretty(&result)?;
+        std::fs::write(path, json)?;
+        println!("\nResults written to: {}", path);
     }
 
     Ok(())

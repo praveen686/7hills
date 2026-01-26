@@ -388,8 +388,10 @@ fn compute_symbol_digests(
 }
 
 /// Capture a perp session with Spot + Perp + Funding data.
+///
+/// NOTE: This function creates its own timestamped subdirectory.
+/// For managed segments (Phase 2B), use `capture_to_segment()` instead.
 pub async fn capture_perp_session(config: PerpSessionConfig) -> Result<PerpSessionStats> {
-    let session_id = uuid::Uuid::new_v4().to_string();
     let start_time = Utc::now();
 
     // Create session directory
@@ -397,6 +399,29 @@ pub async fn capture_perp_session(config: PerpSessionConfig) -> Result<PerpSessi
     let session_dir = config.out_dir.join(&session_tag);
     std::fs::create_dir_all(&session_dir)
         .with_context(|| format!("create session dir: {:?}", session_dir))?;
+
+    capture_to_segment_inner(&session_dir, &config, start_time).await
+}
+
+/// Capture directly into an existing segment directory (Phase 2B).
+///
+/// Unlike `capture_perp_session`, this does NOT create a subdirectory.
+/// The caller (ManagedSegment) is responsible for directory creation.
+pub async fn capture_to_segment(
+    segment_dir: &Path,
+    config: &PerpSessionConfig,
+) -> Result<PerpSessionStats> {
+    let start_time = Utc::now();
+    capture_to_segment_inner(segment_dir, config, start_time).await
+}
+
+/// Inner capture implementation shared by both entry points.
+async fn capture_to_segment_inner(
+    session_dir: &Path,
+    config: &PerpSessionConfig,
+    start_time: DateTime<Utc>,
+) -> Result<PerpSessionStats> {
+    let session_id = uuid::Uuid::new_v4().to_string();
 
     tracing::info!("=== Perp Session Capture ===");
     tracing::info!("Session ID: {}", &session_id[..8]);
