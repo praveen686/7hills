@@ -384,6 +384,27 @@ pub enum Commands {
         /// Output results to JSON file
         #[arg(long)]
         output_json: Option<String>,
+
+        /// Output decision trace to JSON file (for replay parity verification)
+        #[arg(long)]
+        output_trace: Option<String>,
+
+        /// Run ID for correlation context (auto-generated if not provided)
+        #[arg(long)]
+        run_id: Option<String>,
+    },
+
+    /// Verify replay parity between two decision traces
+    ///
+    /// Compares two trace files and reports whether they match or diverge.
+    VerifyTrace {
+        /// Path to original trace file
+        #[arg(long)]
+        original: String,
+
+        /// Path to replay trace file
+        #[arg(long)]
+        replay: String,
     },
 }
 
@@ -546,6 +567,8 @@ async fn async_main() -> anyhow::Result<()> {
             threshold_bps,
             pace,
             output_json,
+            output_trace,
+            run_id,
         } => {
             run_backtest(
                 &segment_dir,
@@ -556,9 +579,12 @@ async fn async_main() -> anyhow::Result<()> {
                 threshold_bps,
                 &pace,
                 output_json.as_deref(),
+                output_trace.as_deref(),
+                run_id.as_deref(),
             )
             .await
         }
+        Commands::VerifyTrace { original, replay } => run_verify_trace(&original, &replay).await,
     }
 }
 
@@ -1866,6 +1892,8 @@ async fn run_backtest(
     threshold_bps: f64,
     pace: &str,
     output_json: Option<&str>,
+    output_trace: Option<&str>,
+    run_id: Option<&str>,
 ) -> anyhow::Result<()> {
     use backtest::{
         BacktestConfig, BacktestEngine, BasisCaptureStrategy, ExchangeConfig, FundingBiasStrategy,
@@ -1893,6 +1921,8 @@ async fn run_backtest(
         },
         log_interval: 500_000,
         pace: pace_mode,
+        output_trace: output_trace.map(|s| s.to_string()),
+        run_id: run_id.map(|s| s.to_string()),
     };
 
     let engine = BacktestEngine::new(config);
@@ -1985,6 +2015,15 @@ async fn run_backtest(
         result.total_pnl, result.return_pct
     );
 
+    // Trace info (for replay parity)
+    println!();
+    println!("--- Decision Trace ---");
+    println!("Decisions: {}", result.total_decisions);
+    println!("Trace hash: {}", result.trace_hash);
+    if let Some(ref path) = result.trace_path {
+        println!("Trace saved to: {}", path);
+    }
+
     // Write JSON output if requested
     if let Some(path) = output_json {
         let json = serde_json::to_string_pretty(&result)?;
@@ -1993,4 +2032,88 @@ async fn run_backtest(
     }
 
     Ok(())
+}
+
+/// Verify replay parity between two decision traces.
+async fn run_verify_trace(original_path: &str, replay_path: &str) -> anyhow::Result<()> {
+    use quantlaxmi_events::{DecisionTrace, ReplayParityResult, verify_replay_parity};
+    use std::path::Path;
+
+    println!("=== Replay Parity Verification ===");
+    println!("Original: {}", original_path);
+    println!("Replay: {}", replay_path);
+    println!();
+
+    // Load traces
+    let original = DecisionTrace::load(Path::new(original_path))
+        .map_err(|e| anyhow::anyhow!("Failed to load original trace: {}", e))?;
+    let replay = DecisionTrace::load(Path::new(replay_path))
+        .map_err(|e| anyhow::anyhow!("Failed to load replay trace: {}", e))?;
+
+    println!(
+        "Original: {} decisions, hash={}...",
+        original.len(),
+        &original.hash_hex()[..16]
+    );
+    println!(
+        "Replay: {} decisions, hash={}...",
+        replay.len(),
+        &replay.hash_hex()[..16]
+    );
+    println!();
+
+    // Verify parity
+    let result = verify_replay_parity(&original, &replay);
+
+    match result {
+        ReplayParityResult::Match => {
+            println!("PARITY_MATCH");
+            println!(
+                "Traces are identical - all {} decisions match.",
+                original.len()
+            );
+            Ok(())
+        }
+        ReplayParityResult::Divergence {
+            index,
+            original: orig_decision,
+            replay: replay_decision,
+            reason,
+        } => {
+            println!("PARITY_DIVERGENCE");
+            println!();
+            println!("First divergence at index: {}", index);
+            println!("Reason: {}", reason);
+            println!();
+            println!("Original decision:");
+            println!("  ts: {}", orig_decision.ts);
+            println!("  decision_id: {}", orig_decision.decision_id);
+            println!("  direction: {}", orig_decision.direction);
+            println!("  qty: {}", orig_decision.target_qty_mantissa);
+            println!();
+            println!("Replay decision:");
+            println!("  ts: {}", replay_decision.ts);
+            println!("  decision_id: {}", replay_decision.decision_id);
+            println!("  direction: {}", replay_decision.direction);
+            println!("  qty: {}", replay_decision.target_qty_mantissa);
+            Err(anyhow::anyhow!(
+                "Replay parity check failed: divergence at index {}",
+                index
+            ))
+        }
+        ReplayParityResult::LengthMismatch {
+            original_len,
+            replay_len,
+        } => {
+            println!("PARITY_LENGTH_MISMATCH");
+            println!();
+            println!("Original length: {}", original_len);
+            println!("Replay length: {}", replay_len);
+            Err(anyhow::anyhow!(
+                "Replay parity check failed: length mismatch ({} vs {})",
+                original_len,
+                replay_len
+            ))
+        }
+    }
 }

@@ -12,7 +12,7 @@
 //! - Domain-separated (`quantlaxmi:decision_trace:v2`)
 //! - Record-delimited (ASCII RS `\x1e`)
 //! - Field-explicit (no serde, explicit byte encoding)
-//! - Float-immune (excludes confidence, spread_bps, metadata)
+//! - Float-immune (excludes confidence_mantissa, spread_bps_mantissa, metadata)
 //!
 //! ## Usage
 //! ```ignore
@@ -290,9 +290,9 @@ fn find_first_divergence_v2(live: &[DecisionEvent], replay: &[DecisionEvent]) ->
 /// - Domain separated with prefix `b"quantlaxmi:decision_trace:v2\0"`
 /// - WAL line order preserved (caller must pass decisions in WAL order; DO NOT sort)
 /// - Explicitly EXCLUDES:
-///   - `DecisionEvent.confidence` (f64)
+///   - `DecisionEvent.confidence_mantissa` (i64, fixed-point)
 ///   - `DecisionEvent.metadata` (serde_json::Value)
-///   - `MarketSnapshot.spread_bps` (f64)
+///   - `MarketSnapshot.spread_bps_mantissa` (i64, fixed-point)
 ///
 /// Encoding rules:
 /// - Strings: u32_le(len) + utf8 bytes (no normalization)
@@ -461,10 +461,12 @@ mod tests {
                 ask_qty_mantissa: 1000,
                 price_exponent: -2,
                 qty_exponent: -2,
-                spread_bps: 4.0, // EXCLUDED from hash
+                // Fixed-point: 400 with exponent -2 = 4.0 bps
+                spread_bps_mantissa: 400,
                 book_ts_ns: 1_700_000_000_000_000_000,
             },
-            confidence: 0.95,                  // EXCLUDED from hash
+            // Fixed-point: 9500 with exponent -4 = 0.95
+            confidence_mantissa: 9500,
             metadata: serde_json::Value::Null, // EXCLUDED from hash
             ctx,
         }
@@ -651,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_excluded_fields_do_not_affect_hash() {
-        // confidence, metadata, spread_bps are excluded - changing them must NOT affect hash
+        // confidence_mantissa, metadata, spread_bps_mantissa are excluded - changing them must NOT affect hash
         let ctx = CorrelationContext {
             session_id: Some("test".to_string()),
             run_id: None,
@@ -665,17 +667,17 @@ mod tests {
         let d1 = make_test_decision(ctx.clone());
         let mut d2 = make_test_decision(ctx);
 
-        // Change excluded fields
-        d2.confidence = 0.50; // different confidence
+        // Change excluded fields (now fixed-point mantissas)
+        d2.confidence_mantissa = 5000; // different confidence (0.50)
         d2.metadata = serde_json::json!({"key": "value"}); // different metadata
-        d2.market_snapshot.spread_bps = 999.0; // different spread_bps
+        d2.market_snapshot.spread_bps_mantissa = 99900; // different spread_bps (999.00)
 
         let hash1 = compute_decision_trace_hash_v2(&[d1]);
         let hash2 = compute_decision_trace_hash_v2(&[d2]);
 
         assert_eq!(
             hash1, hash2,
-            "Excluded fields (confidence, metadata, spread_bps) must NOT affect hash"
+            "Excluded fields (confidence_mantissa, metadata, spread_bps_mantissa) must NOT affect hash"
         );
     }
 

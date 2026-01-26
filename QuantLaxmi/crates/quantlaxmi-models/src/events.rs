@@ -206,10 +206,20 @@ impl QuoteEvent {
     }
 }
 
+/// Fixed exponent for confidence values (-4 = 4 decimal places, e.g., 10000 = 1.0000)
+pub const CONFIDENCE_EXPONENT: i8 = -4;
+
+/// Fixed exponent for spread_bps values (-2 = 2 decimal places, e.g., 523 = 5.23 bps)
+pub const SPREAD_BPS_EXPONENT: i8 = -2;
+
 /// Decision event from strategy execution.
 ///
 /// Captures the full decision context including market state at decision time.
 /// Used for replay parity validation.
+///
+/// ## Fixed-Point Policy
+/// - `confidence_mantissa`: Fixed exponent -4 (10000 = 1.0, range 0-10000)
+/// - `spread_bps_mantissa` in MarketSnapshot: Fixed exponent -2 (523 = 5.23 bps)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionEvent {
     /// Decision timestamp
@@ -245,9 +255,10 @@ pub struct DecisionEvent {
     /// Market state snapshot at decision time
     pub market_snapshot: MarketSnapshot,
 
-    /// Confidence score (0.0 to 1.0)
+    /// Confidence score as fixed-point mantissa (exponent = CONFIDENCE_EXPONENT = -4)
+    /// Value 10000 = 1.0, 8500 = 0.85, 0 = 0.0
     #[serde(default)]
-    pub confidence: f64,
+    pub confidence_mantissa: i64,
 
     /// Strategy-specific metadata
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
@@ -258,7 +269,47 @@ pub struct DecisionEvent {
     pub ctx: CorrelationContext,
 }
 
+impl DecisionEvent {
+    /// Convert confidence_mantissa to f64 (for display only).
+    ///
+    /// # Warning
+    /// Only use for display/logging. Do NOT use for computations that feed
+    /// back into decisions or hashing.
+    pub fn confidence_f64(&self) -> f64 {
+        self.confidence_mantissa as f64 * 10f64.powi(CONFIDENCE_EXPONENT as i32)
+    }
+
+    /// Create confidence_mantissa from f64 value (0.0 to 1.0).
+    ///
+    /// # Migration Bridge
+    /// This helper exists only for ingesting external float inputs (e.g., from
+    /// legacy systems or libraries that provide confidence as f64).
+    ///
+    /// **Internal strategy computations MUST produce confidence directly as
+    /// mantissa values using integer arithmetic to ensure determinism.**
+    ///
+    /// # Example
+    /// ```ignore
+    /// // GOOD: Direct mantissa computation (deterministic)
+    /// let confidence_mantissa = 8500; // 0.85
+    ///
+    /// // ACCEPTABLE: Converting external float input (migration bridge)
+    /// let external_confidence = legacy_api.get_confidence(); // returns f64
+    /// let mantissa = DecisionEvent::confidence_from_f64(external_confidence);
+    ///
+    /// // BAD: Converting internal float computation (nondeterministic)
+    /// let bad_confidence = some_float_calculation(); // DON'T DO THIS
+    /// let bad_mantissa = DecisionEvent::confidence_from_f64(bad_confidence);
+    /// ```
+    pub fn confidence_from_f64(value: f64) -> i64 {
+        (value * 10f64.powi(-CONFIDENCE_EXPONENT as i32)).round() as i64
+    }
+}
+
 /// Market state snapshot at decision time for replay validation.
+///
+/// ## Fixed-Point Policy
+/// - `spread_bps_mantissa`: Fixed exponent -2 (523 = 5.23 bps)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketSnapshot {
     /// Best bid price (mantissa)
@@ -273,10 +324,44 @@ pub struct MarketSnapshot {
     pub price_exponent: i8,
     /// Quantity exponent
     pub qty_exponent: i8,
-    /// Spread in basis points
-    pub spread_bps: f64,
+    /// Spread in basis points as fixed-point mantissa (exponent = SPREAD_BPS_EXPONENT = -2)
+    /// Value 523 = 5.23 bps, 100 = 1.00 bps
+    pub spread_bps_mantissa: i64,
     /// Book timestamp (nanoseconds since epoch for causality)
     pub book_ts_ns: i64,
+}
+
+impl MarketSnapshot {
+    /// Convert spread_bps_mantissa to f64 (for display only).
+    ///
+    /// # Warning
+    /// Only use for display/logging. Do NOT use for computations that feed
+    /// back into decisions or hashing.
+    pub fn spread_bps_f64(&self) -> f64 {
+        self.spread_bps_mantissa as f64 * 10f64.powi(SPREAD_BPS_EXPONENT as i32)
+    }
+
+    /// Create spread_bps_mantissa from f64 value.
+    ///
+    /// # Migration Bridge
+    /// This helper exists only for ingesting external float inputs.
+    /// **Internal spread computations MUST use integer arithmetic.**
+    ///
+    /// # Deterministic Spread Calculation
+    /// ```ignore
+    /// // GOOD: Compute spread in fixed-point directly
+    /// // spread_bps = (ask - bid) / mid * 10000
+    /// // With price_exponent = -2, we can compute:
+    /// let mid_mantissa = (bid_price_mantissa + ask_price_mantissa) / 2;
+    /// let spread_bps_mantissa = if mid_mantissa > 0 {
+    ///     ((ask_price_mantissa - bid_price_mantissa) * 1_000_000) / mid_mantissa
+    /// } else {
+    ///     0
+    /// };
+    /// ```
+    pub fn spread_bps_from_f64(value: f64) -> i64 {
+        (value * 10f64.powi(-SPREAD_BPS_EXPONENT as i32)).round() as i64
+    }
 }
 
 // =============================================================================

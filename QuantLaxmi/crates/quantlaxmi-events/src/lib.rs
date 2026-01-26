@@ -45,6 +45,8 @@ pub mod trace;
 
 // Re-export canonical events from quantlaxmi-models
 pub use quantlaxmi_models::{
+    // Fixed-point exponent constants
+    CONFIDENCE_EXPONENT,
     CanonicalQuoteEvent as QuoteEvent,
     // Canonical events with fixed-point representation
     CorrelationContext,
@@ -70,10 +72,14 @@ pub use quantlaxmi_models::{
     RiskEvent,
     RiskEventType,
 
+    SPREAD_BPS_EXPONENT,
     // Common types
     Side,
     parse_to_mantissa_pure,
 };
 
 // Re-export trace types at crate root
-pub use trace::{DecisionTrace, DecisionTraceBuilder, ReplayParityResult, verify_replay_parity};
+pub use trace::{
+    DecisionTrace, DecisionTraceBuilder, ENCODING_VERSION, ReplayParityResult, TraceError,
+    canonical_bytes, verify_replay_parity,
+};

@@ -29,6 +29,7 @@ quantlaxmi-connectors-binance = { path = "../quantlaxmi-connectors-binance" }
 # Core infrastructure (via shims)
 quantlaxmi-core = { path = "../quantlaxmi-core" }
 quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-events = { path = "../quantlaxmi-events" }
 quantlaxmi-data = { path = "../quantlaxmi-data" }
 quantlaxmi-executor = { path = "../quantlaxmi-executor" }
 quantlaxmi-risk = { path = "../quantlaxmi-risk" }

@@ -15,9 +15,11 @@
 use crate::replay::{EventKind, ReplayEvent, SegmentReplayAdapter};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use quantlaxmi_events::{CorrelationContext, DecisionEvent, DecisionTraceBuilder, MarketSnapshot};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use uuid::Uuid;
 
 // =============================================================================
 // Pacing Mode
@@ -365,6 +367,264 @@ pub fn extract_round_trips(fills: &[Fill]) -> Vec<RoundTrip> {
     }
 
     trades
+}
+
+// =============================================================================
+// Fixed-Point PnL Accumulator
+// =============================================================================
+
+/// Fixed exponent for PnL values (-8 = 8 decimal places, matching crypto qty precision)
+pub const PNL_EXPONENT: i8 = -8;
+
+/// Fixed-point PnL accumulator for deterministic backtest accounting.
+///
+/// All values are stored as mantissas with fixed exponent (PNL_EXPONENT = -8).
+/// This ensures cross-platform reproducibility without floating-point drift.
+///
+/// ## Usage
+/// ```ignore
+/// let mut acc = PnlAccumulatorFixed::new();
+/// acc.add_fill(price_mantissa, qty_mantissa, fee_mantissa, is_buy);
+/// let pnl = acc.realized_pnl_f64(); // For display only
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct PnlAccumulatorFixed {
+    /// Total realized PnL (mantissa, exponent = PNL_EXPONENT)
+    pub realized_pnl_mantissa: i128,
+    /// Total fees paid (mantissa, exponent = PNL_EXPONENT)
+    pub total_fees_mantissa: i128,
+    /// Current position quantity (mantissa, can be negative for short)
+    pub position_qty_mantissa: i128,
+    /// Average entry price for current position (mantissa, exponent = -2)
+    pub avg_entry_price_mantissa: i128,
+    /// Total cost basis for current position (mantissa, exponent = PNL_EXPONENT)
+    pub cost_basis_mantissa: i128,
+}
+
+impl PnlAccumulatorFixed {
+    /// Create a new accumulator with zero balances.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Process a fill (buy or sell).
+    ///
+    /// # Arguments
+    /// * `price_mantissa` - Fill price (exponent = -2, cents)
+    /// * `qty_mantissa` - Fill quantity (exponent = -8)
+    /// * `fee_mantissa` - Fee amount (exponent = -8)
+    /// * `is_buy` - True for buy, false for sell
+    pub fn process_fill(
+        &mut self,
+        price_mantissa: i64,
+        qty_mantissa: i64,
+        fee_mantissa: i64,
+        is_buy: bool,
+    ) {
+        // Fee is always added (exponent already matches PNL_EXPONENT)
+        self.total_fees_mantissa += fee_mantissa as i128;
+
+        // Notional = price * qty, but we need to account for exponent difference
+        // price (exp -2) * qty (exp -8) = notional (exp -10)
+        // We want PNL_EXPONENT = -8, so divide by 10^(-10 - (-8)) = 10^(-2) = 100
+        let notional_raw = (price_mantissa as i128) * (qty_mantissa as i128);
+        let notional_mantissa = notional_raw / 100; // Adjust exponent from -10 to -8
+
+        if is_buy {
+            if self.position_qty_mantissa >= 0 {
+                // Adding to long or opening new long
+                self.cost_basis_mantissa += notional_mantissa;
+                self.position_qty_mantissa += qty_mantissa as i128;
+                // Update average entry price
+                if self.position_qty_mantissa > 0 {
+                    // avg_price = cost_basis / position_qty
+                    // But we need to handle exponent: cost_basis (exp -8) / qty (exp -8) = price (exp 0)
+                    // We want price with exp -2, so multiply by 100
+                    self.avg_entry_price_mantissa =
+                        (self.cost_basis_mantissa * 100) / self.position_qty_mantissa;
+                }
+            } else {
+                // Covering short position
+                let cover_qty = (qty_mantissa as i128).min(-self.position_qty_mantissa);
+                // PnL = (entry_price - exit_price) * cover_qty for short
+                // entry_price (exp -2) * cover_qty (exp -8) / 100 = notional (exp -8)
+                let entry_notional = (self.avg_entry_price_mantissa * cover_qty) / 100;
+                let exit_notional = (price_mantissa as i128 * cover_qty) / 100;
+                let pnl = entry_notional - exit_notional - fee_mantissa as i128;
+                self.realized_pnl_mantissa += pnl;
+
+                self.position_qty_mantissa += qty_mantissa as i128;
+                if self.position_qty_mantissa > 0 {
+                    // Flipped to long
+                    let excess_qty = self.position_qty_mantissa;
+                    self.cost_basis_mantissa = (price_mantissa as i128 * excess_qty) / 100;
+                    self.avg_entry_price_mantissa = price_mantissa as i128;
+                } else if self.position_qty_mantissa == 0 {
+                    self.cost_basis_mantissa = 0;
+                    self.avg_entry_price_mantissa = 0;
+                }
+            }
+        } else {
+            // Sell
+            if self.position_qty_mantissa <= 0 {
+                // Adding to short or opening new short
+                self.cost_basis_mantissa += notional_mantissa;
+                self.position_qty_mantissa -= qty_mantissa as i128;
+                if self.position_qty_mantissa < 0 {
+                    self.avg_entry_price_mantissa =
+                        (self.cost_basis_mantissa * 100) / (-self.position_qty_mantissa);
+                }
+            } else {
+                // Closing long position
+                let close_qty = (qty_mantissa as i128).min(self.position_qty_mantissa);
+                // PnL = (exit_price - entry_price) * close_qty for long
+                let entry_notional = (self.avg_entry_price_mantissa * close_qty) / 100;
+                let exit_notional = (price_mantissa as i128 * close_qty) / 100;
+                let pnl = exit_notional - entry_notional - fee_mantissa as i128;
+                self.realized_pnl_mantissa += pnl;
+
+                self.position_qty_mantissa -= qty_mantissa as i128;
+                if self.position_qty_mantissa < 0 {
+                    // Flipped to short
+                    let excess_qty = -self.position_qty_mantissa;
+                    self.cost_basis_mantissa = (price_mantissa as i128 * excess_qty) / 100;
+                    self.avg_entry_price_mantissa = price_mantissa as i128;
+                } else if self.position_qty_mantissa == 0 {
+                    self.cost_basis_mantissa = 0;
+                    self.avg_entry_price_mantissa = 0;
+                }
+            }
+        }
+    }
+
+    /// Get realized PnL as f64 (for display only).
+    pub fn realized_pnl_f64(&self) -> f64 {
+        self.realized_pnl_mantissa as f64 * 10f64.powi(PNL_EXPONENT as i32)
+    }
+
+    /// Get total fees as f64 (for display only).
+    pub fn total_fees_f64(&self) -> f64 {
+        self.total_fees_mantissa as f64 * 10f64.powi(PNL_EXPONENT as i32)
+    }
+
+    /// Get position quantity as f64 (for display only).
+    pub fn position_qty_f64(&self) -> f64 {
+        self.position_qty_mantissa as f64 * 10f64.powi(PNL_EXPONENT as i32)
+    }
+
+    /// Check if position is flat.
+    pub fn is_flat(&self) -> bool {
+        self.position_qty_mantissa == 0
+    }
+}
+
+// =============================================================================
+// Decision Event Conversion
+// =============================================================================
+
+/// Convert an OrderIntent to a DecisionEvent for trace recording.
+///
+/// This creates a canonical DecisionEvent that can be hashed for replay parity.
+/// The price fields use a fixed exponent of -2 (cents precision) for consistency.
+fn order_intent_to_decision(
+    order: &OrderIntent,
+    ts: DateTime<Utc>,
+    strategy_name: &str,
+    run_id: &str,
+    current_bid: f64,
+    current_ask: f64,
+    book_ts_ns: i64,
+) -> DecisionEvent {
+    let decision_id = Uuid::new_v4();
+
+    // Convert direction: Buy = 1 (long), Sell = -1 (short)
+    let direction: i8 = match order.side {
+        Side::Buy => 1,
+        Side::Sell => -1,
+    };
+
+    // Determine decision type from tag
+    let decision_type = order
+        .tag
+        .as_ref()
+        .map(|t| {
+            if t.contains("entry") {
+                "entry"
+            } else if t.contains("exit") {
+                "exit"
+            } else {
+                "order"
+            }
+        })
+        .unwrap_or("order")
+        .to_string();
+
+    // Price exponent: -2 means prices in cents (e.g., 8871660 = $88716.60)
+    const PRICE_EXPONENT: i8 = -2;
+    const QTY_EXPONENT: i8 = -8; // 8 decimal places for crypto
+
+    // Convert f64 prices to mantissa (multiply by 10^(-exponent))
+    let price_scale = 10f64.powi(-PRICE_EXPONENT as i32);
+    let qty_scale = 10f64.powi(-QTY_EXPONENT as i32);
+
+    let reference_price = order
+        .limit_price
+        .unwrap_or((current_bid + current_ask) / 2.0);
+    let reference_price_mantissa = (reference_price * price_scale).round() as i64;
+    let target_qty_mantissa = (order.qty * qty_scale).round() as i64;
+
+    let bid_price_mantissa = (current_bid * price_scale).round() as i64;
+    let ask_price_mantissa = (current_ask * price_scale).round() as i64;
+
+    // Calculate spread in basis points (fixed-point: exponent = -2)
+    let mid_price = (current_bid + current_ask) / 2.0;
+    let spread_bps_mantissa = if mid_price > 0.0 {
+        MarketSnapshot::spread_bps_from_f64(((current_ask - current_bid) / mid_price) * 10_000.0)
+    } else {
+        0
+    };
+
+    DecisionEvent {
+        ts,
+        decision_id,
+        strategy_id: strategy_name.to_string(),
+        symbol: order.symbol.clone(),
+        decision_type,
+        direction,
+        target_qty_mantissa,
+        qty_exponent: QTY_EXPONENT,
+        reference_price_mantissa,
+        price_exponent: PRICE_EXPONENT,
+        market_snapshot: MarketSnapshot {
+            bid_price_mantissa,
+            ask_price_mantissa,
+            bid_qty_mantissa: 0, // Not tracked in current backtest
+            ask_qty_mantissa: 0,
+            price_exponent: PRICE_EXPONENT,
+            qty_exponent: QTY_EXPONENT,
+            spread_bps_mantissa,
+            book_ts_ns,
+        },
+        // Full confidence for backtest decisions (10000 = 1.0 with exponent -4)
+        confidence_mantissa: DecisionEvent::confidence_from_f64(1.0),
+        metadata: order
+            .tag
+            .as_ref()
+            .map(|t| serde_json::json!({"tag": t}))
+            .unwrap_or(serde_json::Value::Null),
+        // Note: CorrelationContext is flattened in serde, so fields like symbol,
+        // strategy_id, and decision_id would conflict with top-level fields.
+        // We only set fields that don't have top-level equivalents.
+        ctx: CorrelationContext {
+            session_id: None,
+            run_id: Some(run_id.to_string()),
+            symbol: None, // Top-level symbol field exists
+            venue: Some("paper".to_string()),
+            strategy_id: None, // Top-level strategy_id field exists
+            decision_id: None, // Top-level decision_id field exists
+            order_id: None,
+        },
+    }
 }
 
 // =============================================================================
@@ -720,6 +980,12 @@ pub struct BacktestConfig {
     pub log_interval: usize,
     /// Pacing mode (fast or real-time)
     pub pace: PaceMode,
+    /// Optional path to save the decision trace (for replay parity verification).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_trace: Option<String>,
+    /// Run ID for correlation context (auto-generated if not provided).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 impl Default for BacktestConfig {
@@ -728,6 +994,8 @@ impl Default for BacktestConfig {
             exchange: ExchangeConfig::default(),
             log_interval: 100_000,
             pace: PaceMode::Fast,
+            output_trace: None,
+            run_id: None,
         }
     }
 }
@@ -739,6 +1007,7 @@ pub struct BacktestResult {
     pub segment_path: String,
     pub total_events: usize,
     pub total_fills: usize,
+    pub total_decisions: usize,
     pub initial_cash: f64,
     pub final_cash: f64,
     pub realized_pnl: f64,
@@ -752,6 +1021,21 @@ pub struct BacktestResult {
     pub trades: Vec<RoundTrip>,
     pub metrics: TradeMetrics,
     pub equity_curve: Vec<EquityPoint>,
+    /// Decision trace hash (SHA-256 hex) for replay parity verification.
+    pub trace_hash: String,
+    /// Path to the saved trace file (if output_trace was specified).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_path: Option<String>,
+    /// Decision trace encoding version (for compatibility checking).
+    pub trace_encoding_version: u8,
+    /// Fixed-point realized PnL (mantissa with pnl_exponent).
+    /// This is the deterministic value; realized_pnl is for display only.
+    pub realized_pnl_mantissa: i128,
+    /// Fixed-point total fees (mantissa with pnl_exponent).
+    pub total_fees_mantissa: i128,
+    /// PnL exponent for fixed-point values.
+    /// For crypto: typically -8 (price_exp(-2) + qty_exp(-8) normalized to -8).
+    pub pnl_exponent: i8,
 }
 
 /// Backtest engine.
@@ -767,6 +1051,8 @@ impl BacktestEngine {
     /// Run backtest on a segment with a strategy.
     ///
     /// This is an async method to support real-time pacing mode.
+    /// Every strategy decision (OrderIntent) is recorded as a DecisionEvent
+    /// for replay parity verification.
     pub async fn run<S: Strategy>(
         &self,
         segment_dir: &Path,
@@ -775,10 +1061,23 @@ impl BacktestEngine {
         let mut adapter = SegmentReplayAdapter::open(segment_dir)?;
         let mut exchange = PaperExchange::new(self.config.exchange.clone());
 
+        // Decision trace builder for replay parity
+        let mut trace_builder = DecisionTraceBuilder::new();
+        let run_id = self
+            .config
+            .run_id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+
         let mut total_events = 0usize;
         let mut start_ts: Option<DateTime<Utc>> = None;
         let mut end_ts: Option<DateTime<Utc>> = None;
         let mut last_event_ts: Option<DateTime<Utc>> = None;
+
+        // Track market state for DecisionEvent snapshots
+        let mut current_bid: f64 = 0.0;
+        let mut current_ask: f64 = 0.0;
+        let mut current_book_ts_ns: i64 = 0;
 
         // Equity curve tracking
         let mut equity_curve: Vec<EquityPoint> = Vec::new();
@@ -789,10 +1088,11 @@ impl BacktestEngine {
         let wall_clock_start = std::time::Instant::now();
 
         tracing::info!(
-            "Starting backtest: strategy={}, segment={:?}, pace={:?}",
+            "Starting backtest: strategy={}, segment={:?}, pace={:?}, run_id={}",
             strategy.name(),
             segment_dir,
-            self.config.pace
+            self.config.pace,
+            run_id
         );
 
         while let Some(event) = adapter.next_event()? {
@@ -814,14 +1114,33 @@ impl BacktestEngine {
             last_event_ts = Some(event.ts);
             end_ts = Some(event.ts);
 
-            // Update market state
+            // Update market state (also track for DecisionEvent snapshots)
             exchange.update_market(&event);
+            let (bid, ask) = extract_bid_ask(&event.payload, event.kind);
+            if bid > 0.0 && ask > 0.0 {
+                current_bid = bid;
+                current_ask = ask;
+                current_book_ts_ns = event.ts.timestamp_nanos_opt().unwrap_or(0);
+            }
 
             // Get strategy orders
             let orders = strategy.on_event(&event);
 
-            // Execute orders
+            // Record each order as a DecisionEvent and execute
             for order in orders {
+                // Create DecisionEvent from OrderIntent
+                let decision = order_intent_to_decision(
+                    &order,
+                    event.ts,
+                    strategy.name(),
+                    &run_id,
+                    current_bid,
+                    current_ask,
+                    current_book_ts_ns,
+                );
+                trace_builder.record(&decision);
+
+                // Execute the order
                 if let Some(fill) = exchange.execute(&order, event.ts) {
                     strategy.on_fill(&fill);
                 }
@@ -852,14 +1171,32 @@ impl BacktestEngine {
             if total_events.is_multiple_of(self.config.log_interval) {
                 let elapsed = wall_clock_start.elapsed().as_secs_f64();
                 tracing::info!(
-                    "Progress: {} events, {} fills, PnL: {:.2}, elapsed: {:.1}s",
+                    "Progress: {} events, {} fills, {} decisions, PnL: {:.2}, elapsed: {:.1}s",
                     total_events,
                     exchange.fills().len(),
+                    trace_builder.len(),
                     exchange.realized_pnl() + exchange.unrealized_pnl(),
                     elapsed
                 );
             }
         }
+
+        // Finalize trace
+        let trace = trace_builder.finalize();
+        let trace_hash = trace.hash_hex();
+        let total_decisions = trace.len();
+
+        // Save trace if output path specified
+        let trace_path = if let Some(ref path) = self.config.output_trace {
+            let trace_file = Path::new(path);
+            trace
+                .save(trace_file)
+                .map_err(|e| anyhow::anyhow!("Failed to save trace: {}", e))?;
+            tracing::info!("Decision trace saved to: {}", path);
+            Some(path.clone())
+        } else {
+            None
+        };
 
         let realized = exchange.realized_pnl();
         let unrealized = exchange.unrealized_pnl();
@@ -881,11 +1218,23 @@ impl BacktestEngine {
             duration_secs,
         );
 
+        // Compute fixed-point PnL from fills for determinism
+        let mut pnl_fixed = PnlAccumulatorFixed::new();
+        for fill in &fills {
+            // Convert fill to fixed-point
+            let price_mantissa = (fill.price * 100.0).round() as i64; // exp -2
+            let qty_mantissa = (fill.qty * 100_000_000.0).round() as i64; // exp -8
+            let fee_mantissa = (fill.fee * 100_000_000.0).round() as i64; // exp -8
+            let is_buy = matches!(fill.side, Side::Buy);
+            pnl_fixed.process_fill(price_mantissa, qty_mantissa, fee_mantissa, is_buy);
+        }
+
         let result = BacktestResult {
             strategy_name: strategy.name().to_string(),
             segment_path: segment_dir.display().to_string(),
             total_events,
             total_fills: fills.len(),
+            total_decisions,
             initial_cash: self.config.exchange.initial_cash,
             final_cash: exchange.cash(),
             realized_pnl: realized,
@@ -899,12 +1248,20 @@ impl BacktestEngine {
             trades,
             metrics,
             equity_curve,
+            trace_hash: trace_hash.clone(),
+            trace_path,
+            trace_encoding_version: trace.encoding_version,
+            realized_pnl_mantissa: pnl_fixed.realized_pnl_mantissa,
+            total_fees_mantissa: pnl_fixed.total_fees_mantissa,
+            pnl_exponent: PNL_EXPONENT,
         };
 
         tracing::info!("=== Backtest Complete ===");
         tracing::info!("Strategy: {}", result.strategy_name);
         tracing::info!("Events: {}", result.total_events);
         tracing::info!("Fills: {}", result.total_fills);
+        tracing::info!("Decisions: {}", result.total_decisions);
+        tracing::info!("Trace hash: {}...", &trace_hash[..16]);
         tracing::info!("Duration: {:.1}s", result.duration_secs);
         tracing::info!("Realized PnL: ${:.2}", result.realized_pnl);
         tracing::info!("Unrealized PnL: ${:.2}", result.unrealized_pnl);
@@ -1282,5 +1639,143 @@ mod tests {
         // Check realized PnL
         assert!((exchange.realized_pnl() - 10.0).abs() < 0.01);
         assert_eq!(exchange.position("BTCUSDT"), 0.0);
+    }
+
+    // =========================================================================
+    // PnlAccumulatorFixed Tests
+    // =========================================================================
+
+    #[test]
+    fn test_pnl_fixed_buy_sell_round_trip() {
+        // Test a simple buy/sell round trip with fees
+        let mut acc = PnlAccumulatorFixed::new();
+
+        // Buy 0.01 BTC at $100,000.00
+        // price_mantissa = 10000000 (exp -2 = $100,000.00)
+        // qty_mantissa = 1_000_000 (exp -8 = 0.01 BTC)
+        // fee_mantissa = 10_000 (exp -8 = 0.0001 BTC = $10 in fees)
+        acc.process_fill(10_000_000, 1_000_000, 10_000, true);
+
+        assert_eq!(acc.position_qty_mantissa, 1_000_000);
+        assert!(!acc.is_flat());
+
+        // Sell 0.01 BTC at $101,000.00
+        // price_mantissa = 10100000 (exp -2 = $101,000.00)
+        acc.process_fill(10_100_000, 1_000_000, 10_000, false);
+
+        assert!(acc.is_flat());
+
+        // PnL calculation:
+        // Entry notional = 10000000 * 1000000 / 100 = 100_000_000_000 (exp -8 = $1000)
+        // Exit notional = 10100000 * 1000000 / 100 = 101_000_000_000 (exp -8 = $1010)
+        // Gross PnL = 101_000_000_000 - 100_000_000_000 = 1_000_000_000 (exp -8 = $10)
+        // Net PnL = 1_000_000_000 - 10_000 (fee) = 999_990_000 (exp -8 = ~$9.9999)
+
+        // Allow for small rounding differences
+        let pnl_f64 = acc.realized_pnl_f64();
+        assert!(
+            (pnl_f64 - 9.9999).abs() < 0.01,
+            "Expected ~$9.9999 PnL, got {}",
+            pnl_f64
+        );
+
+        // Total fees = 2 * 10_000 = 20_000 (exp -8 = $0.0002)
+        let fees_f64 = acc.total_fees_f64();
+        assert!(
+            (fees_f64 - 0.0002).abs() < 0.0001,
+            "Expected $0.0002 fees, got {}",
+            fees_f64
+        );
+    }
+
+    #[test]
+    fn test_pnl_fixed_multi_fill_aggregation() {
+        // Test aggregating multiple fills
+        let mut acc = PnlAccumulatorFixed::new();
+
+        // Buy 0.01 BTC at $100,000
+        acc.process_fill(10_000_000, 1_000_000, 10_000, true);
+        // Buy another 0.01 BTC at $100,500
+        acc.process_fill(10_050_000, 1_000_000, 10_000, true);
+
+        // Position should be 0.02 BTC
+        assert_eq!(acc.position_qty_mantissa, 2_000_000);
+
+        // Average entry price should be ~$100,250
+        let avg_price_f64 = acc.avg_entry_price_mantissa as f64 / 100.0;
+        assert!(
+            (avg_price_f64 - 100_250.0).abs() < 1.0,
+            "Expected avg entry ~$100,250, got {}",
+            avg_price_f64
+        );
+
+        // Sell all 0.02 BTC at $101,000
+        acc.process_fill(10_100_000, 2_000_000, 20_000, false);
+
+        assert!(acc.is_flat());
+
+        // PnL: Bought avg $100,250, sold at $101,000
+        // (101000 - 100250) * 0.02 = $15 gross profit
+        // Minus fees: 10_000 + 10_000 + 20_000 = 40_000 (exp -8 = $0.0004)
+        // Net should be close to $15 - $0.0004 ≈ $14.9996 (adjusted for fixed-point)
+        let pnl_f64 = acc.realized_pnl_f64();
+        assert!(
+            pnl_f64 > 14.0 && pnl_f64 < 16.0,
+            "Expected ~$15 PnL, got {}",
+            pnl_f64
+        );
+    }
+
+    #[test]
+    fn test_pnl_fixed_determinism() {
+        // Verify identical fills produce identical results
+        let mut acc1 = PnlAccumulatorFixed::new();
+        let mut acc2 = PnlAccumulatorFixed::new();
+
+        // Same sequence of fills
+        acc1.process_fill(10_000_000, 1_000_000, 10_000, true);
+        acc1.process_fill(10_100_000, 1_000_000, 10_000, false);
+
+        acc2.process_fill(10_000_000, 1_000_000, 10_000, true);
+        acc2.process_fill(10_100_000, 1_000_000, 10_000, false);
+
+        // Mantissas must be exactly equal (no floating-point drift)
+        assert_eq!(
+            acc1.realized_pnl_mantissa, acc2.realized_pnl_mantissa,
+            "Fixed-point PnL must be deterministic"
+        );
+        assert_eq!(
+            acc1.total_fees_mantissa, acc2.total_fees_mantissa,
+            "Fixed-point fees must be deterministic"
+        );
+        assert_eq!(
+            acc1.position_qty_mantissa, acc2.position_qty_mantissa,
+            "Fixed-point position must be deterministic"
+        );
+    }
+
+    #[test]
+    fn test_pnl_fixed_short_position() {
+        // Test short position: sell first, then buy to cover
+        let mut acc = PnlAccumulatorFixed::new();
+
+        // Sell 0.01 BTC at $100,000 (opening short)
+        acc.process_fill(10_000_000, 1_000_000, 10_000, false);
+
+        assert_eq!(acc.position_qty_mantissa, -1_000_000);
+
+        // Buy 0.01 BTC at $99,000 (covering short for profit)
+        acc.process_fill(9_900_000, 1_000_000, 10_000, true);
+
+        assert!(acc.is_flat());
+
+        // Short profit: (100000 - 99000) * 0.01 = $10 gross
+        // Net after fees should be ~$10 - $0.0002 ≈ $9.9998
+        let pnl_f64 = acc.realized_pnl_f64();
+        assert!(
+            (pnl_f64 - 9.9998).abs() < 0.01,
+            "Expected ~$10 short profit, got {}",
+            pnl_f64
+        );
     }
 }

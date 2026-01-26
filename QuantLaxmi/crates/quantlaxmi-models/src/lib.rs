@@ -36,8 +36,8 @@ pub use depth::{DepthEvent, DepthLevel, IntegrityTier};
 // Canonical events with fixed-point representation and correlation IDs
 pub mod events;
 pub use events::{
-    CorrelationContext, DecisionEvent, MarketSnapshot, ParseMantissaError,
-    QuoteEvent as CanonicalQuoteEvent, parse_to_mantissa_pure,
+    CONFIDENCE_EXPONENT, CorrelationContext, DecisionEvent, MarketSnapshot, ParseMantissaError,
+    QuoteEvent as CanonicalQuoteEvent, SPREAD_BPS_EXPONENT, parse_to_mantissa_pure,
 };
 
 // Option Greeks and pricing primitives (moved here to break dependency cycles)

@@ -14,6 +14,7 @@
 //! 4. Auto-append to family inventory
 //! ```
 
+use crate::backtest::{PNL_EXPONENT, PnlAccumulatorFixed};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -147,9 +148,35 @@ impl Default for CaptureConfig {
     }
 }
 
+/// Decision trace binding for replay parity verification.
+///
+/// Binds the decision trace artifact to the manifest, enabling:
+/// - Discovery of trace file location
+/// - Integrity verification via SHA-256
+/// - Encoding version compatibility checking
+/// - Decision count audit
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceBinding {
+    /// Relative path to decision trace JSON file (from segment directory)
+    pub decision_trace_path: String,
+    /// SHA-256 hash of the trace file contents
+    pub decision_trace_sha256: String,
+    /// Encoding version used for canonical bytes (for compatibility checking)
+    pub decision_trace_encoding_version: u8,
+    /// Total number of decisions in the trace
+    pub total_decisions: usize,
+    /// Fixed-point realized PnL (mantissa with pnl_exponent)
+    pub realized_pnl_mantissa: i128,
+    /// Fixed-point total fees (mantissa with pnl_exponent)
+    pub total_fees_mantissa: i128,
+    /// PnL exponent (typically price_exponent + qty_exponent, normalized to -8 for crypto)
+    pub pnl_exponent: i8,
+}
+
 /// Current segment manifest schema version.
 /// Bump this when manifest structure changes.
-pub const SEGMENT_MANIFEST_SCHEMA_VERSION: u32 = 3;
+/// Schema version 4: Added trace_binding for decision trace artifact binding.
+pub const SEGMENT_MANIFEST_SCHEMA_VERSION: u32 = 4;
 
 /// Segment manifest - written to segment_manifest.json in each segment directory.
 ///
@@ -197,6 +224,9 @@ pub struct SegmentManifest {
     /// Duration in seconds (None if still running)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_secs: Option<f64>,
+    /// Decision trace binding (populated after backtest/replay)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_binding: Option<TraceBinding>,
 }
 
 impl SegmentManifest {
@@ -231,6 +261,7 @@ impl SegmentManifest {
             digests: None,
             gap_from_prior: None,
             duration_secs: None,
+            trace_binding: None,
         }
     }
 
@@ -317,6 +348,97 @@ impl SegmentManifest {
             self.state,
             SegmentState::Finalized | SegmentState::FinalizedRetro
         )
+    }
+
+    /// Bind a decision trace artifact to this manifest.
+    ///
+    /// This should be called after a backtest/replay produces a trace artifact.
+    /// The trace file must exist at the specified path.
+    ///
+    /// # Arguments
+    /// * `trace_path` - Path to the decision trace JSON file
+    /// * `segment_dir` - Base segment directory (for computing relative path)
+    /// * `encoding_version` - Encoding version used in the trace
+    /// * `total_decisions` - Number of decisions in the trace
+    /// * `pnl` - Fixed-point PnL accumulator with realized PnL and fees
+    pub fn bind_trace(
+        &mut self,
+        trace_path: &Path,
+        segment_dir: &Path,
+        encoding_version: u8,
+        total_decisions: usize,
+        pnl: &PnlAccumulatorFixed,
+    ) -> Result<()> {
+        // Compute relative path from segment directory
+        let relative_path = trace_path
+            .strip_prefix(segment_dir)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| trace_path.to_string_lossy().to_string());
+
+        // Compute SHA-256 of trace file
+        let trace_sha256 = compute_file_sha256(trace_path)?;
+
+        self.trace_binding = Some(TraceBinding {
+            decision_trace_path: relative_path,
+            decision_trace_sha256: trace_sha256,
+            decision_trace_encoding_version: encoding_version,
+            total_decisions,
+            realized_pnl_mantissa: pnl.realized_pnl_mantissa,
+            total_fees_mantissa: pnl.total_fees_mantissa,
+            pnl_exponent: PNL_EXPONENT,
+        });
+
+        Ok(())
+    }
+
+    /// Bind a decision trace from BacktestResult.
+    ///
+    /// Convenience method that extracts trace info from a backtest result.
+    /// The trace file must have been saved (i.e., trace_path must be Some).
+    ///
+    /// # Arguments
+    /// * `trace_path` - Path to the decision trace JSON file
+    /// * `segment_dir` - Base segment directory (for computing relative path)
+    /// * `trace_hash` - Content hash from the trace (for debug logging)
+    /// * `encoding_version` - Encoding version used in the trace
+    /// * `total_decisions` - Number of decisions in the trace
+    /// * `pnl` - Fixed-point PnL accumulator with realized PnL and fees
+    pub fn bind_trace_from_result(
+        &mut self,
+        trace_path: &Path,
+        segment_dir: &Path,
+        trace_hash: &str,
+        encoding_version: u8,
+        total_decisions: usize,
+        pnl: &PnlAccumulatorFixed,
+    ) -> Result<()> {
+        // Compute relative path from segment directory
+        let relative_path = trace_path
+            .strip_prefix(segment_dir)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| trace_path.to_string_lossy().to_string());
+
+        // Verify file exists and compute SHA-256
+        let file_sha256 = compute_file_sha256(trace_path)?;
+
+        // Log for debugging (content hash vs file hash may differ due to formatting)
+        tracing::debug!(
+            "Binding trace: content_hash={}, file_sha256={}",
+            trace_hash,
+            file_sha256
+        );
+
+        self.trace_binding = Some(TraceBinding {
+            decision_trace_path: relative_path,
+            decision_trace_sha256: file_sha256,
+            decision_trace_encoding_version: encoding_version,
+            total_decisions,
+            realized_pnl_mantissa: pnl.realized_pnl_mantissa,
+            total_fees_mantissa: pnl.total_fees_mantissa,
+            pnl_exponent: PNL_EXPONENT,
+        });
+
+        Ok(())
     }
 
     /// Write manifest to disk atomically (write temp + rename).
@@ -523,6 +645,14 @@ impl SessionInventory {
 pub fn compute_binary_hash() -> Result<String> {
     let exe_path = std::env::current_exe().context("get current exe path")?;
     let bytes = std::fs::read(&exe_path).context("read binary")?;
+    let hash = Sha256::digest(&bytes);
+    Ok(hex::encode(hash))
+}
+
+/// Compute SHA256 hash of a file.
+pub fn compute_file_sha256(file_path: &Path) -> Result<String> {
+    let bytes = std::fs::read(file_path)
+        .with_context(|| format!("read file for sha256: {:?}", file_path))?;
     let hash = Sha256::digest(&bytes);
     Ok(hex::encode(hash))
 }

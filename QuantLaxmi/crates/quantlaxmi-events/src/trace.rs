@@ -13,6 +13,7 @@
 //!
 //! ### Encoding Rules
 //!
+//! - **Version byte**: First byte is the encoding version (currently 0x01)
 //! - **Integers**: Little-endian byte encoding (consistent with most systems)
 //! - **Strings**: Length-prefixed with u32 (4 bytes) followed by UTF-8 bytes
 //! - **Optionals**: 1-byte presence marker (0x00 = None, 0x01 = Some) followed by value if present
@@ -20,10 +21,11 @@
 //! - **DateTime**: i64 timestamp in nanoseconds since Unix epoch
 //! - **f64**: IEEE 754 bits as u64 little-endian (for canonical representation)
 //! - **Nested structs**: Concatenated field encodings in declaration order
+//! - **Maps/Sets**: Keys sorted lexicographically before encoding
 //!
 //! ### Field Order (DecisionEvent)
 //!
-//! Fields are encoded in the following fixed order:
+//! After the version byte, fields are encoded in the following fixed order:
 //! 1. ts (i64 nanoseconds)
 //! 2. decision_id (16 bytes UUID)
 //! 3. strategy_id (length-prefixed string)
@@ -36,24 +38,79 @@
 //! 10. price_exponent (i8)
 //! 11. market_snapshot (nested struct)
 //! 12. confidence (f64 bits)
-//! 13. metadata (presence + canonical JSON if present)
+//! 13. metadata (presence + canonical JSON with sorted keys if present)
 //! 14. ctx (CorrelationContext with presence markers)
+//!
+//! ## Encoding Version History
+//!
+//! - v1 (0x01): Initial encoding format
 
 use chrono::{DateTime, Utc};
 use quantlaxmi_models::{CorrelationContext, DecisionEvent, MarketSnapshot};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+/// Current encoding version for canonical bytes.
+/// Increment this when encoding format changes.
+///
+/// ## Version History
+/// - v1 (0x01): Initial encoding with f64 confidence and spread_bps
+/// - v2 (0x02): Fixed-point confidence_mantissa and spread_bps_mantissa (no floats)
+pub const ENCODING_VERSION: u8 = 0x02;
 
 /// Decision trace containing a sequence of decisions and their hash.
 ///
 /// The trace hash is computed incrementally as decisions are recorded,
 /// providing O(1) verification of replay parity.
-#[derive(Debug, Clone)]
+///
+/// ## Serialization
+///
+/// The trace can be serialized to JSON for persistence. The trace_hash is
+/// stored as a hex string for human readability and easy comparison.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionTrace {
+    /// Encoding version used to generate this trace.
+    #[serde(default = "default_encoding_version")]
+    pub encoding_version: u8,
     /// The sequence of decisions in order of occurrence.
     pub decisions: Vec<DecisionEvent>,
-    /// SHA-256 hash of the canonical binary encoding of all decisions.
+    /// SHA-256 hash of the canonical binary encoding of all decisions (hex).
+    #[serde(with = "hex_hash")]
     pub trace_hash: [u8; 32],
+}
+
+fn default_encoding_version() -> u8 {
+    ENCODING_VERSION
+}
+
+/// Serde helper for hex encoding/decoding of hash bytes.
+mod hex_hash {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(hash: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&hex::encode(hash))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let bytes = hex::decode(&s).map_err(serde::de::Error::custom)?;
+        if bytes.len() != 32 {
+            return Err(serde::de::Error::custom(format!(
+                "expected 32 bytes, got {}",
+                bytes.len()
+            )));
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        Ok(arr)
+    }
 }
 
 impl DecisionTrace {
@@ -66,7 +123,54 @@ impl DecisionTrace {
     pub fn hash_hex(&self) -> String {
         hex::encode(self.trace_hash)
     }
+
+    /// Get the number of decisions in the trace.
+    pub fn len(&self) -> usize {
+        self.decisions.len()
+    }
+
+    /// Check if the trace is empty.
+    pub fn is_empty(&self) -> bool {
+        self.decisions.is_empty()
+    }
+
+    /// Load a trace from a JSON file.
+    pub fn load(path: &std::path::Path) -> Result<Self, TraceError> {
+        let file = std::fs::File::open(path).map_err(|e| TraceError::Io(e.to_string()))?;
+        let reader = std::io::BufReader::new(file);
+        serde_json::from_reader(reader).map_err(|e| TraceError::Parse(e.to_string()))
+    }
+
+    /// Save the trace to a JSON file.
+    pub fn save(&self, path: &std::path::Path) -> Result<(), TraceError> {
+        let file = std::fs::File::create(path).map_err(|e| TraceError::Io(e.to_string()))?;
+        let writer = std::io::BufWriter::new(file);
+        serde_json::to_writer_pretty(writer, self).map_err(|e| TraceError::Serialize(e.to_string()))
+    }
 }
+
+/// Errors that can occur during trace operations.
+#[derive(Debug, Clone)]
+pub enum TraceError {
+    /// I/O error (file not found, permission denied, etc.)
+    Io(String),
+    /// JSON parsing error
+    Parse(String),
+    /// Serialization error
+    Serialize(String),
+}
+
+impl std::fmt::Display for TraceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(msg) => write!(f, "I/O error: {}", msg),
+            Self::Parse(msg) => write!(f, "Parse error: {}", msg),
+            Self::Serialize(msg) => write!(f, "Serialize error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for TraceError {}
 
 /// Builder for constructing a decision trace with incremental hashing.
 ///
@@ -110,6 +214,7 @@ impl DecisionTraceBuilder {
     pub fn finalize(self) -> DecisionTrace {
         let hash = self.hasher.finalize();
         DecisionTrace {
+            encoding_version: ENCODING_VERSION,
             decisions: self.decisions,
             trace_hash: hash.into(),
         }
@@ -259,10 +364,10 @@ fn find_divergence_reason(original: &DecisionEvent, replay: &DecisionEvent) -> S
             original.price_exponent, replay.price_exponent
         );
     }
-    if original.confidence != replay.confidence {
+    if original.confidence_mantissa != replay.confidence_mantissa {
         return format!(
-            "confidence differs: original={}, replay={}",
-            original.confidence, replay.confidence
+            "confidence_mantissa differs: original={}, replay={}",
+            original.confidence_mantissa, replay.confidence_mantissa
         );
     }
 
@@ -306,8 +411,13 @@ fn find_divergence_reason(original: &DecisionEvent, replay: &DecisionEvent) -> S
 ///
 /// This encoding is deterministic and independent of serde/JSON serialization.
 /// See module-level documentation for encoding rules.
+///
+/// The first byte is always the encoding version (ENCODING_VERSION).
 pub fn canonical_bytes(decision: &DecisionEvent) -> Vec<u8> {
     let mut buf = Vec::with_capacity(512);
+
+    // 0. Encoding version byte (for future compatibility)
+    buf.push(ENCODING_VERSION);
 
     // 1. ts: DateTime as nanoseconds since Unix epoch
     encode_datetime(&mut buf, &decision.ts);
@@ -342,8 +452,8 @@ pub fn canonical_bytes(decision: &DecisionEvent) -> Vec<u8> {
     // 11. market_snapshot: nested struct
     encode_market_snapshot(&mut buf, &decision.market_snapshot);
 
-    // 12. confidence: f64 as bits
-    encode_f64(&mut buf, decision.confidence);
+    // 12. confidence_mantissa: i64 (fixed exponent = -4, not encoded)
+    encode_i64(&mut buf, decision.confidence_mantissa);
 
     // 13. metadata: presence marker + canonical JSON if present
     encode_json_value(&mut buf, &decision.metadata);
@@ -409,13 +519,6 @@ fn encode_i64(buf: &mut Vec<u8>, val: i64) {
     buf.extend_from_slice(&val.to_le_bytes());
 }
 
-/// Encode f64 as IEEE 754 bits in little-endian.
-///
-/// This ensures deterministic encoding regardless of float formatting.
-fn encode_f64(buf: &mut Vec<u8>, val: f64) {
-    buf.extend_from_slice(&val.to_bits().to_le_bytes());
-}
-
 /// Encode MarketSnapshot.
 fn encode_market_snapshot(buf: &mut Vec<u8>, snap: &MarketSnapshot) {
     encode_i64(buf, snap.bid_price_mantissa);
@@ -424,22 +527,50 @@ fn encode_market_snapshot(buf: &mut Vec<u8>, snap: &MarketSnapshot) {
     encode_i64(buf, snap.ask_qty_mantissa);
     encode_i8(buf, snap.price_exponent);
     encode_i8(buf, snap.qty_exponent);
-    encode_f64(buf, snap.spread_bps);
+    // spread_bps_mantissa: i64 (fixed exponent = -2, not encoded)
+    encode_i64(buf, snap.spread_bps_mantissa);
     encode_i64(buf, snap.book_ts_ns);
 }
 
 /// Encode serde_json::Value with presence marker.
 ///
-/// For deterministic hashing, we use the canonical JSON string representation
-/// with sorted keys. If the value is null/empty, we encode as absent.
+/// For deterministic hashing, we convert to canonical JSON with sorted keys.
+/// If the value is null/empty, we encode as absent.
+///
+/// **Important**: serde_json does NOT sort keys by default. We must explicitly
+/// sort object keys for deterministic encoding.
 fn encode_json_value(buf: &mut Vec<u8>, value: &serde_json::Value) {
     if value.is_null() {
         buf.push(0x00); // Absent
     } else {
         buf.push(0x01); // Present
-        // Use canonical JSON string (serde_json sorts object keys by default)
-        let json_str = serde_json::to_string(value).unwrap_or_default();
+        // Convert to canonical JSON with sorted keys
+        let canonical = canonicalize_json(value);
+        let json_str = serde_json::to_string(&canonical).unwrap_or_default();
         encode_string(buf, &json_str);
+    }
+}
+
+/// Recursively sort all object keys in a JSON value for deterministic encoding.
+fn canonicalize_json(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::Object(map) => {
+            // Sort keys and recursively canonicalize values
+            let mut sorted: Vec<_> = map.iter().collect();
+            sorted.sort_by_key(|(k, _)| *k);
+            let mut new_map = serde_json::Map::new();
+            for (k, v) in sorted {
+                new_map.insert(k.clone(), canonicalize_json(v));
+            }
+            Value::Object(new_map)
+        }
+        Value::Array(arr) => {
+            // Recursively canonicalize array elements (order is preserved)
+            Value::Array(arr.iter().map(canonicalize_json).collect())
+        }
+        // Primitive values are returned as-is
+        _ => value.clone(),
     }
 }
 
@@ -490,10 +621,12 @@ mod tests {
                 ask_qty_mantissa: 10000000,
                 price_exponent: -2,
                 qty_exponent: -8,
-                spread_bps: 0.23,
+                // Fixed-point: 23 with exponent -2 = 0.23 bps
+                spread_bps_mantissa: 23,
                 book_ts_ns: 1737799200000000000,
             },
-            confidence: 0.85,
+            // Fixed-point: 8500 with exponent -4 = 0.85
+            confidence_mantissa: 8500,
             metadata: serde_json::Value::Null,
             ctx: CorrelationContext {
                 session_id: Some("session-001".to_string()),
@@ -753,6 +886,160 @@ mod tests {
         assert_ne!(
             trace1.trace_hash, trace2.trace_hash,
             "Different correlation context should produce different hashes"
+        );
+    }
+
+    #[test]
+    fn test_confidence_mantissa_deterministic() {
+        // Test that confidence_mantissa is encoded deterministically
+        let mut d1 = make_test_decision(1, 1);
+        let mut d2 = make_test_decision(1, 1);
+
+        // Same confidence as fixed-point
+        d1.confidence_mantissa = 8500; // 0.85
+        d2.confidence_mantissa = 8500; // 0.85
+
+        let bytes1 = canonical_bytes(&d1);
+        let bytes2 = canonical_bytes(&d2);
+
+        assert_eq!(
+            bytes1, bytes2,
+            "Same confidence_mantissa should produce same bytes"
+        );
+
+        // Different confidence should produce different bytes
+        d2.confidence_mantissa = 9000; // 0.90
+
+        let bytes3 = canonical_bytes(&d2);
+        assert_ne!(
+            bytes1, bytes3,
+            "Different confidence_mantissa should produce different bytes"
+        );
+    }
+
+    #[test]
+    fn test_spread_bps_mantissa_deterministic() {
+        // Test that spread_bps_mantissa is encoded deterministically
+        let mut d1 = make_test_decision(1, 1);
+        let mut d2 = make_test_decision(1, 1);
+
+        // Same spread as fixed-point
+        d1.market_snapshot.spread_bps_mantissa = 523; // 5.23 bps
+        d2.market_snapshot.spread_bps_mantissa = 523; // 5.23 bps
+
+        let bytes1 = canonical_bytes(&d1);
+        let bytes2 = canonical_bytes(&d2);
+
+        assert_eq!(
+            bytes1, bytes2,
+            "Same spread_bps_mantissa should produce same bytes"
+        );
+
+        // Different spread should produce different bytes
+        d2.market_snapshot.spread_bps_mantissa = 600; // 6.00 bps
+
+        let bytes3 = canonical_bytes(&d2);
+        assert_ne!(
+            bytes1, bytes3,
+            "Different spread_bps_mantissa should produce different bytes"
+        );
+    }
+
+    #[test]
+    fn test_encoding_version_v2() {
+        // Verify we're using encoding version 2 (fixed-point, no floats)
+        assert_eq!(ENCODING_VERSION, 0x02, "Should be encoding version 2");
+
+        let decision = make_test_decision(1, 1);
+        let bytes = canonical_bytes(&decision);
+
+        // First byte should be version
+        assert_eq!(
+            bytes[0], ENCODING_VERSION,
+            "First byte should be encoding version"
+        );
+    }
+
+    #[test]
+    fn test_version_mismatch_detection() {
+        // Build a trace with current version
+        let mut builder = DecisionTraceBuilder::new();
+        builder.record(&make_test_decision(1, 1));
+        let trace = builder.finalize();
+
+        // Verify trace has correct encoding version
+        assert_eq!(trace.encoding_version, ENCODING_VERSION);
+
+        // Simulate loading a trace with different version
+        let mut old_trace = trace.clone();
+        old_trace.encoding_version = 0x01; // Simulate v1 trace
+
+        // Version mismatch should be detectable
+        assert_ne!(
+            old_trace.encoding_version, ENCODING_VERSION,
+            "Should detect version mismatch between v1 and v2"
+        );
+
+        // In a real system, we would reject traces with mismatched versions
+        // or have migration logic. For now, we just detect the mismatch.
+    }
+
+    #[test]
+    fn test_fixed_point_conversion_helpers() {
+        // Test DecisionEvent::confidence_from_f64
+        assert_eq!(DecisionEvent::confidence_from_f64(1.0), 10000);
+        assert_eq!(DecisionEvent::confidence_from_f64(0.85), 8500);
+        assert_eq!(DecisionEvent::confidence_from_f64(0.0), 0);
+
+        // Test MarketSnapshot::spread_bps_from_f64
+        assert_eq!(MarketSnapshot::spread_bps_from_f64(5.23), 523);
+        assert_eq!(MarketSnapshot::spread_bps_from_f64(1.0), 100);
+        assert_eq!(MarketSnapshot::spread_bps_from_f64(0.0), 0);
+
+        // Test round-trip: f64 -> mantissa -> f64
+        let confidence = 0.8765;
+        let mantissa = DecisionEvent::confidence_from_f64(confidence);
+        let decision = make_test_decision(1, 1);
+        let mut d = decision;
+        d.confidence_mantissa = mantissa;
+        let recovered = d.confidence_f64();
+        assert!(
+            (recovered - confidence).abs() < 0.0001,
+            "Confidence round-trip should preserve value"
+        );
+    }
+
+    #[test]
+    fn test_no_floats_in_canonical_encoding() {
+        // Verify that canonical_bytes produces the same output
+        // regardless of any floating-point computation order differences.
+        // This is guaranteed by using only i64 mantissas.
+
+        let decision = make_test_decision(1, 1);
+
+        // Encode multiple times
+        let bytes1 = canonical_bytes(&decision);
+        let bytes2 = canonical_bytes(&decision);
+        let bytes3 = canonical_bytes(&decision);
+
+        assert_eq!(bytes1, bytes2);
+        assert_eq!(bytes2, bytes3);
+
+        // Verify version byte
+        assert_eq!(bytes1[0], 0x02, "Version should be 0x02");
+
+        // Build trace and verify hash stability
+        let mut b1 = DecisionTraceBuilder::new();
+        let mut b2 = DecisionTraceBuilder::new();
+        b1.record(&decision);
+        b2.record(&decision);
+
+        let t1 = b1.finalize();
+        let t2 = b2.finalize();
+
+        assert_eq!(
+            t1.trace_hash, t2.trace_hash,
+            "Hashes must be identical without floats"
         );
     }
 }
