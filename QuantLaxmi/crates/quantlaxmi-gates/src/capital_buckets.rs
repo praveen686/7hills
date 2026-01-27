@@ -53,7 +53,7 @@ impl std::fmt::Display for BucketId {
 }
 
 /// Unique identifier for a strategy.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct StrategyId(pub String);
 
 impl StrategyId {

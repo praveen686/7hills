@@ -22,6 +22,7 @@
 //! let result = g4.validate(&deployment_config)?;
 //! ```
 
+pub mod capital_allocation;
 pub mod capital_buckets;
 pub mod capital_eligibility;
 pub mod g0_data_truth;
@@ -32,6 +33,11 @@ pub mod g4_deployability;
 pub mod portfolio_selector;
 pub mod promotion;
 
+pub use capital_allocation::{
+    ALLOCATION_PLAN_SCHEMA, AllocationCheck, AllocationDecision, AllocationError, AllocationMode,
+    AllocationPlan, AllocationPolicy, Allocator, PlanId, RebalancePolicy, SkipReason,
+    StrategyAllocation, validate_plan,
+};
 pub use capital_buckets::{
     BUCKET_SCHEMA_VERSION, BucketBindingDecision, BucketConstraints, BucketEligibilityBinding,
     BucketError, BucketId, BucketRegistry, BucketSnapshot, CapitalBucket, Currency, FixedPoint,
