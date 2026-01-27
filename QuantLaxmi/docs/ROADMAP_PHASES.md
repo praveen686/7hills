@@ -3,7 +3,7 @@
 
 **Status:** Operational roadmap for implementation sequencing
 **Last Updated:** 2026-01-27
-**Current Phase:** 13.3 Complete → Phase 14 Next
+**Current Phase:** 14.1 Complete → Phase 14.2 Next
 
 ---
 
@@ -215,9 +215,39 @@
 
 ---
 
-## 8) Phase 14+: Future Phases
+## 8) Phase 14: Execution Pipeline (ACTIVE)
 
-### Phase 14: Adaptive Intelligence
+### Phase 14.1: Execution Budget (COMPLETE)
+
+**Question:** "How do allocation plans become runtime-enforceable budgets?"
+
+**Deliverables:**
+- ✅ `BudgetId` — derived deterministically (SHA-256)
+- ✅ `DeltaId` — derived deterministically (not UUID)
+- ✅ `ExecutionBudget` — reserved/committed capital split
+- ✅ `BudgetManager` — budget lifecycle management
+- ✅ `BudgetDelta` — WAL-bound change events
+- ✅ `RateLimitTracker` — deterministic floor-division windowing
+- ✅ `BudgetSnapshot` — audit snapshot with digest
+
+**Tests:** 12 tests covering all scenarios
+
+**What This Phase Does NOT Do:**
+- ❌ No venue connections
+- ❌ No order submission
+- ❌ No fill processing from venues
+- ❌ No PnL accounting
+
+### Phase 14.2: Paper Execution (NEXT)
+
+**Question:** "How do budgets become simulated trades?"
+
+**Planned Deliverables:**
+- Paper exchange simulation
+- Fill generation
+- PnL tracking in paper mode
+
+### Phase 14.3+: Adaptive Intelligence (FUTURE)
 
 **Objective:** Introduce hierarchical RL as controlled upgrade
 
@@ -230,7 +260,9 @@
 - RL outputs bounded parameters first
 - Full policy control only after gate compliance
 
-### Phase 15+: Multi-Venue Expansion
+---
+
+## 9) Phase 15+: Multi-Venue Expansion (FUTURE)
 
 - Additional crypto venues
 - India options support
@@ -238,7 +270,7 @@
 
 ---
 
-## 9) Definition of Done
+## 10) Definition of Done
 
 A phase is "done" only when:
 
@@ -262,10 +294,10 @@ Data ─────────────────────────
       │  Capture → WAL → Replay → Gates → Tournament → Paper → Promotion      │
       │                                                                        │
       │  [COMPLETE]                                                            │
-      │  → Capital Eligibility → Buckets → Selector → Allocation               │
+      │  → Capital Eligibility → Buckets → Selector → Allocation → Budget     │
       │                                                                        │
       │  [FUTURE]                                                              │
-      │  → Live Execution → Adaptive Intelligence → Multi-Venue                │
+      │  → Paper Execution → Live Execution → Adaptive Intelligence            │
       └────────────────────────────────────────────────────────────────────────┘
 ```
 

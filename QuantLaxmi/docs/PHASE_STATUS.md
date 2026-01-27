@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-27
-**Current Phase:** 13.3 Complete, Phase 14 Pending
+**Current Phase:** 14.1 Complete
 
 ---
 
@@ -22,6 +22,7 @@
 | 13.2a | Capital Buckets | ✅ Complete | 2026-01-27 |
 | 13.2b | Portfolio Selector | ✅ Complete | 2026-01-27 |
 | 13.3 | Capital Allocation | ✅ Complete | 2026-01-27 |
+| 14.1 | Execution Budget | ✅ Complete | 2026-01-27 |
 
 ---
 
@@ -120,11 +121,11 @@ pub struct PromotionDecision {
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| quantlaxmi-gates | 76 | ✅ All passing |
+| quantlaxmi-gates | 87 | ✅ All passing |
 | quantlaxmi-models | 57 | ✅ All passing |
 | quantlaxmi-runner-crypto | 52 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
-| **Workspace Total** | 300+ | ✅ All passing |
+| **Workspace Total** | 310+ | ✅ All passing |
 
 ---
 
@@ -178,13 +179,51 @@ pub struct PromotionDecision {
 5. No hidden state (all params in AllocationPolicy)
 6. Audit artifacts first-class (deterministic SHA-256 digests)
 
+### Phase 14.1: Execution Budget
+
+**Question Answered:** "How do allocation plans become runtime-enforceable budgets?"
+
+**Deliverables:**
+- `crates/quantlaxmi-gates/src/execution_budget.rs`
+- `BudgetId` — derived deterministically (SHA-256 from strategy+bucket+plan)
+- `DeltaId` — derived deterministically (not UUID)
+- `ExecutionBudget` — with reserved/committed capital split
+- `BudgetManager` — apply_allocation_plan, check_order, reserve_for_order, release_order, process_fill, release_position
+- `BudgetDelta` — WAL-bound change events with deterministic digest
+- `BudgetPolicy` — max order fraction, rate limits, position limits
+- `OrderConstraints` — per-order enforcement limits
+- `RateLimitTracker` — deterministic floor-division windowing
+- `BudgetSnapshot` — audit snapshot with digest
+- `OrderCheckResult` — pre-trade validation result
+
+**Tests:** 12 tests covering all budget scenarios
+
+**Core Invariants Enforced:**
+1. Budgets derived from AllocationPlan — never invented
+2. Budget enforcement is deterministic and auditable
+3. No wall-clock affects identity or digests (event timestamps only)
+4. Reserved capital (open orders) vs committed capital (open positions) tracked separately
+5. All budget state changes produce BudgetDelta WAL events
+6. Rate limits use floor-division windowing (deterministic)
+7. Budget violations are hard rejections (no soft limits)
+8. All artifacts have deterministic SHA-256 digests
+
+**What This Phase Does NOT Do:**
+- ❌ No venue connections
+- ❌ No order submission to exchanges
+- ❌ No fill processing from venues
+- ❌ No PnL accounting
+
 ---
 
-## Next Phase: Phase 14 (Future)
+## Next Phase: Phase 14.2+ (Future)
 
-**Status:** Specification pending
+**Phase 14.2: Paper Execution**
+- Paper exchange simulation
+- Fill generation
+- PnL tracking in paper mode
 
-**Phase 14: Adaptive Intelligence**
+**Phase 14.3+: Adaptive Intelligence**
 - EARNHFT Router (selects agent profile)
 - RL Agent (execution policy)
 - Q-Teacher (offline training)
@@ -217,6 +256,13 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | `AllocationPolicy` fingerprint | Phase 13.3 |
 | Reserve ratio semantics | Phase 13.3 |
 | Skip/ordering enforcement | Phase 13.3 |
+| `BudgetId` derivation (deterministic) | Phase 14.1 |
+| `DeltaId` derivation (deterministic) | Phase 14.1 |
+| `ExecutionBudget` digest computation | Phase 14.1 |
+| `BudgetDelta` digest computation | Phase 14.1 |
+| Reserved vs committed capital split | Phase 14.1 |
+| Rate limit floor-division windowing | Phase 14.1 |
+| `BudgetSnapshot` digest computation | Phase 14.1 |
 
 ---
 
