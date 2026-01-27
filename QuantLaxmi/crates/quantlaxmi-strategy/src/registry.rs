@@ -5,6 +5,8 @@
 
 use crate::Strategy;
 use crate::strategies::funding_bias::{FUNDING_BIAS_NAME, funding_bias_factory};
+use crate::strategies::micro_breakout::{MICRO_BREAKOUT_NAME, micro_breakout_factory};
+use crate::strategies::spread_mean_revert::{SPREAD_MEAN_REVERT_NAME, spread_mean_revert_factory};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -51,9 +53,8 @@ impl StrategyRegistry {
 
         // Register built-in strategies
         registry.register(FUNDING_BIAS_NAME, funding_bias_factory);
-
-        // Future: register other strategies here
-        // registry.register("basis_capture", basis_capture_factory);
+        registry.register(MICRO_BREAKOUT_NAME, micro_breakout_factory);
+        registry.register(SPREAD_MEAN_REVERT_NAME, spread_mean_revert_factory);
 
         registry
     }

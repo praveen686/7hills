@@ -17,6 +17,7 @@ fn bench_simulated_exchange_order_matching(c: &mut Criterion) {
                 // Submit a market order
                 let order = OrderEvent {
                     order_id: Uuid::new_v4(),
+                    parent_decision_id: None,
                     intent_id: None,
                     timestamp: Utc::now(),
                     symbol: black_box("BTCUSDT".to_string()),

@@ -178,11 +178,24 @@ impl FundingBiasStrategy {
     }
 
     /// Create an OrderIntent for execution.
-    fn create_intent(&self, ctx: &StrategyContext, side: Side, tag: &str) -> OrderIntent {
+    ///
+    /// # Arguments
+    /// * `parent_decision_id` - The decision that authored this intent
+    /// * `ctx` - Strategy context with market state
+    /// * `side` - Buy or Sell
+    /// * `tag` - Tracking tag
+    fn create_intent(
+        &self,
+        parent_decision_id: Uuid,
+        ctx: &StrategyContext,
+        side: Side,
+        tag: &str,
+    ) -> OrderIntent {
         // Use mid price as reference for market order
         let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
 
         OrderIntent {
+            parent_decision_id,
             symbol: ctx.symbol.to_string(),
             side,
             qty_mantissa: self.config.position_size_mantissa,
@@ -234,14 +247,14 @@ impl Strategy for FundingBiasStrategy {
         {
             // Funding positive, go short
             let decision = self.create_decision(ctx, -1, "entry", "funding_short");
-            let intent = self.create_intent(ctx, Side::Sell, "funding_short");
+            let intent = self.create_intent(decision.decision_id, ctx, Side::Sell, "funding_short");
             outputs.push(DecisionOutput::new(decision, intent));
         } else if self.current_funding_rate_mantissa < -self.config.threshold_mantissa
             && self.position_qty_mantissa <= 0
         {
             // Funding negative, go long
             let decision = self.create_decision(ctx, 1, "entry", "funding_long");
-            let intent = self.create_intent(ctx, Side::Buy, "funding_long");
+            let intent = self.create_intent(decision.decision_id, ctx, Side::Buy, "funding_long");
             outputs.push(DecisionOutput::new(decision, intent));
         }
 

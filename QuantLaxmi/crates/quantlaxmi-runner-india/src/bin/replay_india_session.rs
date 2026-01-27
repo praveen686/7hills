@@ -494,6 +494,7 @@ async fn main() -> Result<()> {
             exchange
                 .handle_order(OrderEvent {
                     order_id: Uuid::new_v4(),
+                    parent_decision_id: None,
                     intent_id: signal.intent_id,
                     timestamp: Utc::now(),
                     symbol: signal.symbol.clone(),
@@ -561,6 +562,7 @@ async fn main() -> Result<()> {
 
             strategy.on_fill(&OrderEvent {
                 order_id: Uuid::new_v4(),
+                parent_decision_id: None,
                 intent_id: fill.intent_id,
                 timestamp: Utc::now(),
                 symbol: fill.symbol.clone(),

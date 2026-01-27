@@ -564,6 +564,7 @@ impl SimulatedExchange {
                     );
                     self.bus.publish_order_update(OrderEvent {
                         order_id: event.order_id,
+                        parent_decision_id: None,
                         intent_id: event.intent_id,
                         timestamp: self.current_time,
                         symbol: event.symbol.clone(),
@@ -594,6 +595,7 @@ impl SimulatedExchange {
 
                 self.bus.publish_order_update(OrderEvent {
                     order_id: event.order_id,
+                    parent_decision_id: None,
                     intent_id: event.intent_id,
                     timestamp: self.current_time,
                     symbol: event.symbol.clone(),
@@ -620,6 +622,7 @@ impl SimulatedExchange {
                     info!("Cancelled Order: {}", event.order_id);
                     self.bus.publish_order_update(OrderEvent {
                         order_id: event.order_id,
+                        parent_decision_id: None,
                         intent_id: event.intent_id,
                         timestamp: self.current_time,
                         symbol: event.symbol.clone(),
@@ -657,6 +660,7 @@ impl SimulatedExchange {
                     info!("Modified Order: {}", event.order_id);
                     self.bus.publish_order_update(OrderEvent {
                         order_id: event.order_id,
+                        parent_decision_id: None,
                         intent_id: event.intent_id,
                         timestamp: self.current_time,
                         symbol: event.symbol.clone(),
@@ -763,6 +767,7 @@ impl SimulatedExchange {
 
                 self.bus.publish_order_update(OrderEvent {
                     order_id: order.id,
+                    parent_decision_id: None,
                     intent_id: order.intent_id,
                     timestamp: self.current_time,
                     symbol: order.symbol.clone(),
@@ -779,6 +784,7 @@ impl SimulatedExchange {
                     .publish_fill(quantlaxmi_models::FillEvent {
                         timestamp: self.current_time,
                         order_id: order.id,
+                        parent_decision_id: None,
                         intent_id: order.intent_id,
                         fill_id: Uuid::new_v4().to_string(),
                         symbol: order.symbol.clone(),
@@ -1061,6 +1067,7 @@ impl Exchange for ZerodhaLiveExchange {
                         // Publish accepted status
                         self.bus.publish_order_update(OrderEvent {
                             order_id: event.order_id,
+                            parent_decision_id: None,
                             intent_id: event.intent_id,
                             timestamp: Utc::now(),
                             symbol: symbol.clone(),
@@ -1091,6 +1098,7 @@ impl Exchange for ZerodhaLiveExchange {
                         error!("[ZERODHA LIVE] Order placement failed: {}", e);
                         self.bus.publish_order_update(OrderEvent {
                             order_id: event.order_id,
+                            parent_decision_id: None,
                             intent_id: event.intent_id,
                             timestamp: Utc::now(),
                             symbol: symbol.clone(),
@@ -1120,6 +1128,7 @@ impl Exchange for ZerodhaLiveExchange {
                         self.pending_orders.remove(&zerodha_order_id);
                         self.bus.publish_order_update(OrderEvent {
                             order_id: event.order_id,
+                            parent_decision_id: None,
                             intent_id: event.intent_id,
                             timestamp: Utc::now(),
                             symbol: event.symbol.clone(),
@@ -1180,6 +1189,7 @@ impl Exchange for ZerodhaLiveExchange {
 
                 self.bus.publish_order_update(OrderEvent {
                     order_id,
+                    parent_decision_id: None,
                     intent_id,
                     timestamp: Utc::now(),
                     symbol: symbol.clone(),
@@ -1196,6 +1206,7 @@ impl Exchange for ZerodhaLiveExchange {
                     .publish_fill(quantlaxmi_models::FillEvent {
                         timestamp: Utc::now(),
                         order_id,
+                        parent_decision_id: None,
                         intent_id,
                         fill_id: zerodha_id.clone(),
                         symbol: symbol.clone(),

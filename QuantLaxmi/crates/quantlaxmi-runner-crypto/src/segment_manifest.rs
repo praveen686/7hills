@@ -197,11 +197,149 @@ pub struct StrategyBinding {
     pub config_snapshot: Option<serde_json::Value>,
 }
 
+/// Attribution artifact binding for manifest (Phase 3).
+///
+/// Records the trade attribution artifact location and integrity.
+/// Enables PnL verification and audit trails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttributionBinding {
+    /// Relative path to attribution JSONL file (from segment directory)
+    pub attribution_path: String,
+    /// SHA-256 hash of the attribution file contents
+    pub attribution_sha256: String,
+    /// Number of attribution events in the file
+    pub num_attribution_events: usize,
+
+    // === Summary statistics (for manifest self-description) ===
+    /// Total net PnL across all attribution events (mantissa)
+    pub total_net_pnl_mantissa: i128,
+    /// Total fees across all attribution events (mantissa)
+    pub total_fees_mantissa: i128,
+    /// PnL exponent (typically -8 for crypto)
+    pub pnl_exponent: i8,
+}
+
+/// Attribution summary binding for manifest (Phase 4).
+///
+/// Records the aggregated attribution summary artifact for strategy evaluation.
+/// Enables alpha scoring and G1 promotion gating.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttributionSummaryBinding {
+    /// Relative path to attribution_summary.json (from segment directory)
+    pub summary_path: String,
+    /// SHA-256 hash of the summary file contents
+    pub summary_sha256: String,
+    /// Strategy ID this summary is for
+    pub strategy_id: String,
+
+    // === Summary statistics (for manifest self-description) ===
+    /// Total decisions aggregated
+    pub total_decisions: u32,
+    /// Total fills executed
+    pub total_fills: u32,
+    /// Win rate in basis points (10000 = 100%)
+    pub win_rate_bps: u32,
+    /// Total net PnL (mantissa)
+    pub total_net_pnl_mantissa: i128,
+    /// Max loss (mantissa, positive value)
+    pub max_loss_mantissa: i128,
+    /// PnL exponent (typically -8)
+    pub pnl_exponent: i8,
+
+    // === Alpha Score ===
+    /// Alpha score mantissa (computed using AlphaScoreV1 formula)
+    pub alpha_score_mantissa: i128,
+    /// Alpha score exponent
+    pub alpha_score_exponent: i8,
+    /// Alpha score formula version
+    pub alpha_score_formula: String,
+}
+
+/// Router binding for manifest (Phase 5).
+///
+/// Records the router configuration and decisions artifact for replay parity.
+/// Enables reproducible regime classification and strategy routing.
+///
+/// # Phase 6 Correlation Note
+/// RouterDecisionEvent.decision_id should be linked to downstream DecisionEvent
+/// via a `router_decision_id` field or shared CorrelationContext. This enables
+/// full traceability: Router → Decision → Intent → Fill → Attribution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterBinding {
+    /// Relative path to router_decisions.jsonl (from segment directory)
+    pub decisions_path: String,
+    /// SHA-256 hash of the decisions file contents
+    pub decisions_sha256: String,
+    /// Number of routing decisions in the file
+    pub num_decisions: usize,
+
+    // === Router Identity ===
+    /// Router config hash (SHA-256 of canonical config bytes)
+    pub router_config_hash: String,
+    /// Router version
+    pub router_version: String,
+
+    // === Summary Statistics ===
+    /// Distribution of regimes classified (regime label -> count).
+    /// Uses BTreeMap for deterministic serialization order (replay parity).
+    pub regime_distribution: std::collections::BTreeMap<String, usize>,
+    /// Number of unique strategies selected
+    pub unique_strategies_used: usize,
+}
+
+/// G2 robustness report binding for manifest (Phase 6).
+///
+/// Records the G2 robustness test results artifact.
+/// Enables verification that strategy passed anti-overfit checks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct G2Binding {
+    /// Relative path to g2_report.json (from segment directory)
+    pub report_path: String,
+    /// SHA-256 hash of the report file contents
+    pub report_sha256: String,
+    /// Whether G2 gate passed
+    pub passed: bool,
+    /// G2 gate version used
+    pub version: String,
+    /// Base alpha score (mantissa) for reference
+    pub base_score_mantissa: i128,
+    /// Number of time-shift tests run
+    pub num_shift_tests: u32,
+    /// Number of cost sensitivity tests run
+    pub num_cost_tests: u32,
+}
+
+/// G3 walk-forward report binding for manifest (Phase 6).
+///
+/// Records the G3 walk-forward stability test results artifact.
+/// Enables verification that strategy is stable across time periods.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct G3Binding {
+    /// Relative path to g3_walkforward.json (from segment directory)
+    pub report_path: String,
+    /// SHA-256 hash of the report file contents
+    pub report_sha256: String,
+    /// Whether G3 gate passed
+    pub passed: bool,
+    /// G3 gate version used
+    pub version: String,
+    /// Number of folds used
+    pub num_folds: u32,
+    /// Median alpha score across folds (mantissa)
+    pub median_score_mantissa: i128,
+    /// Consistency ratio (basis points)
+    pub consistency_ratio_bps: u32,
+}
+
 /// Current segment manifest schema version.
 /// Bump this when manifest structure changes.
 /// Schema version 4: Added trace_binding for decision trace artifact binding.
 /// Schema version 5: Added strategy_binding for strategy identity (Phase 2).
-pub const SEGMENT_MANIFEST_SCHEMA_VERSION: u32 = 5;
+/// Schema version 6: Added attribution_binding for trade attribution (Phase 3).
+/// Schema version 7: Added attribution_summary_binding for strategy evaluation (Phase 4).
+/// Schema version 8: Added router_binding for regime routing (Phase 5).
+/// Schema version 9: Added g2_binding and g3_binding for anti-overfit validation (Phase 6).
+pub const SEGMENT_MANIFEST_SCHEMA_VERSION: u32 = 9;
 
 /// Segment manifest - written to segment_manifest.json in each segment directory.
 ///
@@ -255,6 +393,21 @@ pub struct SegmentManifest {
     /// Strategy identity binding (populated after backtest with strategy SDK)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy_binding: Option<StrategyBinding>,
+    /// Attribution artifact binding (populated after backtest with attribution)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution_binding: Option<AttributionBinding>,
+    /// Attribution summary binding (populated after strategy evaluation, Phase 4)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution_summary_binding: Option<AttributionSummaryBinding>,
+    /// Router binding (populated after routing decisions, Phase 5)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub router_binding: Option<RouterBinding>,
+    /// G2 robustness report binding (populated after anti-overfit validation, Phase 6)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub g2_binding: Option<G2Binding>,
+    /// G3 walk-forward report binding (populated after stability validation, Phase 6)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub g3_binding: Option<G3Binding>,
 }
 
 impl SegmentManifest {
@@ -291,6 +444,11 @@ impl SegmentManifest {
             duration_secs: None,
             trace_binding: None,
             strategy_binding: None,
+            attribution_binding: None,
+            attribution_summary_binding: None,
+            router_binding: None,
+            g2_binding: None,
+            g3_binding: None,
         }
     }
 
@@ -501,6 +659,234 @@ impl SegmentManifest {
             config_path: config_path.map(|s| s.to_string()),
             config_snapshot,
         });
+    }
+
+    /// Bind an attribution artifact to this manifest (Phase 3).
+    ///
+    /// This should be called after a backtest/replay produces an attribution artifact.
+    /// The attribution file must exist at the specified path.
+    ///
+    /// # Arguments
+    /// * `attribution_path` - Path to the attribution JSONL file
+    /// * `segment_dir` - Base segment directory (for computing relative path)
+    /// * `num_events` - Number of attribution events
+    /// * `total_net_pnl_mantissa` - Sum of net PnL across all events
+    /// * `total_fees_mantissa` - Sum of fees across all events
+    /// * `pnl_exponent` - PnL exponent (typically -8)
+    pub fn bind_attribution(
+        &mut self,
+        attribution_path: &Path,
+        segment_dir: &Path,
+        num_events: usize,
+        total_net_pnl_mantissa: i128,
+        total_fees_mantissa: i128,
+        pnl_exponent: i8,
+    ) -> Result<()> {
+        // Compute relative path from segment directory
+        let relative_path = attribution_path
+            .strip_prefix(segment_dir)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| attribution_path.to_string_lossy().to_string());
+
+        // Compute SHA-256 of attribution file
+        let attribution_sha256 = compute_file_sha256(attribution_path)?;
+
+        self.attribution_binding = Some(AttributionBinding {
+            attribution_path: relative_path,
+            attribution_sha256,
+            num_attribution_events: num_events,
+            total_net_pnl_mantissa,
+            total_fees_mantissa,
+            pnl_exponent,
+        });
+
+        Ok(())
+    }
+
+    /// Bind an attribution summary artifact to this manifest (Phase 4).
+    ///
+    /// This should be called after aggregating attribution events into a summary.
+    /// Writes the summary JSON file and binds it with SHA-256 hash.
+    ///
+    /// # Arguments
+    /// * `summary` - The attribution summary to bind
+    /// * `alpha_score` - The computed alpha score for this strategy
+    /// * `segment_dir` - Base segment directory (for writing file and computing relative path)
+    pub fn bind_attribution_summary(
+        &mut self,
+        summary: &quantlaxmi_models::AttributionSummary,
+        alpha_score: &quantlaxmi_models::AlphaScoreV1,
+        segment_dir: &Path,
+    ) -> Result<()> {
+        // Write summary to JSON file
+        let summary_path = segment_dir.join("attribution_summary.json");
+        let json = serde_json::to_string_pretty(summary)?;
+        std::fs::write(&summary_path, &json)
+            .with_context(|| format!("write attribution summary: {:?}", summary_path))?;
+
+        // Compute SHA-256 of summary file
+        let summary_sha256 = compute_file_sha256(&summary_path)?;
+
+        // Compute relative path from segment directory
+        let relative_path = "attribution_summary.json".to_string();
+
+        self.attribution_summary_binding = Some(AttributionSummaryBinding {
+            summary_path: relative_path,
+            summary_sha256,
+            strategy_id: summary.strategy_id.clone(),
+            total_decisions: summary.total_decisions,
+            total_fills: summary.total_fills,
+            win_rate_bps: summary.win_rate_bps,
+            total_net_pnl_mantissa: summary.total_net_pnl_mantissa,
+            max_loss_mantissa: summary.max_loss_mantissa,
+            pnl_exponent: summary.pnl_exponent,
+            alpha_score_mantissa: alpha_score.score_mantissa,
+            alpha_score_exponent: alpha_score.score_exponent,
+            alpha_score_formula: alpha_score.formula_version.to_string(),
+        });
+
+        Ok(())
+    }
+
+    /// Bind router decisions artifact to this manifest (Phase 5).
+    ///
+    /// This should be called after a backtest/replay produces router decisions.
+    /// Writes the decisions JSONL file and binds it with SHA-256 hash.
+    ///
+    /// # Arguments
+    /// * `decisions` - The list of routing decisions
+    /// * `router_config_hash` - Hash of the router configuration
+    /// * `router_version` - Router version string
+    /// * `segment_dir` - Base segment directory (for writing file)
+    pub fn bind_router_decisions(
+        &mut self,
+        decisions: &[quantlaxmi_models::RouterDecisionEvent],
+        router_config_hash: &str,
+        router_version: &str,
+        segment_dir: &Path,
+    ) -> Result<()> {
+        use std::io::Write;
+
+        // Write decisions to JSONL file
+        let decisions_path = segment_dir.join("router_decisions.jsonl");
+        let mut file = std::fs::File::create(&decisions_path)
+            .with_context(|| format!("create router decisions file: {:?}", decisions_path))?;
+
+        // Collect regime distribution and unique strategies
+        // Using BTreeMap for deterministic serialization order (replay parity)
+        let mut regime_distribution: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        let mut unique_strategies: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
+        for decision in decisions {
+            // Write JSONL line
+            let json = serde_json::to_string(decision)?;
+            writeln!(file, "{}", json)?;
+
+            // Track regime distribution
+            *regime_distribution
+                .entry(decision.regime.as_str().to_string())
+                .or_insert(0) += 1;
+
+            // Track unique strategies
+            unique_strategies.insert(decision.selected_strategy_id.clone());
+        }
+
+        drop(file);
+
+        // Compute SHA-256 of decisions file
+        let decisions_sha256 = compute_file_sha256(&decisions_path)?;
+
+        self.router_binding = Some(RouterBinding {
+            decisions_path: "router_decisions.jsonl".to_string(),
+            decisions_sha256,
+            num_decisions: decisions.len(),
+            router_config_hash: router_config_hash.to_string(),
+            router_version: router_version.to_string(),
+            regime_distribution,
+            unique_strategies_used: unique_strategies.len(),
+        });
+
+        Ok(())
+    }
+
+    /// Bind a G2 robustness report to this manifest (Phase 6).
+    ///
+    /// This should be called after generating the G2 anti-overfit report.
+    /// The report file must exist at the specified path.
+    ///
+    /// # Arguments
+    /// * `report` - The G2Report to bind
+    /// * `segment_dir` - Base segment directory (for writing file and computing relative path)
+    pub fn bind_g2_report(
+        &mut self,
+        report: &quantlaxmi_models::G2Report,
+        segment_dir: &Path,
+    ) -> Result<()> {
+        use std::io::Write;
+
+        // Write report to JSON file
+        let report_path = segment_dir.join("g2_report.json");
+        let json = serde_json::to_string_pretty(report)?;
+        let mut file = std::fs::File::create(&report_path)
+            .with_context(|| format!("create G2 report file: {:?}", report_path))?;
+        file.write_all(json.as_bytes())?;
+        drop(file);
+
+        // Compute SHA-256 of report file
+        let report_sha256 = compute_file_sha256(&report_path)?;
+
+        self.g2_binding = Some(G2Binding {
+            report_path: "g2_report.json".to_string(),
+            report_sha256,
+            passed: report.passed,
+            version: report.version.clone(),
+            base_score_mantissa: report.base_score_mantissa,
+            num_shift_tests: report.time_shift_results.len() as u32,
+            num_cost_tests: report.cost_sensitivity_results.len() as u32,
+        });
+
+        Ok(())
+    }
+
+    /// Bind a G3 walk-forward report to this manifest (Phase 6).
+    ///
+    /// This should be called after generating the G3 stability report.
+    /// The report file must exist at the specified path.
+    ///
+    /// # Arguments
+    /// * `report` - The G3Report to bind
+    /// * `segment_dir` - Base segment directory (for writing file and computing relative path)
+    pub fn bind_g3_report(
+        &mut self,
+        report: &quantlaxmi_models::G3Report,
+        segment_dir: &Path,
+    ) -> Result<()> {
+        use std::io::Write;
+
+        // Write report to JSON file
+        let report_path = segment_dir.join("g3_walkforward.json");
+        let json = serde_json::to_string_pretty(report)?;
+        let mut file = std::fs::File::create(&report_path)
+            .with_context(|| format!("create G3 report file: {:?}", report_path))?;
+        file.write_all(json.as_bytes())?;
+        drop(file);
+
+        // Compute SHA-256 of report file
+        let report_sha256 = compute_file_sha256(&report_path)?;
+
+        self.g3_binding = Some(G3Binding {
+            report_path: "g3_walkforward.json".to_string(),
+            report_sha256,
+            passed: report.passed,
+            version: report.version.clone(),
+            num_folds: report.folds.len() as u32,
+            median_score_mantissa: report.stability_metrics.median_score_mantissa,
+            consistency_ratio_bps: report.stability_metrics.consistency_ratio_bps,
+        });
+
+        Ok(())
     }
 
     /// Write manifest to disk atomically (write temp + rename).
@@ -1099,5 +1485,268 @@ mod tests {
         assert_eq!(manifest.stop_reason, StopReason::Unknown);
         assert!(manifest.end_ts.is_some());
         assert!(manifest.digests.is_some());
+    }
+
+    #[test]
+    fn test_attribution_binding() {
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let segment_dir = temp_dir.path();
+
+        let mut manifest = SegmentManifest::new(
+            "perp_BTCUSDT_20260125".to_string(),
+            "perp_20260125_120000".to_string(),
+            vec!["BTCUSDT".to_string()],
+            "capture-perp-session".to_string(),
+            "abc123".to_string(),
+            CaptureConfig::default(),
+        );
+
+        // Schema version should be 8 (Phase 5)
+        assert_eq!(manifest.schema_version, 9);
+        assert!(manifest.attribution_binding.is_none());
+
+        // Create a test attribution file
+        let attribution_path = segment_dir.join("attribution.jsonl");
+        let mut file = std::fs::File::create(&attribution_path).unwrap();
+        writeln!(
+            file,
+            r#"{{"ts_ns":1000,"symbol":"BTCUSDT","net_pnl_mantissa":1000000000}}"#
+        )
+        .unwrap();
+
+        // Bind the attribution
+        manifest
+            .bind_attribution(
+                &attribution_path,
+                segment_dir,
+                1,          // num_events
+                1000000000, // total_net_pnl_mantissa (~$10)
+                20000,      // total_fees_mantissa
+                -8,         // pnl_exponent
+            )
+            .unwrap();
+
+        // Verify binding
+        let binding = manifest.attribution_binding.as_ref().unwrap();
+        assert_eq!(binding.attribution_path, "attribution.jsonl");
+        assert_eq!(binding.num_attribution_events, 1);
+        assert_eq!(binding.total_net_pnl_mantissa, 1000000000);
+        assert_eq!(binding.total_fees_mantissa, 20000);
+        assert_eq!(binding.pnl_exponent, -8);
+        assert!(!binding.attribution_sha256.is_empty());
+    }
+
+    #[test]
+    fn test_attribution_summary_binding() {
+        use quantlaxmi_models::{AlphaScoreV1, AttributionSummary};
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let segment_dir = temp_dir.path();
+
+        let mut manifest = SegmentManifest::new(
+            "perp_BTCUSDT_20260125".to_string(),
+            "perp_20260125_120000".to_string(),
+            vec!["BTCUSDT".to_string()],
+            "backtest".to_string(),
+            "abc123".to_string(),
+            CaptureConfig::default(),
+        );
+
+        // Schema version should be 8 (Phase 5)
+        assert_eq!(manifest.schema_version, 9);
+        assert!(manifest.attribution_summary_binding.is_none());
+
+        // Create a test attribution summary
+        let summary = AttributionSummary {
+            strategy_id: "funding_bias:2.0.0:abc123def".to_string(),
+            run_id: "run_001".to_string(),
+            symbols: vec!["BTCUSDT".to_string()],
+            generated_ts_ns: 1706180400_000_000_000,
+            total_decisions: 100,
+            total_fills: 200,
+            winning_decisions: 60,
+            losing_decisions: 40,
+            round_trips: 30,
+            total_gross_pnl_mantissa: 5_000_000_000, // $50
+            total_fees_mantissa: 200_000,            // $0.002
+            total_net_pnl_mantissa: 4_999_800_000,   // $49.998
+            pnl_exponent: -8,
+            win_rate_bps: 6000,                        // 60%
+            avg_pnl_per_decision_mantissa: 49_998_000, // ~$0.50
+            total_slippage_mantissa: 10_000_000,
+            slippage_exponent: -8,
+            max_loss_mantissa: 500_000_000, // $5 max loss
+            total_holding_time_ns: 3_600_000_000_000,
+        };
+
+        // Compute alpha score
+        let alpha_score = AlphaScoreV1::from_summary(&summary);
+
+        // Bind the summary
+        manifest
+            .bind_attribution_summary(&summary, &alpha_score, segment_dir)
+            .unwrap();
+
+        // Verify binding
+        let binding = manifest.attribution_summary_binding.as_ref().unwrap();
+        assert_eq!(binding.summary_path, "attribution_summary.json");
+        assert_eq!(binding.strategy_id, "funding_bias:2.0.0:abc123def");
+        assert_eq!(binding.total_decisions, 100);
+        assert_eq!(binding.total_fills, 200);
+        assert_eq!(binding.win_rate_bps, 6000);
+        assert_eq!(binding.total_net_pnl_mantissa, 4_999_800_000);
+        assert_eq!(binding.max_loss_mantissa, 500_000_000);
+        assert_eq!(binding.pnl_exponent, -8);
+        assert_eq!(binding.alpha_score_formula, "alpha_score_v1.0");
+        assert!(!binding.summary_sha256.is_empty());
+
+        // Verify the file was written
+        let summary_path = segment_dir.join("attribution_summary.json");
+        assert!(summary_path.exists());
+
+        // Verify file can be parsed back
+        let content = std::fs::read_to_string(&summary_path).unwrap();
+        let loaded: AttributionSummary = serde_json::from_str(&content).unwrap();
+        assert_eq!(loaded.strategy_id, summary.strategy_id);
+        assert_eq!(loaded.total_decisions, summary.total_decisions);
+
+        // Verify manifest round-trip
+        manifest.write(segment_dir).unwrap();
+        let loaded_manifest = SegmentManifest::load(segment_dir).unwrap();
+        assert!(loaded_manifest.attribution_summary_binding.is_some());
+        let loaded_binding = loaded_manifest.attribution_summary_binding.unwrap();
+        assert_eq!(loaded_binding.strategy_id, "funding_bias:2.0.0:abc123def");
+        assert_eq!(
+            loaded_binding.alpha_score_mantissa,
+            alpha_score.score_mantissa
+        );
+    }
+
+    #[test]
+    fn test_router_binding() {
+        use quantlaxmi_models::{RegimeInputs, RegimeLabel, RouterDecisionEvent};
+        use tempfile::TempDir;
+        use uuid::Uuid;
+
+        let temp_dir = TempDir::new().unwrap();
+        let segment_dir = temp_dir.path();
+
+        let mut manifest = SegmentManifest::new(
+            "perp_BTCUSDT_20260126".to_string(),
+            "perp_20260126_120000".to_string(),
+            vec!["BTCUSDT".to_string()],
+            "backtest".to_string(),
+            "abc123".to_string(),
+            CaptureConfig::default(),
+        );
+
+        // Schema version should be 8 (Phase 5)
+        assert_eq!(manifest.schema_version, 9);
+        assert!(manifest.router_binding.is_none());
+
+        // Create test regime inputs
+        let make_inputs = |ts_ns: i64, vol_bps: i32, vol_tier: u8| RegimeInputs {
+            ts_ns,
+            symbol: "BTCUSDT".to_string(),
+            spread_bps: 10,
+            spread_tier: 0,
+            volatility_bps: vol_bps,
+            volatility_tier: vol_tier,
+            depth_mantissa: 100_000_000,
+            depth_exponent: -2,
+            liquidity_tier: 0,
+            funding_rate_bps: 5,
+            funding_tier: 0,
+            trend_strength: 0,
+        };
+
+        // Create test router decisions
+        let decisions = vec![
+            RouterDecisionEvent {
+                ts_ns: 1_000_000_000,
+                decision_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+                symbols: vec!["BTCUSDT".to_string()],
+                inputs: make_inputs(1_000_000_000, 50, 0),
+                regime: RegimeLabel::Normal,
+                confidence_bps: 8000,
+                selected_strategy_id: "funding_bias:2.0.0:abc123".to_string(),
+                alternatives: vec![],
+                selection_reason: "Best match for Normal regime".to_string(),
+                router_config_hash: "router_hash_001".to_string(),
+                router_version: "router_v1.0".to_string(),
+            },
+            RouterDecisionEvent {
+                ts_ns: 2_000_000_000,
+                decision_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap(),
+                symbols: vec!["BTCUSDT".to_string()],
+                inputs: make_inputs(2_000_000_000, 300, 2),
+                regime: RegimeLabel::HighVol,
+                confidence_bps: 9000,
+                selected_strategy_id: "momentum:1.0.0:xyz456".to_string(),
+                alternatives: vec!["funding_bias:2.0.0:abc123".to_string()],
+                selection_reason: "Best match for HighVol regime".to_string(),
+                router_config_hash: "router_hash_001".to_string(),
+                router_version: "router_v1.0".to_string(),
+            },
+            RouterDecisionEvent {
+                ts_ns: 3_000_000_000,
+                decision_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap(),
+                symbols: vec!["BTCUSDT".to_string()],
+                inputs: make_inputs(3_000_000_000, 60, 0),
+                regime: RegimeLabel::Normal,
+                confidence_bps: 7500,
+                selected_strategy_id: "funding_bias:2.0.0:abc123".to_string(),
+                alternatives: vec![],
+                selection_reason: "Best match for Normal regime".to_string(),
+                router_config_hash: "router_hash_001".to_string(),
+                router_version: "router_v1.0".to_string(),
+            },
+        ];
+
+        // Bind router decisions
+        manifest
+            .bind_router_decisions(&decisions, "router_hash_001", "router_v1.0", segment_dir)
+            .unwrap();
+
+        // Verify binding
+        let binding = manifest.router_binding.as_ref().unwrap();
+        assert_eq!(binding.decisions_path, "router_decisions.jsonl");
+        assert_eq!(binding.num_decisions, 3);
+        assert_eq!(binding.router_config_hash, "router_hash_001");
+        assert_eq!(binding.router_version, "router_v1.0");
+        assert_eq!(binding.unique_strategies_used, 2); // funding_bias and momentum
+        assert!(!binding.decisions_sha256.is_empty());
+
+        // Verify regime distribution (as_str returns uppercase like "NORMAL", "HIGH_VOL")
+        assert_eq!(*binding.regime_distribution.get("NORMAL").unwrap(), 2);
+        assert_eq!(*binding.regime_distribution.get("HIGH_VOL").unwrap(), 1);
+
+        // Verify the decisions file was written
+        let decisions_path = segment_dir.join("router_decisions.jsonl");
+        assert!(decisions_path.exists());
+
+        // Verify decisions file can be parsed back
+        let content = std::fs::read_to_string(&decisions_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 3);
+
+        // Parse first decision and verify
+        let parsed: RouterDecisionEvent = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed.regime, RegimeLabel::Normal);
+        assert_eq!(parsed.selected_strategy_id, "funding_bias:2.0.0:abc123");
+
+        // Verify manifest round-trip
+        manifest.write(segment_dir).unwrap();
+        let loaded_manifest = SegmentManifest::load(segment_dir).unwrap();
+        assert!(loaded_manifest.router_binding.is_some());
+
+        let loaded_binding = loaded_manifest.router_binding.unwrap();
+        assert_eq!(loaded_binding.router_config_hash, "router_hash_001");
+        assert_eq!(loaded_binding.num_decisions, 3);
+        assert_eq!(loaded_binding.unique_strategies_used, 2);
     }
 }

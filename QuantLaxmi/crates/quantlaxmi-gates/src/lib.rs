@@ -22,17 +22,34 @@
 //! let result = g4.validate(&deployment_config)?;
 //! ```
 
+pub mod capital_buckets;
+pub mod capital_eligibility;
 pub mod g0_data_truth;
 pub mod g1_replay_parity;
 pub mod g2_backtest_correctness;
 pub mod g3_robustness;
 pub mod g4_deployability;
+pub mod promotion;
 
+pub use capital_buckets::{
+    BUCKET_SCHEMA_VERSION, BucketBindingDecision, BucketConstraints, BucketEligibilityBinding,
+    BucketError, BucketId, BucketRegistry, BucketSnapshot, CapitalBucket, Currency, FixedPoint,
+    RiskClass, SnapshotId, StrategyId, Symbol,
+};
+pub use capital_eligibility::{
+    CapitalConstraints as EligibilityConstraints, CapitalEligibility, ConditionType,
+    ELIGIBILITY_DECISION_SCHEMA, EligibilityCheck, EligibilityCondition, EligibilityDecision,
+    EligibilityPolicy, EligibilityStatus, EligibilityValidator, StrategyMetrics, TimeWindow, Venue,
+};
 pub use g0_data_truth::{G0Config, G0DataTruth};
 pub use g1_replay_parity::{G1Config, G1ReplayParity};
 pub use g2_backtest_correctness::{G2BacktestCorrectness, G2Config};
 pub use g3_robustness::{G3Config, G3Robustness};
 pub use g4_deployability::{G4Config, G4Deployability};
+pub use promotion::{
+    PROMOTION_DECISION_SCHEMA, PaperEvidence, PromotionCheck, PromotionDecision, PromotionPolicy,
+    PromotionRequest, PromotionSource, PromotionValidator,
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

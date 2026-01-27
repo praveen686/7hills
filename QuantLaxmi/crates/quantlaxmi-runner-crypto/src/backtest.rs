@@ -88,9 +88,18 @@ impl OrderIntent {
 }
 
 /// Execution fill.
+///
+/// ## Correlation Chain
+/// Every fill carries `parent_decision_id` linking it back to the
+/// originating DecisionEvent. This enables:
+/// - Decision → Intent → Order → Fill attribution chain
+/// - PnL attribution per decision
+/// - Audit trails for G2/G3
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fill {
     pub ts: DateTime<Utc>,
+    /// Parent decision that originated this fill (for correlation)
+    pub parent_decision_id: Uuid,
     pub symbol: String,
     pub side: Side,
     pub qty: f64,
@@ -813,7 +822,17 @@ impl PaperExchange {
     }
 
     /// Execute an order intent. Returns fill if executed.
-    pub fn execute(&mut self, intent: &OrderIntent, ts: DateTime<Utc>) -> Option<Fill> {
+    ///
+    /// # Arguments
+    /// * `intent` - The order intent to execute
+    /// * `ts` - Execution timestamp
+    /// * `parent_decision_id` - Decision that originated this order (for correlation)
+    pub fn execute(
+        &mut self,
+        intent: &OrderIntent,
+        ts: DateTime<Utc>,
+        parent_decision_id: Uuid,
+    ) -> Option<Fill> {
         let market = self.markets.get(&intent.symbol)?;
 
         // Determine execution price (cross the spread)
@@ -908,6 +927,7 @@ impl PaperExchange {
 
         let fill = Fill {
             ts,
+            parent_decision_id,
             symbol: intent.symbol.clone(),
             side: intent.side,
             qty: intent.qty,
@@ -1140,8 +1160,8 @@ impl BacktestEngine {
                 );
                 trace_builder.record(&decision);
 
-                // Execute the order
-                if let Some(fill) = exchange.execute(&order, event.ts) {
+                // Execute the order (pass decision_id for correlation)
+                if let Some(fill) = exchange.execute(&order, event.ts, decision.decision_id) {
                     strategy.on_fill(&fill);
                 }
             }
@@ -1409,6 +1429,9 @@ impl BacktestEngine {
 
                 // Execute intents (authored by strategy)
                 for intent in output.intents {
+                    // Phase 2: intent carries parent_decision_id for correlation
+                    let parent_decision_id = intent.parent_decision_id;
+
                     // Convert Phase 2 OrderIntent to local OrderIntent
                     let local_intent = OrderIntent {
                         symbol: intent.symbol.clone(),
@@ -1423,7 +1446,9 @@ impl BacktestEngine {
                         tag: intent.tag.clone(),
                     };
 
-                    if let Some(fill) = exchange.execute(&local_intent, event.ts) {
+                    if let Some(fill) =
+                        exchange.execute(&local_intent, event.ts, parent_decision_id)
+                    {
                         // Convert fill to Phase 2 FillNotification
                         let notification = quantlaxmi_strategy::FillNotification {
                             ts: fill.ts,
@@ -1906,14 +1931,16 @@ mod tests {
         assert_eq!(market.ask, 100010.0, "Ask should be 100010.0");
 
         // Execute buy (0.1 BTC @ $100,010 = $10,001 + ~$1 fee)
+        let decision_id = Uuid::new_v4();
         let order = OrderIntent::market("BTCUSDT", Side::Buy, 0.1);
-        let fill = exchange.execute(&order, Utc::now());
+        let fill = exchange.execute(&order, Utc::now(), decision_id);
 
         assert!(fill.is_some(), "Fill should not be None");
         let fill = fill.unwrap();
         assert_eq!(fill.price, 100010.0); // Bought at ask
         assert_eq!(fill.qty, 0.1);
         assert!(fill.fee > 0.0);
+        assert_eq!(fill.parent_decision_id, decision_id); // Correlation preserved
 
         assert_eq!(exchange.position("BTCUSDT"), 0.1);
     }
@@ -1934,7 +1961,12 @@ mod tests {
             payload: serde_json::json!({"bid": 100.0, "ask": 100.0}),
         };
         exchange.update_market(&event1);
-        exchange.execute(&OrderIntent::market("BTCUSDT", Side::Buy, 1.0), Utc::now());
+        let decision_id1 = Uuid::new_v4();
+        exchange.execute(
+            &OrderIntent::market("BTCUSDT", Side::Buy, 1.0),
+            Utc::now(),
+            decision_id1,
+        );
 
         // Price moves to 110
         let event2 = ReplayEvent {
@@ -1949,7 +1981,12 @@ mod tests {
         assert!((exchange.unrealized_pnl() - 10.0).abs() < 0.01);
 
         // Sell to realize
-        exchange.execute(&OrderIntent::market("BTCUSDT", Side::Sell, 1.0), Utc::now());
+        let decision_id2 = Uuid::new_v4();
+        exchange.execute(
+            &OrderIntent::market("BTCUSDT", Side::Sell, 1.0),
+            Utc::now(),
+            decision_id2,
+        );
 
         // Check realized PnL
         assert!((exchange.realized_pnl() - 10.0).abs() < 0.01);

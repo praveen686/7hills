@@ -48,6 +48,12 @@ pub fn encode_i64(buf: &mut Vec<u8>, value: i64) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
+/// Helper: encode i32 as 4 bytes (little-endian).
+#[inline]
+pub fn encode_i32(buf: &mut Vec<u8>, value: i32) {
+    buf.extend_from_slice(&value.to_le_bytes());
+}
+
 /// Helper: encode i128 as 16 bytes (little-endian).
 #[inline]
 pub fn encode_i128(buf: &mut Vec<u8>, value: i128) {

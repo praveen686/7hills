@@ -27,6 +27,7 @@ fn bench_risk_check(c: &mut Criterion) {
 
     let order = OrderEvent {
         order_id: Uuid::new_v4(),
+        parent_decision_id: None,
         intent_id: None,
         timestamp: Utc::now(),
         symbol: "BTCUSDT".to_string(),

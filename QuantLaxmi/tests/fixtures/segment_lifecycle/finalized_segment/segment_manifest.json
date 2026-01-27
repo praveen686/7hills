@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 9,
   "quote_schema": "canonical_v1",
   "state": "FINALIZED",
   "session_family_id": "perp_BTCUSDT_20260125",

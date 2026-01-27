@@ -371,6 +371,7 @@ mod tests {
     fn create_test_order(symbol: &str, side: Side, quantity: f64) -> OrderEvent {
         OrderEvent {
             order_id: Uuid::new_v4(),
+            parent_decision_id: None,
             intent_id: None,
             timestamp: Utc::now(),
             symbol: symbol.to_string(),

@@ -1,281 +1,265 @@
 # QuantLaxmi Roadmap Phases
-## Execution Plan Aligned to Charter v2.1 and Production Contract
+## Execution Plan Aligned to Charter v2.2
 
-**Status:** Operational roadmap for implementation sequencing.
-**Rule:** No phase may be considered complete until its acceptance criteria are met.
+**Status:** Operational roadmap for implementation sequencing
+**Last Updated:** 2026-01-27
+**Current Phase:** 13.2a Complete → 13.2b Next
 
 ---
 
 ## Table of Contents
 
 1. [Operating Model](#1-operating-model)
-2. [Phase 0: Repo Hygiene and Working Agreements](#2-phase-0-repo-hygiene-and-working-agreements)
-3. [Phase 1: Platform Spine (Deterministic Baseline)](#3-phase-1-platform-spine-deterministic-baseline)
-4. [Phase 2: Edge Protector (Real-World Stability)](#4-phase-2-edge-protector-real-world-stability)
-5. [Phase 3: Edge Builders (Differentiated Alpha)](#5-phase-3-edge-builders-differentiated-alpha)
-6. [Phase 4: Adaptive Intelligence (EARNHFT Upgrade)](#6-phase-4-adaptive-intelligence-earnhft-upgrade)
-7. [Release Gates and Promotion Workflow](#7-release-gates-and-promotion-workflow)
-8. [Definition of Done (DoD)](#8-definition-of-done-dod)
+2. [Phase 0: Repo Hygiene](#2-phase-0-repo-hygiene-complete)
+3. [Phase 1: Platform Spine](#3-phase-1-platform-spine-complete)
+4. [Phase 2: Edge Protector](#4-phase-2-edge-protector-complete)
+5. [Phase 11: Paper Evidence Loop](#5-phase-11-paper-evidence-loop-complete)
+6. [Phase 12: Strategy Lifecycle](#6-phase-12-strategy-lifecycle-complete)
+7. [Phase 13: Capital Lifecycle](#7-phase-13-capital-lifecycle-active)
+8. [Phase 14+: Future Phases](#8-phase-14-future-phases)
+9. [Definition of Done](#9-definition-of-done)
 
 ---
 
 ## 1) Operating Model
 
-### 1.1 Engineering modes
-- **Backbone mode:** deterministic capture → WAL → replay → gates → risk → execution → observability
-- **Research mode:** offline experimentation producing artifacts (features/models) + evidence (gate reports)
+### 1.1 Engineering Modes
+- **Backbone mode:** deterministic capture → WAL → replay → gates → risk → execution
+- **Research mode:** offline experimentation producing artifacts + evidence
 
-### 1.2 Promotion discipline
-- Research outputs are not allowed into production runners unless they:
-  - produce canonical outputs
-  - are replayable
-  - pass required gates
+### 1.2 Promotion Discipline
+- Research outputs require:
+  - Canonical outputs
+  - Replayability
+  - Gate compliance
 
-### 1.3 Release policy
+### 1.3 Release Policy
 - Every merged change must preserve:
-  - event schema stability
+  - Event schema stability
   - WAL readability
-  - replay parity invariants
-  - gate execution in CI
+  - Replay parity invariants
 
 ---
 
-## 2) Phase 0: Repo Hygiene and Working Agreements
+## 2) Phase 0: Repo Hygiene (COMPLETE)
 
-### 2.1 Deliverables
-- `docs/QUANTLAXMI_CHARTER_v2_1.md` committed
-- `docs/PRODUCTION_CONTRACT.md` committed
-- `docs/ROADMAP_PHASES.md` committed
-- `docs/ARCHITECTURE_DIAGRAMS.md` committed
+### Deliverables
+- ✅ `docs/QUANTLAXMI_CHARTER_v2_2.md`
+- ✅ `docs/PRODUCTION_CONTRACT.md`
+- ✅ `docs/ROADMAP_PHASES.md`
+- ✅ `docs/PHASE_STATUS.md`
 
-### 2.2 CI baseline
-- `cargo test` for workspace
-- lint/format checks
-- a single "fixture run" pipeline (tiny sample) reserved for gates
-
-### 2.3 Acceptance Criteria
-- CI green on main
-- documentation present and referenced in `README.md` or `docs/index.md`
+### Acceptance
+- ✅ CI green on main
+- ✅ Documentation present
 
 ---
 
-## 3) Phase 1: Platform Spine (Deterministic Baseline)
+## 3) Phase 1: Platform Spine (COMPLETE)
 
-**Objective:** Prove capture → canonical events → WAL → manifests → replay parity.
+### Deliverables
+- ✅ Canonical events (`quantlaxmi-events`, `quantlaxmi-models`)
+- ✅ WAL v1 (`quantlaxmi-wal`)
+- ✅ Manifests binding
+- ✅ Deterministic replay
+- ✅ Gates framework (`quantlaxmi-gates`)
+- ✅ Correlation IDs everywhere
 
-### 3.1 Deliverables
-
-#### A) Canonical events
-- Introduce `quantlaxmi-events` (or `quantlaxmi-models::events`)
-- Move fixed-point parsing and canonical QuoteEvent into canonical events crate
-- Ensure both **Binance** and **Zerodha** emit canonical QuoteEvent
-
-#### B) WAL v1 (JSONL)
-- Introduce `quantlaxmi-wal`
-- Record at least:
-  - SessionEvent
-  - QuoteEvent
-  - DecisionEvent
-  - RiskEvent (even if minimal)
-  - OrderEvent (intent + ack/reject at minimum)
-  - FillEvent (if available; paper mode acceptable initially)
-
-#### C) Manifests binding
-- `run_manifest` must include:
-  - config hash
-  - code hash
-  - WAL path + checksum
-  - decision trace hash
-  - gate report checksum (even if stub)
-- `session_manifest` must include:
-  - universe
-  - schema versions
-  - capture metadata
-
-#### D) Deterministic replay v1
-- Implement `replay` command:
-  - consumes WAL + config snapshot
-  - produces decision trace hash
-  - confirms parity with original
-
-#### E) Gates framework v1
-- Introduce `quantlaxmi-gates`
-- Implement fully:
-  - **G0 DataTruth**
-  - **G4 Deployability**
-- Scaffold:
-  - G1 ReplayParity
-  - G2 Anti-Overfit Suite
-  - G3 Robustness
-
-#### F) Correlation IDs everywhere
-- Ensure tracing spans and logs include:
-  - session_id, run_id, symbol, venue, strategy_id, decision_id, risk_decision_id, order_id
-
-### 3.2 Acceptance Criteria
-- Run a small live/paper session, produce WAL + manifests
-- Replay yields identical decision trace hash
-- G0 and G4 pass on fixture session in CI
-- No float intermediates in canonical event parsing paths
-- Observability exporter available and non-crashing
+### Acceptance
+- ✅ Replay yields identical decision trace hash
+- ✅ G0 and G4 pass on fixture sessions
+- ✅ No float intermediates in canonical parsing
 
 ---
 
-## 4) Phase 2: Edge Protector (Real-World Stability)
+## 4) Phase 2: Edge Protector (COMPLETE)
 
-**Objective:** Make "profitability survivable" by preventing common live failure modes.
+### Deliverables
+- ✅ Risk policy engine v1
+- ✅ Regime Router v1 (deterministic)
+- ✅ Toxicity filters
+- ✅ Full G0-G4 implementation
+- ✅ Paper trading harness
 
-### 4.1 Deliverables
-
-#### A) Risk policy engine v1
-- Implement deterministic pre-trade checks:
-  - max position/notional
-  - max order rate
-  - quote_age bounds
-  - spread bounds
-  - liquidity floor (if L2 available; else L1 proxy)
-- Implement escalation ladder:
-  - WARN → THROTTLE → HALT
-- Ensure every risk decision is written to WAL as RiskEvent
-
-#### B) Regime Router v1 (deterministic)
-- Implement regime classification:
-  - volatility bucket + liquidity bucket + trend bucket
-- Router selects "profile":
-  - sizing band
-  - max aggressiveness
-  - market-making vs taker toggle
-- Router output recorded to WAL/DecisionEvent context
-
-#### C) Toxicity filters (microstructure defense)
-- Implement:
-  - VPIN or VPIN-lite
-  - imbalance/staleness filters
-  - spread shock detection
-- Use filters to throttle/avoid trading
-
-#### D) Expand gates
-- Implement **G1 ReplayParity** fully
-- Implement **G2 Anti-Overfit Suite** minimally:
-  - time-shift test
-  - random-entry baseline
-  - simple permutation test (within day)
-  - (supervised) label shuffle
-  - basic ablation hooks
-- Implement **G3 Robustness** minimally:
-  - walk-forward skeleton
-  - fee 2x and slippage +X bps sweep
-
-#### E) Paper trading / simulator harness v1
-- Latency model
-- Slippage model
-- Partial fill model
-- (Optional) FIFO queue approximation
-
-### 4.2 Acceptance Criteria
-- Strategies operate in paper mode with:
-  - risk ladder functioning
-  - no uncontrolled "close all" hard-coded global rules
-  - WAL includes risk and router decisions
-- G0–G4 implemented and runnable
-- A simple strategy survives friction and does not profit on placebo suite
+### Acceptance
+- ✅ Strategies operate in paper mode with risk ladder
+- ✅ G0-G4 runnable
+- ✅ Simple strategy survives friction
 
 ---
 
-## 5) Phase 3: Edge Builders (Differentiated Alpha)
+## 5) Phase 11: Paper Evidence Loop (COMPLETE)
 
-**Objective:** Add unique alpha modules under strict promotion governance.
+### Deliverables
+- ✅ Deterministic paper evidence
+- ✅ Attribution + AlphaScore computation
+- ✅ Evidence embedded in bundles
+- ✅ Closed-loop verification
 
-### 5.1 Deliverables
-
-#### A) Options surface feature engine (India)
-- skew slope/curvature features
-- term structure features
-- expiry/roll window features
-- surface state recorded as FeatureEvent summaries + hashes
-
-#### B) Carry / calendar engine (India + crypto)
-- Crypto:
-  - funding schedule + basis approximation
-  - feasibility scoring (margin, liquidation proxy)
-- India:
-  - expiry calendar + holiday effects + rollover features
-- Output: carry score + risk flags + regime overlays
-
-#### C) Indic mathematics feature library (research quarantine)
-- Ramanujan periodic dictionary features
-- Mock theta/q-series transforms
-- Continued fraction approximants (streaming)
-- Kuttaka-like constraint solver (calendar feasibility)
-- Stability tests and perturbation robustness suite
-
-#### D) ML ranker/filter (gated)
-- Use ML primarily for:
-  - ranking trade candidates
-  - do-not-trade anomaly detection
-- Not direct execution control (yet)
-
-### 5.2 Acceptance Criteria
-- At least one strategy shows stable profitability net of costs across regimes
-- Indic features demonstrate:
-  - stability under perturbations
-  - improved regime separation metrics
-  - no placebo profitability
-- All modules are replayable and gate-compliant
+### Acceptance
+- ✅ Paper sessions produce verifiable evidence
+- ✅ AlphaScore computation deterministic
 
 ---
 
-## 6) Phase 4: Adaptive Intelligence (EARNHFT Upgrade)
+## 6) Phase 12: Strategy Lifecycle (COMPLETE)
 
-**Objective:** Introduce hierarchical RL as a controlled upgrade after backbone maturity.
+### Phase 12.1: Strategy Pack v1 (COMPLETE)
 
-### 6.1 Deliverables
+**Deliverables:**
+- ✅ `funding_bias` strategy
+- ✅ `micro_breakout` strategy
+- ✅ `spread_mean_revert` strategy
+- ✅ Strategy SDK with registry
+- ✅ Fixed-point arithmetic
 
-#### A) EARNHFT architecture
-- Router: selects agent profile
-- Agent: execution policy
-- Teacher/Q-Teacher: offline training pipeline
+### Phase 12.2: Tournament Runner (COMPLETE)
 
-#### B) Training and deployment discipline
-- RL trained exclusively in simulation and paper trading first
-- Inference deployed via deterministic runtime (ONNX preferred)
-- Policy updates are versioned and gate-validated
+**Deliverables:**
+- ✅ `TournamentRunner` with deterministic execution
+- ✅ `LeaderboardV1` with reproducible ranking
+- ✅ `TournamentManifest` for audit
+- ✅ Attribution summary integration
 
-#### C) Safety posture
-- RL outputs bounded parameters first (sizing/spreads/throttles)
-- Full policy control only if it passes:
-  - replay parity
-  - robustness
-  - drawdown containment
-  - regime-sliced stability
+### Phase 12.3: Promotion Tightening (COMPLETE)
 
-### 6.2 Acceptance Criteria
-- RL policy improves execution quality without harming:
-  - replay parity
-  - risk containment
-  - observability/auditability
-- Rollback is instant (policy version selection)
+**Invariant:** No G3 without paper evidence
 
----
+**Deliverables:**
+- ✅ `PromotionSource` (Tournament, Paper, Manual)
+- ✅ `PaperEvidence` struct
+- ✅ `PromotionPolicy` with rules
+- ✅ `PromotionValidator` with gate integration
+- ✅ `PromotionDecision` with digest
 
-## 7) Release Gates and Promotion Workflow
-
-### 7.1 Promotion states
-- Research → Candidate → Shadow (paper) → Limited Live → Production
-
-### 7.2 Required evidence at each step
-- Gate reports (G0–G4)
-- Replay parity evidence
-- Cost sensitivity results
-- Regime-sliced metrics
-- Run manifests + WAL checksums
+**Tests:** 8 tests enforcing invariants
 
 ---
 
-## 8) Definition of Done (DoD)
+## 7) Phase 13: Capital Lifecycle (ACTIVE)
+
+### Phase 13.1: Capital Eligibility (COMPLETE)
+
+**Question:** "Is this G3 strategy allowed to touch capital under what constraints?"
+
+**Deliverables:**
+- ✅ `Venue` enum
+- ✅ `EligibilityStatus` (Eligible, Ineligible, Conditional)
+- ✅ `EligibilityPolicy` with presets
+- ✅ `EligibilityValidator`
+- ✅ `EligibilityDecision` with digest
+
+**Tests:** 13 tests covering all scenarios
+
+### Phase 13.2a: Capital Buckets (COMPLETE)
+
+**Question:** "What capital exists, where is it allowed to operate, and under what constraints?"
+
+**Deliverables:**
+- ✅ `CapitalBucket` — venue-isolated capital pool
+- ✅ `BucketRegistry` — governed management
+- ✅ `BucketEligibilityBinding` — explicit binding
+- ✅ `BucketBindingDecision` with digest
+- ✅ `BucketSnapshot` for audit
+- ✅ `FixedPoint` for capital arithmetic
+- ✅ `Currency`, `RiskClass` enums
+
+**Tests:** 13 tests covering all operations
+
+**What This Phase Does NOT Do:**
+- ❌ No capital allocation
+- ❌ No sizing
+- ❌ No optimizer hooks
+- ❌ No rebalancing
+
+### Phase 13.2b: Portfolio Selector (NEXT)
+
+**Question:** "Which eligible strategies may draw from which buckets, and in what priority order?"
+
+**Will Consume:**
+- `CapitalEligibility`
+- `CapitalBucket`
+- `BucketEligibilityBinding`
+
+**Will Produce:**
+- Allocation intents (priority ordering)
+- Still no capital quantities
+
+**Scope:**
+- Multiple eligible strategies compete
+- Bucket constraints respected
+- Priority ordering determined
+- No sizing math
+
+### Phase 13.3: Capital Allocation (PENDING)
+
+**Question:** "How much capital does each strategy receive?"
+
+**Will Introduce:**
+- Capital math
+- Rebalancing logic
+- Risk budgeting
+- Execution engines receive numbers
+
+---
+
+## 8) Phase 14+: Future Phases
+
+### Phase 14: Adaptive Intelligence
+
+**Objective:** Introduce hierarchical RL as controlled upgrade
+
+**Components:**
+- EARNHFT Router (selects agent profile)
+- RL Agent (execution policy)
+- Q-Teacher (offline training)
+
+**Safety Posture:**
+- RL outputs bounded parameters first
+- Full policy control only after gate compliance
+
+### Phase 15+: Multi-Venue Expansion
+
+- Additional crypto venues
+- India options support
+- Cross-venue arbitrage
+
+---
+
+## 9) Definition of Done
 
 A phase is "done" only when:
-- acceptance criteria are met
-- CI includes regression tests for the new capabilities
-- replay parity remains intact
-- documentation is updated
+
+1. ✅ Acceptance criteria are met
+2. ✅ CI includes regression tests
+3. ✅ Replay parity remains intact
+4. ✅ Clippy clean
+5. ✅ Documentation updated
+6. ✅ All tests pass
+
+---
+
+## Quick Reference: Current State
+
+```
+Lifecycle Position:
+
+Data ──────────────────────────────────────────────────────────────────────────►
+      │                                                                        │
+      │  [COMPLETE]                                                            │
+      │  Capture → WAL → Replay → Gates → Tournament → Paper → Promotion      │
+      │                                                                        │
+      │  [COMPLETE]                                                            │
+      │  → Capital Eligibility → Capital Buckets                               │
+      │                                                                        │
+      │  [NEXT]                                                                │
+      │  → Portfolio Selector → Capital Allocation                             │
+      │                                                                        │
+      │  [FUTURE]                                                              │
+      │  → Live Execution → Adaptive Intelligence                              │
+      └────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+*End of Roadmap*

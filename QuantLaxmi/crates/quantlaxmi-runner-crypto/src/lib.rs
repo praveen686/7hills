@@ -30,6 +30,7 @@ pub mod paper_trading;
 pub mod replay;
 pub mod segment_manifest;
 pub mod session_capture;
+pub mod tournament;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
