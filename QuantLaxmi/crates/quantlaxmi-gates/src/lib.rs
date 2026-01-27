@@ -26,6 +26,7 @@ pub mod capital_allocation;
 pub mod capital_buckets;
 pub mod capital_eligibility;
 pub mod execution_budget;
+pub mod execution_session;
 pub mod g0_data_truth;
 pub mod g1_replay_parity;
 pub mod g2_backtest_correctness;
@@ -57,6 +58,15 @@ pub use execution_budget::{
     BudgetDelta, BudgetError, BudgetId, BudgetManager, BudgetPolicy, BudgetSnapshot, BudgetStatus,
     DeltaId, DeltaType, EXECUTION_BUDGET_SCHEMA, ExecutionBudget, OrderCheckResult,
     OrderConstraints, RateLimitTracker,
+};
+pub use execution_session::{
+    CircuitBreakerType, EMERGENCY_FLATTEN_SCHEMA_VERSION, EmergencyFlattenRequest,
+    EmergencyFlattenResult, EXECUTION_SESSION_SCHEMA_VERSION, FlattenOutcome, FlattenRequestId,
+    FlattenResultId, FlattenScope, KILL_SWITCH_SCHEMA_VERSION, KillSwitchEvent, KillSwitchEventId,
+    KillSwitchReason, KillSwitchRegistry, KillSwitchScope, MANUAL_OVERRIDE_SCHEMA_VERSION,
+    ManualOverrideEvent, OverrideError, OverrideId, OverridePolicy, OverrideType,
+    SessionController, SessionState, SessionStatusSummary, SessionTransitionEvent,
+    SessionTransitionReason, TransitionId,
 };
 pub use g0_data_truth::{G0Config, G0DataTruth};
 pub use g1_replay_parity::{G1Config, G1ReplayParity};
