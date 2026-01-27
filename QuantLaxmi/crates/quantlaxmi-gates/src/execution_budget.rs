@@ -479,8 +479,7 @@ impl BudgetPolicy {
         // max_order = allocated * fraction
         // fraction = mantissa * 10^exponent
         let denom = 10i128.pow((-self.max_order_fraction_exponent) as u32);
-        let max_mantissa =
-            (allocated.mantissa * self.max_order_fraction_mantissa as i128) / denom;
+        let max_mantissa = (allocated.mantissa * self.max_order_fraction_mantissa as i128) / denom;
         FixedPoint::new(max_mantissa, allocated.exponent)
     }
 }
@@ -733,8 +732,7 @@ impl BudgetManager {
         allocation: &StrategyAllocation,
         event_ts_ns: i64,
     ) -> Result<(ExecutionBudget, BudgetDelta), BudgetError> {
-        let budget_id =
-            BudgetId::derive(&allocation.strategy_id, &plan.bucket_id, &plan.digest);
+        let budget_id = BudgetId::derive(&allocation.strategy_id, &plan.bucket_id, &plan.digest);
 
         let exponent = allocation.assigned_capital.exponent;
         let max_order_notional = self
@@ -804,7 +802,6 @@ impl BudgetManager {
 
         Ok((budget, delta))
     }
-
 
     /// Check if an order is allowed (pre-trade).
     pub fn check_order(
@@ -942,7 +939,9 @@ impl BudgetManager {
         })?;
 
         if budget.status != BudgetStatus::Active {
-            return Err(BudgetError::BudgetNotActive(budget.status.as_str().to_string()));
+            return Err(BudgetError::BudgetNotActive(
+                budget.status.as_str().to_string(),
+            ));
         }
 
         if order_notional.exponent != budget.available_capital.exponent {
@@ -1162,13 +1161,13 @@ impl BudgetManager {
 
     /// Create a snapshot of all budgets.
     pub fn snapshot(&self, snapshot_id: SnapshotId, ts_ns: i64) -> BudgetSnapshot {
-        let mut budgets: Vec<ExecutionBudget> =
-            self.budgets.values().cloned().collect();
-        budgets.sort_by(|a, b| {
-            (&a.strategy_id, &a.bucket_id).cmp(&(&b.strategy_id, &b.bucket_id))
-        });
+        let mut budgets: Vec<ExecutionBudget> = self.budgets.values().cloned().collect();
+        budgets.sort_by(|a, b| (&a.strategy_id, &a.bucket_id).cmp(&(&b.strategy_id, &b.bucket_id)));
 
-        let exponent = budgets.first().map(|b| b.allocated_capital.exponent).unwrap_or(-2);
+        let exponent = budgets
+            .first()
+            .map(|b| b.allocated_capital.exponent)
+            .unwrap_or(-2);
 
         let total_allocated = FixedPoint::new(
             budgets.iter().map(|b| b.allocated_capital.mantissa).sum(),
@@ -1279,14 +1278,13 @@ impl BudgetSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capital_allocation::{AllocationPlan, PlanId, StrategyAllocation, ALLOCATION_PLAN_SCHEMA};
+    use crate::capital_allocation::{
+        ALLOCATION_PLAN_SCHEMA, AllocationPlan, PlanId, StrategyAllocation,
+    };
     use crate::portfolio_selector::IntentId;
     use chrono::Utc;
 
-    fn create_test_allocation_plan(
-        bucket_id: &str,
-        strategies: &[(&str, i128)],
-    ) -> AllocationPlan {
+    fn create_test_allocation_plan(bucket_id: &str, strategies: &[(&str, i128)]) -> AllocationPlan {
         let exponent = -2;
         let allocations: Vec<StrategyAllocation> = strategies
             .iter()
@@ -1365,16 +1363,36 @@ mod tests {
         let bucket = BucketId::new("bucket_1");
 
         // Order within limits - should be allowed
-        let result = manager.check_order(&strat, &bucket, &FixedPoint::new(5_000_00, -2), 1_000_000_000);
+        let result = manager.check_order(
+            &strat,
+            &bucket,
+            &FixedPoint::new(5_000_00, -2),
+            1_000_000_000,
+        );
         assert!(result.allowed);
 
         // Order exceeding max notional (10% of 100,000 = 10,000)
-        let result = manager.check_order(&strat, &bucket, &FixedPoint::new(15_000_00, -2), 1_000_000_000);
+        let result = manager.check_order(
+            &strat,
+            &bucket,
+            &FixedPoint::new(15_000_00, -2),
+            1_000_000_000,
+        );
         assert!(!result.allowed);
-        assert!(result.rejection_reason.unwrap().contains("max order notional"));
+        assert!(
+            result
+                .rejection_reason
+                .unwrap()
+                .contains("max order notional")
+        );
 
         // Order exceeding available
-        let result = manager.check_order(&strat, &bucket, &FixedPoint::new(200_000_00, -2), 1_000_000_000);
+        let result = manager.check_order(
+            &strat,
+            &bucket,
+            &FixedPoint::new(200_000_00, -2),
+            1_000_000_000,
+        );
         assert!(!result.allowed);
         assert!(result.rejection_reason.unwrap().contains("Insufficient"));
     }
@@ -1390,7 +1408,13 @@ mod tests {
 
         // Reserve 10,000
         let delta = manager
-            .reserve_for_order(&strat, &bucket, "order_1", &FixedPoint::new(10_000_00, -2), 2_000_000_000)
+            .reserve_for_order(
+                &strat,
+                &bucket,
+                "order_1",
+                &FixedPoint::new(10_000_00, -2),
+                2_000_000_000,
+            )
             .unwrap();
 
         assert_eq!(delta.delta_type, DeltaType::OrderOpen);
@@ -1412,7 +1436,13 @@ mod tests {
 
         // Reserve then release
         manager
-            .reserve_for_order(&strat, &bucket, "order_1", &FixedPoint::new(10_000_00, -2), 2_000_000_000)
+            .reserve_for_order(
+                &strat,
+                &bucket,
+                "order_1",
+                &FixedPoint::new(10_000_00, -2),
+                2_000_000_000,
+            )
             .unwrap();
 
         let delta = manager
@@ -1437,14 +1467,31 @@ mod tests {
 
         // Reserve most of the budget (max order = 10% = 2,000, so we reserve twice)
         manager
-            .reserve_for_order(&strat, &bucket, "order_1", &FixedPoint::new(2_000_00, -2), 2_000_000_000)
+            .reserve_for_order(
+                &strat,
+                &bucket,
+                "order_1",
+                &FixedPoint::new(2_000_00, -2),
+                2_000_000_000,
+            )
             .unwrap();
         manager
-            .reserve_for_order(&strat, &bucket, "order_2", &FixedPoint::new(2_000_00, -2), 3_000_000_000)
+            .reserve_for_order(
+                &strat,
+                &bucket,
+                "order_2",
+                &FixedPoint::new(2_000_00, -2),
+                3_000_000_000,
+            )
             .unwrap();
 
         // Now only 16,000 available
-        let result = manager.check_order(&strat, &bucket, &FixedPoint::new(20_000_00, -2), 4_000_000_000);
+        let result = manager.check_order(
+            &strat,
+            &bucket,
+            &FixedPoint::new(20_000_00, -2),
+            4_000_000_000,
+        );
         assert!(!result.allowed);
         assert!(result.rejection_reason.unwrap().contains("Insufficient"));
     }
@@ -1453,11 +1500,15 @@ mod tests {
     fn test_rebalance_updates_budgets() {
         let plan1 = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
         let mut manager = BudgetManager::with_default_policy();
-        manager.apply_allocation_plan(&plan1, 1_000_000_000).unwrap();
+        manager
+            .apply_allocation_plan(&plan1, 1_000_000_000)
+            .unwrap();
 
         // Create a new plan with different digest (different allocation)
         let plan2 = create_test_allocation_plan("bucket_1", &[("strat_a", 150_000_00)]);
-        let deltas = manager.apply_allocation_plan(&plan2, 2_000_000_000).unwrap();
+        let deltas = manager
+            .apply_allocation_plan(&plan2, 2_000_000_000)
+            .unwrap();
 
         // Should have expiration + new allocation
         assert_eq!(deltas.len(), 2);
@@ -1477,8 +1528,12 @@ mod tests {
         let mut manager1 = BudgetManager::with_default_policy();
         let mut manager2 = BudgetManager::with_default_policy();
 
-        manager1.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
-        manager2.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
+        manager1
+            .apply_allocation_plan(&plan, 1_000_000_000)
+            .unwrap();
+        manager2
+            .apply_allocation_plan(&plan, 1_000_000_000)
+            .unwrap();
 
         let budget1 = manager1
             .get_budget(&StrategyId::new("strat_a"), &BucketId::new("bucket_1"))
@@ -1492,13 +1547,20 @@ mod tests {
 
     #[test]
     fn test_snapshot_digest_deterministic() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00), ("strat_b", 50_000_00)]);
+        let plan = create_test_allocation_plan(
+            "bucket_1",
+            &[("strat_a", 100_000_00), ("strat_b", 50_000_00)],
+        );
 
         let mut manager1 = BudgetManager::with_default_policy();
         let mut manager2 = BudgetManager::with_default_policy();
 
-        manager1.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
-        manager2.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
+        manager1
+            .apply_allocation_plan(&plan, 1_000_000_000)
+            .unwrap();
+        manager2
+            .apply_allocation_plan(&plan, 1_000_000_000)
+            .unwrap();
 
         let snap1 = manager1.snapshot(SnapshotId::new("snap_test"), 2_000_000_000);
         let snap2 = manager2.snapshot(SnapshotId::new("snap_test"), 2_000_000_000);
@@ -1556,12 +1618,24 @@ mod tests {
 
         // Reserve for order
         manager
-            .reserve_for_order(&strat, &bucket, "order_1", &FixedPoint::new(10_000_00, -2), 2_000_000_000)
+            .reserve_for_order(
+                &strat,
+                &bucket,
+                "order_1",
+                &FixedPoint::new(10_000_00, -2),
+                2_000_000_000,
+            )
             .unwrap();
 
         // Process fill
         let delta = manager
-            .process_fill(&strat, &bucket, "order_1", &FixedPoint::new(10_000_00, -2), 3_000_000_000)
+            .process_fill(
+                &strat,
+                &bucket,
+                "order_1",
+                &FixedPoint::new(10_000_00, -2),
+                3_000_000_000,
+            )
             .unwrap();
 
         assert_eq!(delta.delta_type, DeltaType::OrderFill);

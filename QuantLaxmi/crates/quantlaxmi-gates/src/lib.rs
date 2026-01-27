@@ -32,6 +32,7 @@ pub mod g2_backtest_correctness;
 pub mod g3_robustness;
 pub mod g4_deployability;
 pub mod portfolio_selector;
+pub mod position_keeper;
 pub mod promotion;
 
 pub use capital_allocation::{
@@ -49,6 +50,11 @@ pub use capital_eligibility::{
     ELIGIBILITY_DECISION_SCHEMA, EligibilityCheck, EligibilityCondition, EligibilityDecision,
     EligibilityPolicy, EligibilityStatus, EligibilityValidator, StrategyMetrics, TimeWindow, Venue,
 };
+pub use execution_budget::{
+    BudgetDelta, BudgetError, BudgetId, BudgetManager, BudgetPolicy, BudgetSnapshot, BudgetStatus,
+    DeltaId, DeltaType, EXECUTION_BUDGET_SCHEMA, ExecutionBudget, OrderCheckResult,
+    OrderConstraints, RateLimitTracker,
+};
 pub use g0_data_truth::{G0Config, G0DataTruth};
 pub use g1_replay_parity::{G1Config, G1ReplayParity};
 pub use g2_backtest_correctness::{G2BacktestCorrectness, G2Config};
@@ -59,14 +65,14 @@ pub use portfolio_selector::{
     PortfolioPolicy, PortfolioRejection, PortfolioSelectionResult, PortfolioSelector,
     StrategyIntent, StrategyOrderingMetrics,
 };
+pub use position_keeper::{
+    POSITION_KEEPER_SCHEMA_VERSION, PortfolioLedger, PortfolioSnapshot, PositionError,
+    PositionKeeper, PositionSnapshot, PositionState, SnapshotId as PositionSnapshotId,
+    venue_to_position_venue,
+};
 pub use promotion::{
     PROMOTION_DECISION_SCHEMA, PaperEvidence, PromotionCheck, PromotionDecision, PromotionPolicy,
     PromotionRequest, PromotionSource, PromotionValidator,
-};
-pub use execution_budget::{
-    BudgetDelta, BudgetError, BudgetId, BudgetManager, BudgetPolicy, BudgetSnapshot, BudgetStatus,
-    DeltaId, DeltaType, EXECUTION_BUDGET_SCHEMA, ExecutionBudget, OrderCheckResult,
-    OrderConstraints, RateLimitTracker,
 };
 
 use chrono::{DateTime, Utc};

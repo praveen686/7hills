@@ -783,7 +783,10 @@ mod tests {
 
     #[test]
     fn test_live_order_state_display() {
-        assert_eq!(format!("{}", LiveOrderState::IntentCreated), "INTENT_CREATED");
+        assert_eq!(
+            format!("{}", LiveOrderState::IntentCreated),
+            "INTENT_CREATED"
+        );
         assert_eq!(format!("{}", LiveOrderState::Filled), "FILLED");
         assert_eq!(format!("{}", LiveOrderState::Rejected), "REJECTED");
     }

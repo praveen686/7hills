@@ -17,9 +17,9 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use quantlaxmi_models::{
-    IdempotencyKey, IntentId, LiveOrderState,
-    OrderAckEvent, OrderCancelEvent, OrderFillEvent, OrderIntentEvent, OrderRejectEvent,
-    OrderSubmitEvent, PositionCloseEvent, EXECUTION_EVENTS_SCHEMA_VERSION,
+    EXECUTION_EVENTS_SCHEMA_VERSION, IdempotencyKey, IntentId, LiveOrderState, OrderAckEvent,
+    OrderCancelEvent, OrderFillEvent, OrderIntentEvent, OrderRejectEvent, OrderSubmitEvent,
+    PositionCloseEvent,
 };
 use serde::de::DeserializeOwned;
 use std::collections::{HashMap, HashSet};
@@ -107,12 +107,24 @@ fn read_jsonl<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
 
     let mut events = Vec::new();
     for (line_num, line) in reader.lines().enumerate() {
-        let line = line.with_context(|| format!("Failed to read line {} from {}", line_num + 1, path.display()))?;
+        let line = line.with_context(|| {
+            format!(
+                "Failed to read line {} from {}",
+                line_num + 1,
+                path.display()
+            )
+        })?;
         if line.trim().is_empty() {
             continue;
         }
-        let event: T = serde_json::from_str(&line)
-            .with_context(|| format!("Failed to parse line {} from {}: {}", line_num + 1, path.display(), line))?;
+        let event: T = serde_json::from_str(&line).with_context(|| {
+            format!(
+                "Failed to parse line {} from {}: {}",
+                line_num + 1,
+                path.display(),
+                line
+            )
+        })?;
         events.push(event);
     }
 
@@ -162,7 +174,12 @@ fn validate_client_order_id(submit: &OrderSubmitEvent) -> Result<(), String> {
         ));
     }
 
-    if !submit.client_order_id.0.chars().all(|c| c.is_ascii_hexdigit()) {
+    if !submit
+        .client_order_id
+        .0
+        .chars()
+        .all(|c| c.is_ascii_hexdigit())
+    {
         return Err(format!(
             "Client order ID contains non-hex characters: {}",
             submit.client_order_id.0
@@ -172,7 +189,12 @@ fn validate_client_order_id(submit: &OrderSubmitEvent) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_digest<T>(_event: &T, computed: &str, stored: &str, event_type: &str) -> Result<(), String> {
+fn validate_digest<T>(
+    _event: &T,
+    computed: &str,
+    stored: &str,
+    event_type: &str,
+) -> Result<(), String> {
     if computed != stored {
         return Err(format!(
             "{} digest mismatch: computed={}, stored={}",
@@ -224,11 +246,7 @@ fn validate_state_transition(
 // Main Validation Logic
 // =============================================================================
 
-fn validate_intents(
-    session_dir: &Path,
-    state: &mut ValidationState,
-    verbose: bool,
-) -> Result<()> {
+fn validate_intents(session_dir: &Path, state: &mut ValidationState, verbose: bool) -> Result<()> {
     let path = session_dir.join("intents.jsonl");
     let intents: Vec<OrderIntentEvent> = read_jsonl(&path)?;
 
@@ -253,7 +271,9 @@ fn validate_intents(
         }
 
         // Track the intent
-        state.intents.insert(intent.intent_id.0.clone(), intent.clone());
+        state
+            .intents
+            .insert(intent.intent_id.0.clone(), intent.clone());
         state.intent_count += 1;
 
         if verbose {
@@ -264,11 +284,7 @@ fn validate_intents(
     Ok(())
 }
 
-fn validate_submits(
-    session_dir: &Path,
-    state: &mut ValidationState,
-    verbose: bool,
-) -> Result<()> {
+fn validate_submits(session_dir: &Path, state: &mut ValidationState, verbose: bool) -> Result<()> {
     let path = session_dir.join("submits.jsonl");
     let submits: Vec<OrderSubmitEvent> = read_jsonl(&path)?;
 
@@ -307,15 +323,15 @@ fn validate_submits(
         }
 
         // Track mappings
-        state.client_to_intent.insert(
-            submit.client_order_id.0.clone(),
-            submit.intent_id.0.clone(),
-        );
-        state.order_states.insert(
-            submit.client_order_id.0.clone(),
-            LiveOrderState::Submitted,
-        );
-        state.submits.insert(submit.client_order_id.0.clone(), submit.clone());
+        state
+            .client_to_intent
+            .insert(submit.client_order_id.0.clone(), submit.intent_id.0.clone());
+        state
+            .order_states
+            .insert(submit.client_order_id.0.clone(), LiveOrderState::Submitted);
+        state
+            .submits
+            .insert(submit.client_order_id.0.clone(), submit.clone());
         state.submit_count += 1;
 
         if verbose {
@@ -329,11 +345,7 @@ fn validate_submits(
     Ok(())
 }
 
-fn validate_acks(
-    session_dir: &Path,
-    state: &mut ValidationState,
-    verbose: bool,
-) -> Result<()> {
+fn validate_acks(session_dir: &Path, state: &mut ValidationState, verbose: bool) -> Result<()> {
     let path = session_dir.join("acks.jsonl");
     let acks: Vec<OrderAckEvent> = read_jsonl(&path)?;
 
@@ -371,10 +383,9 @@ fn validate_acks(
         }
 
         // Update state
-        state.order_states.insert(
-            ack.client_order_id.0.clone(),
-            LiveOrderState::Acked,
-        );
+        state
+            .order_states
+            .insert(ack.client_order_id.0.clone(), LiveOrderState::Acked);
         state.exchange_to_client.insert(
             ack.exchange_order_id.0.clone(),
             ack.client_order_id.0.clone(),
@@ -393,11 +404,7 @@ fn validate_acks(
 }
 
 #[allow(clippy::collapsible_if)]
-fn validate_rejects(
-    session_dir: &Path,
-    state: &mut ValidationState,
-    verbose: bool,
-) -> Result<()> {
+fn validate_rejects(session_dir: &Path, state: &mut ValidationState, verbose: bool) -> Result<()> {
     let path = session_dir.join("rejects.jsonl");
     let rejects: Vec<OrderRejectEvent> = read_jsonl(&path)?;
 
@@ -430,10 +437,9 @@ fn validate_rejects(
         }
 
         // Update state
-        state.order_states.insert(
-            reject.client_order_id.0.clone(),
-            LiveOrderState::Rejected,
-        );
+        state
+            .order_states
+            .insert(reject.client_order_id.0.clone(), LiveOrderState::Rejected);
         state.reject_count += 1;
 
         if verbose {
@@ -448,11 +454,7 @@ fn validate_rejects(
 }
 
 #[allow(clippy::collapsible_if)]
-fn validate_fills(
-    session_dir: &Path,
-    state: &mut ValidationState,
-    verbose: bool,
-) -> Result<()> {
+fn validate_fills(session_dir: &Path, state: &mut ValidationState, verbose: bool) -> Result<()> {
     let path = session_dir.join("fills.jsonl");
     let fills: Vec<OrderFillEvent> = read_jsonl(&path)?;
 
@@ -475,11 +477,9 @@ fn validate_fills(
 
         // Validate state transition
         if let Some(&current_state) = state.order_states.get(&fill.client_order_id.0) {
-            if let Err(e) = validate_state_transition(
-                current_state,
-                fill.state,
-                &fill.client_order_id.0,
-            ) {
+            if let Err(e) =
+                validate_state_transition(current_state, fill.state, &fill.client_order_id.0)
+            {
                 state.add_error(e);
             }
         }
@@ -497,10 +497,9 @@ fn validate_fills(
         }
 
         // Update state
-        state.order_states.insert(
-            fill.client_order_id.0.clone(),
-            fill.state,
-        );
+        state
+            .order_states
+            .insert(fill.client_order_id.0.clone(), fill.state);
         state.fill_count += 1;
 
         if verbose {
@@ -515,11 +514,7 @@ fn validate_fills(
 }
 
 #[allow(clippy::collapsible_if)]
-fn validate_cancels(
-    session_dir: &Path,
-    state: &mut ValidationState,
-    verbose: bool,
-) -> Result<()> {
+fn validate_cancels(session_dir: &Path, state: &mut ValidationState, verbose: bool) -> Result<()> {
     let path = session_dir.join("cancels.jsonl");
     let cancels: Vec<OrderCancelEvent> = read_jsonl(&path)?;
 
@@ -562,10 +557,9 @@ fn validate_cancels(
         }
 
         // Update state
-        state.order_states.insert(
-            cancel.client_order_id.0.clone(),
-            LiveOrderState::Cancelled,
-        );
+        state
+            .order_states
+            .insert(cancel.client_order_id.0.clone(), LiveOrderState::Cancelled);
         state.cancel_count += 1;
 
         if verbose {
@@ -649,7 +643,10 @@ fn validate_budget_balance(state: &ValidationState) -> Vec<String> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    println!("Validating execution session: {}", cli.session_dir.display());
+    println!(
+        "Validating execution session: {}",
+        cli.session_dir.display()
+    );
     println!("Schema version: {}", EXECUTION_EVENTS_SCHEMA_VERSION);
     println!();
 
@@ -685,16 +682,10 @@ fn main() -> Result<()> {
     // Print budget state
     println!("=== Budget State ===");
     for ((strategy_id, bucket_id), reserved) in &state.reserved {
-        println!(
-            "  {}:{} - Reserved: {}",
-            strategy_id, bucket_id, reserved
-        );
+        println!("  {}:{} - Reserved: {}", strategy_id, bucket_id, reserved);
     }
     for ((strategy_id, bucket_id), committed) in &state.committed {
-        println!(
-            "  {}:{} - Committed: {}",
-            strategy_id, bucket_id, committed
-        );
+        println!("  {}:{} - Committed: {}", strategy_id, bucket_id, committed);
     }
     println!();
 

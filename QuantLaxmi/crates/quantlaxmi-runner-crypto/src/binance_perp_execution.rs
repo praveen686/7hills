@@ -20,10 +20,10 @@
 //! - PnL accounting (Phase 14.3+)
 
 use quantlaxmi_models::{
-    CancelSource, ClientOrderId, ExchangeOrderId, ExecutionOrderType, ExecutionSide,
-    FillId, IdempotencyKey, IntentId, LiveOrderState, OrderAckEvent,
-    OrderCancelEvent, OrderFillEvent, OrderIntentEvent, OrderRejectEvent, OrderSubmitEvent,
-    PositionCloseEvent, EXECUTION_EVENTS_SCHEMA_VERSION,
+    CancelSource, ClientOrderId, EXECUTION_EVENTS_SCHEMA_VERSION, ExchangeOrderId,
+    ExecutionOrderType, ExecutionSide, FillId, IdempotencyKey, IntentId, LiveOrderState,
+    OrderAckEvent, OrderCancelEvent, OrderFillEvent, OrderIntentEvent, OrderRejectEvent,
+    OrderSubmitEvent, PositionCloseEvent,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -480,8 +480,8 @@ impl<B: BudgetInterface, W: WalInterface> LiveExecutionEngine<B, W> {
         let price = intent
             .limit_price_mantissa
             .unwrap_or(intent.reference_price_mantissa);
-        let notional_mantissa = (price * intent.quantity_mantissa)
-            / 10i128.pow((-intent.quantity_exponent) as u32);
+        let notional_mantissa =
+            (price * intent.quantity_mantissa) / 10i128.pow((-intent.quantity_exponent) as u32);
 
         // Step 1: Budget check
         self.budget.check_order(
@@ -706,8 +706,8 @@ impl<B: BudgetInterface, W: WalInterface> LiveExecutionEngine<B, W> {
             .ok_or_else(|| ExecutionError::OrderNotFound(client_order_id.0.clone()))?;
 
         // Calculate fill notional
-        let fill_notional = (fill_price_mantissa * fill_quantity_mantissa)
-            / 10i128.pow((-exponent) as u32);
+        let fill_notional =
+            (fill_price_mantissa * fill_quantity_mantissa) / 10i128.pow((-exponent) as u32);
 
         // Commit fill capital
         let commitment_delta_id = self.budget.commit_fill(
@@ -849,7 +849,10 @@ impl<B: BudgetInterface, W: WalInterface> LiveExecutionEngine<B, W> {
     }
 
     /// Get order by exchange order ID.
-    pub fn get_order_by_exchange_id(&self, exchange_order_id: &ExchangeOrderId) -> Option<&LiveOrder> {
+    pub fn get_order_by_exchange_id(
+        &self,
+        exchange_order_id: &ExchangeOrderId,
+    ) -> Option<&LiveOrder> {
         self.exchange_to_client_id
             .get(exchange_order_id)
             .and_then(|coid| self.orders_by_client_id.get(coid))
@@ -892,9 +895,9 @@ mod tests {
                 "BTCUSDT",
                 ExecutionSide::Buy,
                 ExecutionOrderType::Limit,
-                100_000_000,  // 1 BTC
+                100_000_000, // 1 BTC
                 -8,
-                Some(50000_00000000),  // $50,000
+                Some(50000_00000000), // $50,000
                 -8,
                 50000_00000000,
                 "decision_001",
@@ -930,7 +933,9 @@ mod tests {
             )
             .unwrap();
 
-        let submit = engine.submit_order(&intent, 1234567891_000_000_000).unwrap();
+        let submit = engine
+            .submit_order(&intent, 1234567891_000_000_000)
+            .unwrap();
 
         assert_eq!(submit.intent_id, intent.intent_id);
         assert_eq!(submit.state, LiveOrderState::Submitted);
@@ -963,7 +968,9 @@ mod tests {
             )
             .unwrap();
 
-        let submit = engine.submit_order(&intent, 1234567891_000_000_000).unwrap();
+        let submit = engine
+            .submit_order(&intent, 1234567891_000_000_000)
+            .unwrap();
 
         let ack = engine
             .process_ack(
@@ -993,7 +1000,7 @@ mod tests {
                 "BTCUSDT",
                 ExecutionSide::Buy,
                 ExecutionOrderType::Limit,
-                100_000_000,  // 1 BTC
+                100_000_000, // 1 BTC
                 -8,
                 Some(50000_00000000),
                 -8,
@@ -1003,7 +1010,9 @@ mod tests {
             )
             .unwrap();
 
-        let submit = engine.submit_order(&intent, 1234567891_000_000_000).unwrap();
+        let submit = engine
+            .submit_order(&intent, 1234567891_000_000_000)
+            .unwrap();
 
         engine
             .process_ack(
@@ -1021,9 +1030,9 @@ mod tests {
                 &ExchangeOrderId::new("EX_ORDER_001"),
                 "FILL_001",
                 50000_00000000,
-                50_000_000,  // 0.5 BTC
+                50_000_000, // 0.5 BTC
                 -8,
-                25_000_000,  // Commission
+                25_000_000, // Commission
                 -8,
                 "BNB",
                 1234567893_000_000_000,
@@ -1040,7 +1049,7 @@ mod tests {
                 &ExchangeOrderId::new("EX_ORDER_001"),
                 "FILL_002",
                 50000_00000000,
-                50_000_000,  // 0.5 BTC
+                50_000_000, // 0.5 BTC
                 -8,
                 25_000_000,
                 -8,
@@ -1074,7 +1083,9 @@ mod tests {
             )
             .unwrap();
 
-        let submit = engine.submit_order(&intent, 1234567891_000_000_000).unwrap();
+        let submit = engine
+            .submit_order(&intent, 1234567891_000_000_000)
+            .unwrap();
 
         let reject = engine
             .process_reject(
@@ -1116,7 +1127,9 @@ mod tests {
             )
             .unwrap();
 
-        let submit = engine.submit_order(&intent, 1234567891_000_000_000).unwrap();
+        let submit = engine
+            .submit_order(&intent, 1234567891_000_000_000)
+            .unwrap();
 
         engine
             .process_ack(
@@ -1163,7 +1176,9 @@ mod tests {
             )
             .unwrap();
 
-        let submit = engine.submit_order(&intent, 1234567891_000_000_000).unwrap();
+        let submit = engine
+            .submit_order(&intent, 1234567891_000_000_000)
+            .unwrap();
 
         // First ack succeeds
         engine
@@ -1219,7 +1234,9 @@ mod tests {
             )
             .unwrap();
 
-        engine.submit_order(&intent, 1234567891_000_000_000).unwrap();
+        engine
+            .submit_order(&intent, 1234567891_000_000_000)
+            .unwrap();
 
         assert_eq!(engine.active_order_count(), 1);
         assert_eq!(engine.total_order_count(), 1);

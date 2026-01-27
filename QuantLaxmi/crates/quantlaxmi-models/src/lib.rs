@@ -56,10 +56,18 @@ pub use tournament::{
 // Execution events for live trading lifecycle (Phase 14.2)
 pub mod execution_events;
 pub use execution_events::{
-    CancelSource, ClientOrderId, ExchangeOrderId, ExecutionOrderType, ExecutionSide,
-    FillId, FixedPointValue, IdempotencyKey, IntentId, LiveOrderState, OrderAckEvent,
-    OrderCancelEvent, OrderFillEvent, OrderIntentEvent, OrderRejectEvent, OrderSubmitEvent,
-    PositionCloseEvent, EXECUTION_EVENTS_SCHEMA_VERSION,
+    CancelSource, ClientOrderId, EXECUTION_EVENTS_SCHEMA_VERSION, ExchangeOrderId,
+    ExecutionOrderType, ExecutionSide, FillId, FixedPointValue, IdempotencyKey, IntentId,
+    LiveOrderState, OrderAckEvent, OrderCancelEvent, OrderFillEvent, OrderIntentEvent,
+    OrderRejectEvent, OrderSubmitEvent, PositionCloseEvent,
+};
+
+// Position events for position lifecycle (Phase 14.3)
+pub mod position_events;
+pub use position_events::{
+    POSITION_EVENTS_SCHEMA_VERSION, PositionClosedEvent, PositionEventKind, PositionFlipEvent,
+    PositionId, PositionIncreaseEvent, PositionKey, PositionOpenEvent, PositionReduceEvent,
+    PositionSide, PositionVenue, SnapshotId as PositionSnapshotId,
 };
 
 /// Market data event from exchange or data feed.
