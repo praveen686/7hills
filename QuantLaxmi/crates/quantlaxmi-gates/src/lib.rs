@@ -31,6 +31,7 @@ pub mod g1_replay_parity;
 pub mod g2_backtest_correctness;
 pub mod g3_robustness;
 pub mod g4_deployability;
+pub mod mtm_drawdown;
 pub mod portfolio_selector;
 pub mod position_keeper;
 pub mod promotion;
@@ -61,6 +62,12 @@ pub use g1_replay_parity::{G1Config, G1ReplayParity};
 pub use g2_backtest_correctness::{G2BacktestCorrectness, G2Config};
 pub use g3_robustness::{G3Config, G3Robustness};
 pub use g4_deployability::{G4Config, G4Deployability};
+pub use mtm_drawdown::{
+    DRAWDOWN_SNAPSHOT_SCHEMA_VERSION, DrawdownSnapshot, DrawdownSnapshotId,
+    EQUITY_POLICY_SCHEMA_VERSION, EquityPolicy, EquityViolationType, MTM_SNAPSHOT_SCHEMA_VERSION,
+    MtmEvaluator, MtmMetrics, MtmSnapshot, MtmSnapshotId, PositionValuation, PricePoint,
+    PriceSource,
+};
 pub use portfolio_selector::{
     BucketSelectionResult, IntentId, OrderingRule, PORTFOLIO_INTENT_SCHEMA, PortfolioIntent,
     PortfolioPolicy, PortfolioRejection, PortfolioSelectionResult, PortfolioSelector,
