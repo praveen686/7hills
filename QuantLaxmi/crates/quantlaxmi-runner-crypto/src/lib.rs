@@ -21,6 +21,7 @@ pub mod binance_capture;
 pub mod binance_exchange_info;
 pub mod binance_funding_capture;
 pub mod binance_perp_capture;
+pub mod binance_perp_execution;
 pub mod binance_perp_session;
 pub mod binance_sbe_depth_capture;
 pub mod binance_trades_capture;

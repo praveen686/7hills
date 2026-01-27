@@ -53,6 +53,15 @@ pub use tournament::{
     generate_run_key, generate_tournament_id, is_meaningful_run,
 };
 
+// Execution events for live trading lifecycle (Phase 14.2)
+pub mod execution_events;
+pub use execution_events::{
+    CancelSource, ClientOrderId, ExchangeOrderId, ExecutionOrderType, ExecutionSide,
+    FillId, FixedPointValue, IdempotencyKey, IntentId, LiveOrderState, OrderAckEvent,
+    OrderCancelEvent, OrderFillEvent, OrderIntentEvent, OrderRejectEvent, OrderSubmitEvent,
+    PositionCloseEvent, EXECUTION_EVENTS_SCHEMA_VERSION,
+};
+
 /// Market data event from exchange or data feed.
 ///
 /// # Description

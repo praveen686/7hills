@@ -3,7 +3,7 @@
 
 **Status:** Operational roadmap for implementation sequencing
 **Last Updated:** 2026-01-27
-**Current Phase:** 14.1 Complete → Phase 14.2 Next
+**Current Phase:** 14.2 baseline_v1 Complete → Phase 14.2b Next
 
 ---
 
@@ -238,7 +238,30 @@
 - ❌ No fill processing from venues
 - ❌ No PnL accounting
 
-### Phase 14.2: Paper Execution (NEXT)
+### Phase 14.2 baseline_v1: Live Execution Binding (COMPLETE)
+
+**Question:** "How do budgets become executed trades with deterministic audit trail?"
+
+**Deliverables:**
+- ✅ `OrderIntentEvent` — strategy wants to trade (entry point)
+- ✅ `OrderSubmitEvent` — order sent to exchange (budget reserved)
+- ✅ `OrderAckEvent` — exchange acknowledged order
+- ✅ `OrderRejectEvent` — exchange rejected order (budget rolled back)
+- ✅ `OrderFillEvent` — partial/full fill (budget committed)
+- ✅ `OrderCancelEvent` — order cancelled (remaining released)
+- ✅ `PositionCloseEvent` — position closed (capital released)
+- ✅ `LiveExecutionEngine` — order lifecycle management with budget integration
+- ✅ `validate-execution-session` CLI — validates WAL invariants
+
+**Tests:** 16 tests covering all scenarios
+
+**What This Phase Does NOT Do:**
+- ❌ No actual venue connections (stubbed interfaces)
+- ❌ No WebSocket streaming (stubbed)
+- ❌ No real order submission (stubbed)
+- ❌ No PnL accounting (Phase 14.3+)
+
+### Phase 14.2b: Paper Execution (NEXT)
 
 **Question:** "How do budgets become simulated trades?"
 
@@ -296,8 +319,11 @@ Data ─────────────────────────
       │  [COMPLETE]                                                            │
       │  → Capital Eligibility → Buckets → Selector → Allocation → Budget     │
       │                                                                        │
+      │  [COMPLETE]                                                            │
+      │  → Live Execution Binding (baseline_v1)                                │
+      │                                                                        │
       │  [FUTURE]                                                              │
-      │  → Paper Execution → Live Execution → Adaptive Intelligence            │
+      │  → Paper Execution → Venue Connections → Adaptive Intelligence         │
       └────────────────────────────────────────────────────────────────────────┘
 ```
 

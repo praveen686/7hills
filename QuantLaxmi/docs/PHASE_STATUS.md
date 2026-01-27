@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-27
-**Current Phase:** 14.1 Complete
+**Current Phase:** 14.2 baseline_v1 Complete
 
 ---
 
@@ -23,6 +23,7 @@
 | 13.2b | Portfolio Selector | ✅ Complete | 2026-01-27 |
 | 13.3 | Capital Allocation | ✅ Complete | 2026-01-27 |
 | 14.1 | Execution Budget | ✅ Complete | 2026-01-27 |
+| 14.2 baseline_v1 | Live Execution Binding | ✅ Complete | 2026-01-27 |
 
 ---
 
@@ -122,10 +123,10 @@ pub struct PromotionDecision {
 | Crate | Tests | Status |
 |-------|-------|--------|
 | quantlaxmi-gates | 87 | ✅ All passing |
-| quantlaxmi-models | 57 | ✅ All passing |
-| quantlaxmi-runner-crypto | 52 | ✅ All passing |
+| quantlaxmi-models | 64 | ✅ All passing |
+| quantlaxmi-runner-crypto | 61 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
-| **Workspace Total** | 310+ | ✅ All passing |
+| **Workspace Total** | 331+ | ✅ All passing |
 
 ---
 
@@ -214,11 +215,54 @@ pub struct PromotionDecision {
 - ❌ No fill processing from venues
 - ❌ No PnL accounting
 
+### Phase 14.2 baseline_v1: Live Execution Binding (COMPLETE)
+
+**Question Answered:** "How do budgets become executed trades with deterministic audit trail?"
+
+**Deliverables:**
+- `crates/quantlaxmi-models/src/execution_events.rs` — Canonical execution event types
+- `crates/quantlaxmi-runner-crypto/src/binance_perp_execution.rs` — Live execution engine
+- `crates/quantlaxmi-runner-crypto/src/bin/validate_execution_session.rs` — Validator CLI
+
+**Canonical Events:**
+- `OrderIntentEvent` — Strategy wants to trade (entry point)
+- `OrderSubmitEvent` — Order sent to exchange (budget reserved)
+- `OrderAckEvent` — Exchange acknowledged order
+- `OrderRejectEvent` — Exchange rejected order (budget rolled back)
+- `OrderFillEvent` — Partial/full fill (budget committed)
+- `OrderCancelEvent` — Order cancelled (remaining released)
+- `PositionCloseEvent` — Position closed (capital released)
+
+**Key Types:**
+- `IntentId` — Derived deterministically (SHA-256 from strategy+bucket+ts+seq)
+- `ClientOrderId` — Derived deterministically (truncated to 32 chars)
+- `FillId` — Derived deterministically from exchange fill ID
+- `IdempotencyKey` — Prevents duplicate processing of exchange events
+- `LiveOrderState` — State machine enum for order lifecycle
+- `LiveExecutionEngine` — Order lifecycle management with budget integration
+
+**Tests:** 16 tests covering all execution scenarios
+
+**Core Invariants Enforced:**
+1. No order leaves without budget check + reservation delta
+2. Every exchange event reconciles budget ledger with WAL-bound artifacts
+3. Rollback on failure is deterministic
+4. Idempotent processing of exchange events (no double-reserve/commit)
+5. All IDs derived deterministically (SHA-256, no UUIDs)
+6. All events have deterministic digests
+7. State machine transitions are explicit and auditable
+
+**What This Phase Does NOT Do:**
+- ❌ No actual venue connections (stubbed interfaces)
+- ❌ No WebSocket streaming (stubbed)
+- ❌ No real order submission (stubbed)
+- ❌ No PnL accounting (Phase 14.3+)
+
 ---
 
 ## Next Phase: Phase 14.2+ (Future)
 
-**Phase 14.2: Paper Execution**
+**Phase 14.2b: Paper Execution**
 - Paper exchange simulation
 - Fill generation
 - PnL tracking in paper mode
@@ -263,6 +307,18 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | Reserved vs committed capital split | Phase 14.1 |
 | Rate limit floor-division windowing | Phase 14.1 |
 | `BudgetSnapshot` digest computation | Phase 14.1 |
+| `IntentId` derivation (deterministic) | Phase 14.2 |
+| `ClientOrderId` derivation (deterministic) | Phase 14.2 |
+| `FillId` derivation (deterministic) | Phase 14.2 |
+| `IdempotencyKey` derivation | Phase 14.2 |
+| `LiveOrderState` state machine | Phase 14.2 |
+| `OrderIntentEvent` digest computation | Phase 14.2 |
+| `OrderSubmitEvent` digest computation | Phase 14.2 |
+| `OrderAckEvent` digest computation | Phase 14.2 |
+| `OrderRejectEvent` digest computation | Phase 14.2 |
+| `OrderFillEvent` digest computation | Phase 14.2 |
+| `OrderCancelEvent` digest computation | Phase 14.2 |
+| `PositionCloseEvent` digest computation | Phase 14.2 |
 
 ---
 

@@ -16,6 +16,10 @@ path = "src/bin/run_funding_arb.rs"
 name = "score_funding_arb"
 path = "src/bin/score_funding_arb.rs"
 
+[[bin]]
+name = "validate-execution-session"
+path = "src/bin/validate_execution_session.rs"
+
 [lib]
 path = "src/lib.rs"
 
@@ -76,6 +80,7 @@ url = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 # Environment
 dotenv = { workspace = true }
