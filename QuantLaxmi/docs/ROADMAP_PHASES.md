@@ -3,7 +3,7 @@
 
 **Status:** Operational roadmap for implementation sequencing
 **Last Updated:** 2026-01-27
-**Current Phase:** 13.2a Complete → 13.2b Next
+**Current Phase:** 13.2b Complete → 13.3 Next
 
 ---
 
@@ -172,26 +172,27 @@
 - ❌ No optimizer hooks
 - ❌ No rebalancing
 
-### Phase 13.2b: Portfolio Selector (NEXT)
+### Phase 13.2b: Portfolio Selector (COMPLETE)
 
-**Question:** "Which eligible strategies may draw from which buckets, and in what priority order?"
+**Question:** "Given governed capital buckets and eligible strategies, what is the admissible portfolio structure?"
 
-**Will Consume:**
-- `CapitalEligibility`
-- `CapitalBucket`
-- `BucketEligibilityBinding`
+**Deliverables:**
+- ✅ `PortfolioIntent` — per-bucket ordering of eligible strategies
+- ✅ `StrategyIntent` — priority-ordered strategy with digests
+- ✅ `PortfolioPolicy` — configurable ordering rules
+- ✅ `OrderingRule` enum (EligibilityTier, AlphaScoreDescending, etc.)
+- ✅ `PortfolioRejection` — audit artifact for rejected strategies
+- ✅ `PortfolioSelector` — policy-driven selection engine
+- ✅ `StrategyOrderingMetrics` — metrics for ordering decisions
 
-**Will Produce:**
-- Allocation intents (priority ordering)
-- Still no capital quantities
+**Tests:** 9 tests covering all portfolio selection scenarios
 
-**Scope:**
-- Multiple eligible strategies compete
-- Bucket constraints respected
-- Priority ordering determined
-- No sizing math
+**What This Phase Does NOT Do:**
+- ❌ No capital quantities (policy-only)
+- ❌ No position sizing
+- ❌ No rebalancing math
 
-### Phase 13.3: Capital Allocation (PENDING)
+### Phase 13.3: Capital Allocation (NEXT)
 
 **Question:** "How much capital does each strategy receive?"
 
@@ -250,10 +251,10 @@ Data ─────────────────────────
       │  Capture → WAL → Replay → Gates → Tournament → Paper → Promotion      │
       │                                                                        │
       │  [COMPLETE]                                                            │
-      │  → Capital Eligibility → Capital Buckets                               │
+      │  → Capital Eligibility → Capital Buckets → Portfolio Selector          │
       │                                                                        │
       │  [NEXT]                                                                │
-      │  → Portfolio Selector → Capital Allocation                             │
+      │  → Capital Allocation                                                  │
       │                                                                        │
       │  [FUTURE]                                                              │
       │  → Live Execution → Adaptive Intelligence                              │

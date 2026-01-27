@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-27
-**Current Phase:** 13.2a Complete, 13.2b Pending
+**Current Phase:** 13.2b Complete, 13.3 Pending
 
 ---
 
@@ -20,7 +20,7 @@
 | 12.3 | Promotion Tightening | ✅ Complete | 2026-01-27 |
 | 13.1 | Capital Eligibility | ✅ Complete | 2026-01-27 |
 | 13.2a | Capital Buckets | ✅ Complete | 2026-01-27 |
-| 13.2b | Portfolio Selector | ⏳ Pending | - |
+| 13.2b | Portfolio Selector | ✅ Complete | 2026-01-27 |
 | 13.3 | Capital Allocation | ⏳ Pending | - |
 
 ---
@@ -120,32 +120,59 @@ pub struct PromotionDecision {
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| quantlaxmi-gates | 54 | ✅ All passing |
+| quantlaxmi-gates | 63 | ✅ All passing |
 | quantlaxmi-models | 57 | ✅ All passing |
 | quantlaxmi-runner-crypto | 52 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
-| **Workspace Total** | 280+ | ✅ All passing |
+| **Workspace Total** | 290+ | ✅ All passing |
 
 ---
 
-## Next Phase: 13.2b Portfolio Selector
+### Phase 13.2b: Portfolio Selector
+
+**Question Answered:** "Given governed capital buckets and eligible strategies, what is the admissible portfolio structure?"
+
+**Deliverables:**
+- `crates/quantlaxmi-gates/src/portfolio_selector.rs`
+- `IntentId` — unique intent identifier
+- `PortfolioIntent` — per-bucket ordering of eligible strategies
+- `StrategyIntent` — priority-ordered strategy with digests
+- `PortfolioPolicy` — configurable ordering rules and limits
+- `OrderingRule` enum (EligibilityTier, AlphaScoreDescending, DrawdownAscending, etc.)
+- `PortfolioRejection` — audit artifact for rejected strategies
+- `PortfolioSelector` — policy-driven selection engine
+- `StrategyOrderingMetrics` — metrics for ordering decisions
+
+**Tests:** 9 tests covering all portfolio selection scenarios
+
+**Core Invariants Enforced:**
+1. Read-only from bucket snapshots (no mutations)
+2. No capital quantities (policy-only priority ordering)
+3. Bucket constraints absolute (max_concurrent_strategies)
+4. All decisions produce deterministic SHA-256 digests
+5. Same inputs → identical digest
+
+---
+
+## Next Phase: 13.3 Capital Allocation
 
 **Status:** Specification pending
 
 **Will Consume:**
-- `CapitalEligibility`
-- `CapitalBucket`
-- `BucketEligibilityBinding`
+- `PortfolioIntent`
+- `StrategyIntent`
+- `BucketSnapshot`
 
-**Will Produce:**
-- Allocation intents (priority ordering)
-- No capital quantities (that's Phase 13.3)
+**Will Introduce:**
+- Capital math
+- Rebalancing logic
+- Risk budgeting
+- Execution engines receive numbers
 
 **Scope:**
-- Multiple eligible strategies compete
-- Bucket constraints respected
-- Priority ordering determined
-- Still no sizing math
+- Translate priority ordering into capital quantities
+- Risk budget enforcement
+- Position sizing calculations
 
 ---
 
@@ -163,6 +190,9 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | `BucketSnapshot` digest computation | Phase 13.2a |
 | Venue isolation enforcement | Phase 13.2a |
 | Policy preset meanings | Phase 13.1 |
+| `PortfolioIntent` digest computation | Phase 13.2b |
+| `OrderingRule` semantics | Phase 13.2b |
+| Priority ordering (no quantities) | Phase 13.2b |
 
 ---
 
