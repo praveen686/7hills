@@ -1145,7 +1145,7 @@ async fn run_paper_mode(
 
     // Start web server
     let (web_tx, _) = tokio::sync::broadcast::channel(100);
-    let web_state = Arc::new(ServerState { tx: web_tx.clone() });
+    let web_state = Arc::new(ServerState::new(web_tx.clone()));
     tokio::spawn(start_server(web_state, 8081));
 
     info!("Paper trading active. Press Ctrl+C to stop.");

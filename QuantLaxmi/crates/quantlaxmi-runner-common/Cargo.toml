@@ -11,6 +11,7 @@ quantlaxmi-models = { path = "../quantlaxmi-models" }
 quantlaxmi-data = { path = "../quantlaxmi-data" }
 quantlaxmi-executor = { path = "../quantlaxmi-executor" }
 quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-gates = { path = "../quantlaxmi-gates" }
 
 # Async runtime
 tokio = { workspace = true }

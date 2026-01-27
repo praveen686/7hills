@@ -19,6 +19,7 @@
 pub mod artifact;
 pub mod circuit_breakers;
 pub mod config;
+pub mod control_view;
 pub mod manifest_io;
 pub mod report;
 pub mod run_manifest;
@@ -31,6 +32,10 @@ pub use circuit_breakers::{
     CircuitBreakerStatus, LatencyCircuitBreaker, RateLimiter, TradingCircuitBreakers,
 };
 pub use config::{ExecutionInfo, ModeInfo, RiskInfo, RunnerConfig, StrategyConfig};
+pub use control_view::{
+    CONTROL_VIEW_SCHEMA_VERSION, ExecutionControlView, OperatorOutcome, OperatorRequest,
+    OperatorResponse, format_kill_switch_scope, format_session_state, format_transition_reason,
+};
 pub use run_manifest::{
     InputBinding, OutputBinding, RunManifest, WalBinding, bind_json_file, config_hash,
     git_commit_string, hash_file, persist_run_manifest_atomic,
@@ -40,7 +45,11 @@ pub use session_manifest::{
     UnderlyingEntry, load_session_manifest, load_universe_manifest_bytes,
     persist_session_manifest_atomic, session_manifest_exists,
 };
-pub use web_server::{ServerState, WebMessage, start_server};
+pub use tui::{
+    render_control_summary_panel, render_kill_switch_panel, render_override_panel,
+    render_session_panel,
+};
+pub use web_server::{ServerState, StatusResponse, WebMessage, start_server};
 
 use quantlaxmi_core::ExecutionMode;
 use quantlaxmi_core::{MetricsConfig, TradingMetrics};

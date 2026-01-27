@@ -951,7 +951,7 @@ impl Default for OverridePolicy {
         Self {
             min_reason_length: 10,
             require_2fa: vec![OverrideType::EmergencyFlatten],
-            allowed_operators: vec![], // Empty = all allowed
+            allowed_operators: vec![],   // Empty = all allowed
             cooldown_ns: 60_000_000_000, // 60 seconds
         }
     }
@@ -1000,7 +1000,10 @@ pub enum OverrideError {
     CooldownActive { remaining_ns: i64 },
 
     #[error("Invalid state transition: {from} -> {to}")]
-    InvalidTransition { from: SessionState, to: SessionState },
+    InvalidTransition {
+        from: SessionState,
+        to: SessionState,
+    },
 
     #[error("2FA required for override type")]
     Requires2FA,
@@ -1478,15 +1481,8 @@ impl SessionController {
             let reason = SessionTransitionReason::RiskViolation {
                 violations: halt_violations,
             };
-            self.transition(
-                SessionState::Halted,
-                reason,
-                ts_ns,
-                risk_digest,
-                None,
-                None,
-            )
-            .ok()
+            self.transition(SessionState::Halted, reason, ts_ns, risk_digest, None, None)
+                .ok()
         } else {
             None
         }
@@ -1592,8 +1588,8 @@ impl SessionController {
             OverrideType::ClearHalt => SessionState::ReduceOnly, // Must go through ReduceOnly
             OverrideType::RestoreFull => SessionState::Active,
             OverrideType::EmergencyFlatten => SessionState::Halted, // Flatten starts from Halted
-            OverrideType::CancelAllOrders => self.state, // No state change
-            OverrideType::AdjustLimit { .. } => self.state, // No state change
+            OverrideType::CancelAllOrders => self.state,            // No state change
+            OverrideType::AdjustLimit { .. } => self.state,         // No state change
         };
 
         // Validate the transition
@@ -1779,7 +1775,10 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(result, Err(OverrideError::InvalidTransition { .. })));
+        assert!(matches!(
+            result,
+            Err(OverrideError::InvalidTransition { .. })
+        ));
 
         // Go to Halted first
         ctrl.transition(

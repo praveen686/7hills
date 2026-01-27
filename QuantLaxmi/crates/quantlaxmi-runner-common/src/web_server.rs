@@ -6,9 +6,16 @@
 //! Provides a WebSocket server that broadcasts trading metrics, status updates,
 //! and order logs to connected clients. Supports bidirectional communication
 //! for remote control of the trading system.
+//!
+//! ## Phase 17A Extensions
+//! - `ExecutionControlView` streaming for Phase 16 control plane observability
+//! - `OperatorRequest`/`OperatorResponse` for typed operator commands
+//! - `/status` endpoint for one-shot JSON status
 
+use crate::circuit_breakers::CircuitBreakerStatus;
+use crate::control_view::{ExecutionControlView, OperatorRequest, OperatorResponse};
 use axum::{
-    Router,
+    Json, Router,
     extract::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -17,9 +24,10 @@ use axum::{
     routing::get,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
+use quantlaxmi_gates::{KillSwitchEvent, ManualOverrideEvent, SessionTransitionEvent};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{RwLock, broadcast};
 use tracing::{debug, info};
 
 /// WebSocket message types for client communication
@@ -115,6 +123,28 @@ pub enum WebMessage {
         tick_count: u64,
         events_per_sec: f64,
     },
+
+    // === Phase 17A: Execution Control Plane Observability ===
+    /// Full execution control view (sent on connect + state changes).
+    ExecutionControlView { view: ExecutionControlView },
+
+    /// Session state transition event (real-time).
+    SessionTransition { event: SessionTransitionEvent },
+
+    /// Kill-switch activation/deactivation event.
+    KillSwitchEvent { event: KillSwitchEvent },
+
+    /// Manual override event.
+    ManualOverrideEvent { event: ManualOverrideEvent },
+
+    /// Operator request (inbound from client).
+    OperatorRequest {
+        correlation_id: Option<String>,
+        request: OperatorRequest,
+    },
+
+    /// Operator response (outbound to client).
+    OperatorResponse { response: OperatorResponse },
 }
 
 impl WebMessage {
@@ -150,10 +180,108 @@ impl WebMessage {
     }
 }
 
-/// Shared server state for WebSocket broadcasting
+// =============================================================================
+// Status Response (Phase 17A)
+// =============================================================================
+
+/// One-shot status response for /status endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusResponse {
+    /// Timestamp in nanoseconds.
+    pub ts_ns: i64,
+
+    /// Trading metrics snapshot (from quantlaxmi_core).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<quantlaxmi_core::MetricsSnapshot>,
+
+    /// Circuit breaker status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circuit_breakers: Option<CircuitBreakerStatus>,
+
+    /// Execution control view (Phase 16 control plane).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<ExecutionControlView>,
+}
+
+impl StatusResponse {
+    /// Create a minimal status response with just timestamp.
+    pub fn minimal(ts_ns: i64) -> Self {
+        Self {
+            ts_ns,
+            metrics: None,
+            circuit_breakers: None,
+            control: None,
+        }
+    }
+}
+
+// =============================================================================
+// Server State
+// =============================================================================
+
+/// Shared server state for WebSocket broadcasting.
 pub struct ServerState {
-    /// Broadcast channel for sending messages to all connected clients
+    /// Broadcast channel for sending messages to all connected clients.
     pub tx: broadcast::Sender<WebMessage>,
+
+    /// Shared execution control view (read-only snapshot, updated by runner core).
+    pub control_view: Arc<RwLock<Option<ExecutionControlView>>>,
+
+    /// Shared metrics snapshot (updated by runner core).
+    pub metrics_snapshot: Arc<RwLock<Option<quantlaxmi_core::MetricsSnapshot>>>,
+
+    /// Shared circuit breaker status (updated by runner core).
+    pub circuit_breaker_status: Arc<RwLock<Option<CircuitBreakerStatus>>>,
+}
+
+impl ServerState {
+    /// Create a new server state with default empty values.
+    pub fn new(tx: broadcast::Sender<WebMessage>) -> Self {
+        Self {
+            tx,
+            control_view: Arc::new(RwLock::new(None)),
+            metrics_snapshot: Arc::new(RwLock::new(None)),
+            circuit_breaker_status: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Update the control view (called by runner core on state changes).
+    pub async fn update_control_view(&self, view: ExecutionControlView) {
+        *self.control_view.write().await = Some(view.clone());
+        // Broadcast to connected clients
+        let _ = self.tx.send(WebMessage::ExecutionControlView { view });
+    }
+
+    /// Broadcast a session transition event.
+    pub fn broadcast_transition(&self, event: SessionTransitionEvent) {
+        let _ = self.tx.send(WebMessage::SessionTransition { event });
+    }
+
+    /// Broadcast a kill-switch event.
+    pub fn broadcast_kill_switch(&self, event: KillSwitchEvent) {
+        let _ = self.tx.send(WebMessage::KillSwitchEvent { event });
+    }
+
+    /// Broadcast a manual override event.
+    pub fn broadcast_override(&self, event: ManualOverrideEvent) {
+        let _ = self.tx.send(WebMessage::ManualOverrideEvent { event });
+    }
+
+    /// Broadcast an operator response.
+    pub fn broadcast_response(&self, response: OperatorResponse) {
+        let _ = self.tx.send(WebMessage::OperatorResponse { response });
+    }
+
+    /// Get current status for /status endpoint.
+    pub async fn get_status(&self) -> StatusResponse {
+        let ts_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        StatusResponse {
+            ts_ns,
+            metrics: self.metrics_snapshot.read().await.clone(),
+            circuit_breakers: self.circuit_breaker_status.read().await.clone(),
+            control: self.control_view.read().await.clone(),
+        }
+    }
 }
 
 /// Start the WebSocket server
@@ -162,6 +290,7 @@ pub async fn start_server(state: Arc<ServerState>, port: u16) {
         .route("/ws", get(ws_handler))
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics_handler))
+        .route("/status", get(status_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
@@ -174,6 +303,7 @@ pub async fn start_server(state: Arc<ServerState>, port: u16) {
     info!("  WebSocket: ws://localhost:{}/ws", port);
     info!("  Health:    http://localhost:{}/health", port);
     info!("  Metrics:   http://localhost:{}/metrics", port);
+    info!("  Status:    http://localhost:{}/status", port);
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -194,6 +324,12 @@ async fn metrics_handler() -> impl IntoResponse {
         "info": "Use Prometheus exporter on METRICS_PORT for full metrics",
         "hint": "Default: http://localhost:9000/metrics"
     }))
+}
+
+/// Status endpoint (Phase 17A) - One-shot JSON status.
+async fn status_handler(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
+    let status = state.get_status().await;
+    Json(status)
 }
 
 /// WebSocket upgrade handler

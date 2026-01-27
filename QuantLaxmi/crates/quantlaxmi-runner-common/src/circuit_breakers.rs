@@ -552,7 +552,7 @@ impl TradingCircuitBreakers {
 }
 
 /// Detailed circuit breaker status for display
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CircuitBreakerStatus {
     pub is_tripped: bool,
     pub kill_switch_active: bool,

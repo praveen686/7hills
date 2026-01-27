@@ -81,7 +81,9 @@ impl IntentType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum BlockReason {
     /// Equity violations triggered HALT (discriminant 0).
-    EquityHalt { violations: Vec<EquityViolationType> },
+    EquityHalt {
+        violations: Vec<EquityViolationType>,
+    },
     /// Risk violations triggered REJECT/HALT (discriminant 1).
     RiskReject { violations: Vec<ViolationType> },
     /// Reduce-only mode active but intent is increase (discriminant 2).
@@ -611,7 +613,7 @@ impl ShapingPolicy {
             enable_equity_proportional_cap: true,
             max_equity_pct_per_intent_mantissa: 1000, // 10% of equity per intent
             enable_drawdown_recovery_cap: true,
-            recovery_min_scale_mantissa: 5000,        // 50% at max DD
+            recovery_min_scale_mantissa: 5000, // 50% at max DD
             recovery_max_drawdown_pct_mantissa: 1000, // At 10% DD
             pct_exponent: -4,
             fingerprint: String::new(),
@@ -632,7 +634,7 @@ impl ShapingPolicy {
             enable_equity_proportional_cap: false,
             max_equity_pct_per_intent_mantissa: 2000, // 20% (disabled anyway)
             enable_drawdown_recovery_cap: false,
-            recovery_min_scale_mantissa: 7500,        // 75% at max DD (disabled)
+            recovery_min_scale_mantissa: 7500, // 75% at max DD (disabled)
             recovery_max_drawdown_pct_mantissa: 2000, // At 20% DD
             pct_exponent: -4,
             fingerprint: String::new(),
@@ -689,10 +691,16 @@ impl IntentShaper {
 
         // Rule 1: Block precedence
         // Check for halt violations
-        let halt_equity_violations: Vec<_> =
-            equity_violations.iter().filter(|v| v.is_halt()).cloned().collect();
-        let halt_risk_violations: Vec<_> =
-            risk_violations.iter().filter(|v| v.is_halt()).cloned().collect();
+        let halt_equity_violations: Vec<_> = equity_violations
+            .iter()
+            .filter(|v| v.is_halt())
+            .cloned()
+            .collect();
+        let halt_risk_violations: Vec<_> = risk_violations
+            .iter()
+            .filter(|v| v.is_halt())
+            .cloned()
+            .collect();
 
         if !halt_equity_violations.is_empty() {
             return self.build_transform(
@@ -739,9 +747,7 @@ impl IntentShaper {
         }
 
         // Rule 2: Reduce-only mode
-        if let Some(restrict_reason) =
-            self.is_reduce_only_mode(drawdown_snapshot, mtm_snapshot)
-        {
+        if let Some(restrict_reason) = self.is_reduce_only_mode(drawdown_snapshot, mtm_snapshot) {
             if intent_type.is_increase() {
                 return self.build_transform(
                     transform_id,
@@ -918,8 +924,7 @@ impl IntentShaper {
 
         // max_notional = floor(equity * max_leverage / 10000)
         // leverage is exp -4, so divide by 10000
-        let max_notional =
-            (equity * self.policy.max_leverage_mantissa as i128) / 10000;
+        let max_notional = (equity * self.policy.max_leverage_mantissa as i128) / 10000;
         let current_notional = mtm.metrics.total_notional_mantissa;
         let headroom = (max_notional - current_notional).max(0);
 
@@ -1044,12 +1049,10 @@ impl IntentShaper {
 mod tests {
     use super::*;
     use crate::mtm_drawdown::{
-        DrawdownSnapshotId, MtmMetrics, MtmSnapshotId, DRAWDOWN_SNAPSHOT_SCHEMA_VERSION,
-        MTM_SNAPSHOT_SCHEMA_VERSION,
+        DRAWDOWN_SNAPSHOT_SCHEMA_VERSION, DrawdownSnapshotId, MTM_SNAPSHOT_SCHEMA_VERSION,
+        MtmMetrics, MtmSnapshotId,
     };
-    use crate::risk_exposure::{
-        ExposureMetrics, RiskSnapshotId, RISK_SNAPSHOT_SCHEMA_VERSION,
-    };
+    use crate::risk_exposure::{ExposureMetrics, RISK_SNAPSHOT_SCHEMA_VERSION, RiskSnapshotId};
     use std::collections::BTreeMap;
 
     fn create_healthy_mtm() -> MtmSnapshot {

@@ -60,8 +60,8 @@ pub use execution_budget::{
     OrderConstraints, RateLimitTracker,
 };
 pub use execution_session::{
-    CircuitBreakerType, EMERGENCY_FLATTEN_SCHEMA_VERSION, EmergencyFlattenRequest,
-    EmergencyFlattenResult, EXECUTION_SESSION_SCHEMA_VERSION, FlattenOutcome, FlattenRequestId,
+    CircuitBreakerType, EMERGENCY_FLATTEN_SCHEMA_VERSION, EXECUTION_SESSION_SCHEMA_VERSION,
+    EmergencyFlattenRequest, EmergencyFlattenResult, FlattenOutcome, FlattenRequestId,
     FlattenResultId, FlattenScope, KILL_SWITCH_SCHEMA_VERSION, KillSwitchEvent, KillSwitchEventId,
     KillSwitchReason, KillSwitchRegistry, KillSwitchScope, MANUAL_OVERRIDE_SCHEMA_VERSION,
     ManualOverrideEvent, OverrideError, OverrideId, OverridePolicy, OverrideType,
