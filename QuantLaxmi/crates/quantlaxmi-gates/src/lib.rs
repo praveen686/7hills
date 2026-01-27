@@ -25,6 +25,7 @@
 pub mod capital_allocation;
 pub mod capital_buckets;
 pub mod capital_eligibility;
+pub mod execution_budget;
 pub mod g0_data_truth;
 pub mod g1_replay_parity;
 pub mod g2_backtest_correctness;
@@ -61,6 +62,11 @@ pub use portfolio_selector::{
 pub use promotion::{
     PROMOTION_DECISION_SCHEMA, PaperEvidence, PromotionCheck, PromotionDecision, PromotionPolicy,
     PromotionRequest, PromotionSource, PromotionValidator,
+};
+pub use execution_budget::{
+    BudgetDelta, BudgetError, BudgetId, BudgetManager, BudgetPolicy, BudgetSnapshot, BudgetStatus,
+    DeltaId, DeltaType, EXECUTION_BUDGET_SCHEMA, ExecutionBudget, OrderCheckResult,
+    OrderConstraints, RateLimitTracker,
 };
 
 use chrono::{DateTime, Utc};
