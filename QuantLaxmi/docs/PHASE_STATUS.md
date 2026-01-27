@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-27
-**Current Phase:** 13.2b Complete, 13.3 Pending
+**Current Phase:** 13.3 Complete, Phase 14 Pending
 
 ---
 
@@ -21,7 +21,7 @@
 | 13.1 | Capital Eligibility | ✅ Complete | 2026-01-27 |
 | 13.2a | Capital Buckets | ✅ Complete | 2026-01-27 |
 | 13.2b | Portfolio Selector | ✅ Complete | 2026-01-27 |
-| 13.3 | Capital Allocation | ⏳ Pending | - |
+| 13.3 | Capital Allocation | ✅ Complete | 2026-01-27 |
 
 ---
 
@@ -120,11 +120,11 @@ pub struct PromotionDecision {
 
 | Crate | Tests | Status |
 |-------|-------|--------|
-| quantlaxmi-gates | 63 | ✅ All passing |
+| quantlaxmi-gates | 76 | ✅ All passing |
 | quantlaxmi-models | 57 | ✅ All passing |
 | quantlaxmi-runner-crypto | 52 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
-| **Workspace Total** | 290+ | ✅ All passing |
+| **Workspace Total** | 300+ | ✅ All passing |
 
 ---
 
@@ -152,27 +152,47 @@ pub struct PromotionDecision {
 4. All decisions produce deterministic SHA-256 digests
 5. Same inputs → identical digest
 
+### Phase 13.3: Capital Allocation
+
+**Question Answered:** "How much capital does each strategy receive?"
+
+**Deliverables:**
+- `crates/quantlaxmi-gates/src/capital_allocation.rs`
+- `PlanId` — unique allocation plan identifier
+- `AllocationPolicy` — reserve ratio, min allocation, caps, skip rules
+- `AllocationMode` enum (EqualSplit, PriorityFill, ScoreProportional)
+- `StrategyAllocation` — assigned capital + reasons + skip tracking
+- `AllocationPlan` — per-bucket capital assignments with SHA-256 digest
+- `AllocationDecision` — audit artifact with validation checks
+- `AllocationCheck` — individual validation result
+- `RebalancePolicy` enum (FixedInterval, OnNewSnapshot, OnNewIntent)
+- `Allocator` — pure function allocation engine
+
+**Tests:** 13 tests covering all allocation scenarios
+
+**Core Invariants Enforced:**
+1. Allocation is pure function of inputs + policy (deterministic)
+2. No re-evaluation of eligibility (trusts prior digests)
+3. Bucket constraints absolute (never violated)
+4. Ordering respected (no skip unless policy allows)
+5. No hidden state (all params in AllocationPolicy)
+6. Audit artifacts first-class (deterministic SHA-256 digests)
+
 ---
 
-## Next Phase: 13.3 Capital Allocation
+## Next Phase: Phase 14 (Future)
 
 **Status:** Specification pending
 
-**Will Consume:**
-- `PortfolioIntent`
-- `StrategyIntent`
-- `BucketSnapshot`
+**Phase 14: Adaptive Intelligence**
+- EARNHFT Router (selects agent profile)
+- RL Agent (execution policy)
+- Q-Teacher (offline training)
 
-**Will Introduce:**
-- Capital math
-- Rebalancing logic
-- Risk budgeting
-- Execution engines receive numbers
-
-**Scope:**
-- Translate priority ordering into capital quantities
-- Risk budget enforcement
-- Position sizing calculations
+**Phase 15+: Multi-Venue Expansion**
+- Additional crypto venues
+- India options support
+- Cross-venue arbitrage
 
 ---
 
@@ -193,6 +213,10 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | `PortfolioIntent` digest computation | Phase 13.2b |
 | `OrderingRule` semantics | Phase 13.2b |
 | Priority ordering (no quantities) | Phase 13.2b |
+| `AllocationPlan` digest computation | Phase 13.3 |
+| `AllocationPolicy` fingerprint | Phase 13.3 |
+| Reserve ratio semantics | Phase 13.3 |
+| Skip/ordering enforcement | Phase 13.3 |
 
 ---
 

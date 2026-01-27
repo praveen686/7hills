@@ -3,7 +3,7 @@
 
 **Status:** Operational roadmap for implementation sequencing
 **Last Updated:** 2026-01-27
-**Current Phase:** 13.2b Complete → 13.3 Next
+**Current Phase:** 13.3 Complete → Phase 14 Next
 
 ---
 
@@ -192,15 +192,26 @@
 - ❌ No position sizing
 - ❌ No rebalancing math
 
-### Phase 13.3: Capital Allocation (NEXT)
+### Phase 13.3: Capital Allocation (COMPLETE)
 
 **Question:** "How much capital does each strategy receive?"
 
-**Will Introduce:**
-- Capital math
-- Rebalancing logic
-- Risk budgeting
-- Execution engines receive numbers
+**Deliverables:**
+- ✅ `AllocationPolicy` — reserve ratio, min allocation, caps, skip rules
+- ✅ `AllocationMode` enum (EqualSplit, PriorityFill, ScoreProportional)
+- ✅ `AllocationPlan` — per-bucket capital assignments
+- ✅ `StrategyAllocation` — assigned capital + reasons
+- ✅ `AllocationDecision` — audit artifact with validation checks
+- ✅ `RebalancePolicy` enum (scheduling policy only)
+- ✅ `Allocator` — pure function allocation engine
+
+**Tests:** 13 tests covering all allocation scenarios
+
+**What This Phase Does NOT Do:**
+- ❌ No trade sizing / order sizing
+- ❌ No execution logic
+- ❌ No PnL accounting
+- ❌ No market interaction
 
 ---
 
@@ -251,13 +262,10 @@ Data ─────────────────────────
       │  Capture → WAL → Replay → Gates → Tournament → Paper → Promotion      │
       │                                                                        │
       │  [COMPLETE]                                                            │
-      │  → Capital Eligibility → Capital Buckets → Portfolio Selector          │
-      │                                                                        │
-      │  [NEXT]                                                                │
-      │  → Capital Allocation                                                  │
+      │  → Capital Eligibility → Buckets → Selector → Allocation               │
       │                                                                        │
       │  [FUTURE]                                                              │
-      │  → Live Execution → Adaptive Intelligence                              │
+      │  → Live Execution → Adaptive Intelligence → Multi-Venue                │
       └────────────────────────────────────────────────────────────────────────┘
 ```
 
