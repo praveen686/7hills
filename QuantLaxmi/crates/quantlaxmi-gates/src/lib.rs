@@ -34,6 +34,7 @@ pub mod g4_deployability;
 pub mod portfolio_selector;
 pub mod position_keeper;
 pub mod promotion;
+pub mod risk_exposure;
 
 pub use capital_allocation::{
     ALLOCATION_PLAN_SCHEMA, AllocationCheck, AllocationDecision, AllocationError, AllocationMode,
@@ -73,6 +74,12 @@ pub use position_keeper::{
 pub use promotion::{
     PROMOTION_DECISION_SCHEMA, PaperEvidence, PromotionCheck, PromotionDecision, PromotionPolicy,
     PromotionRequest, PromotionSource, PromotionValidator,
+};
+pub use risk_exposure::{
+    BudgetView, ExposureMetrics, RISK_DECISION_SCHEMA_VERSION, RISK_POLICY_SCHEMA_VERSION,
+    RISK_SNAPSHOT_SCHEMA_VERSION, RiskDecision, RiskDecisionId, RiskDecisionScope,
+    RiskDecisionStatus, RiskError, RiskEvaluator, RiskPolicy, RiskSnapshot, RiskSnapshotId,
+    ViolationType, compute_notional, normalize_notional,
 };
 
 use chrono::{DateTime, Utc};

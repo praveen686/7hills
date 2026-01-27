@@ -320,7 +320,7 @@ impl PortfolioLedger {
     }
 
     /// Insert or update position.
-    fn upsert_position(&mut self, state: PositionState) {
+    pub(crate) fn upsert_position(&mut self, state: PositionState) {
         self.positions.insert(state.position_id.0.clone(), state);
     }
 

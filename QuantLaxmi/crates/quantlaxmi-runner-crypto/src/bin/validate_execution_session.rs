@@ -1,13 +1,18 @@
-//! # Validate Execution Session (Phase 14.2)
+//! # Validate Execution Session (Phase 14.2 + Phase 15.1)
 //!
 //! CLI validator for execution session WAL files.
 //!
-//! ## Invariants Verified
+//! ## Invariants Verified (Phase 14.2)
 //! 1. All IDs are deterministically derived
 //! 2. State machine transitions are valid
 //! 3. Budget deltas balance (reserved → committed/released)
 //! 4. No duplicate idempotency keys
 //! 5. All events have valid digests
+//!
+//! ## Risk Invariants (Phase 15.1 INV-R1/R2/R3)
+//! - INV-R1: Risk snapshot must be computed before any order decisions
+//! - INV-R2: Every order intent must have a corresponding risk decision logged
+//! - INV-R3: Risk violations must trigger proper rejection (no Reject/Halt without rejection)
 //!
 //! ## Usage
 //! ```bash
@@ -16,6 +21,10 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use quantlaxmi_gates::{
+    RISK_DECISION_SCHEMA_VERSION, RISK_SNAPSHOT_SCHEMA_VERSION, RiskDecision, RiskDecisionScope,
+    RiskDecisionStatus, RiskSnapshot,
+};
 use quantlaxmi_models::{
     EXECUTION_EVENTS_SCHEMA_VERSION, IdempotencyKey, IntentId, LiveOrderState, OrderAckEvent,
     OrderCancelEvent, OrderFillEvent, OrderIntentEvent, OrderRejectEvent, OrderSubmitEvent,
@@ -81,6 +90,22 @@ struct ValidationState {
     fill_count: usize,
     cancel_count: usize,
     position_close_count: usize,
+
+    // Phase 15.1 Risk tracking
+    /// Risk snapshots by snapshot ID
+    risk_snapshots: HashMap<String, RiskSnapshot>,
+    /// Risk decisions by intent ID (for INV-R2)
+    risk_decisions_by_intent: HashMap<String, RiskDecision>,
+    /// Intents that were rejected (for INV-R3)
+    rejected_intents: HashSet<String>,
+    /// First risk snapshot timestamp (for INV-R1)
+    first_snapshot_ts_ns: Option<i64>,
+    /// First intent timestamp (for INV-R1)
+    first_intent_ts_ns: Option<i64>,
+    /// Risk snapshot count
+    risk_snapshot_count: usize,
+    /// Risk decision count
+    risk_decision_count: usize,
 }
 
 impl ValidationState {
@@ -268,6 +293,11 @@ fn validate_intents(session_dir: &Path, state: &mut ValidationState, verbose: bo
                 "Intent {}: wrong schema version {}",
                 intent.intent_id, intent.schema_version
             ));
+        }
+
+        // Track first intent timestamp (for INV-R1)
+        if state.first_intent_ts_ns.is_none() {
+            state.first_intent_ts_ns = Some(intent.ts_ns);
         }
 
         // Track the intent
@@ -637,6 +667,163 @@ fn validate_budget_balance(state: &ValidationState) -> Vec<String> {
 }
 
 // =============================================================================
+// Phase 15.1 Risk Validation (INV-R1/R2/R3)
+// =============================================================================
+
+fn validate_risk_snapshots(
+    session_dir: &Path,
+    state: &mut ValidationState,
+    verbose: bool,
+) -> Result<()> {
+    let path = session_dir.join("risk_snapshots.jsonl");
+    let snapshots: Vec<RiskSnapshot> = read_jsonl(&path)?;
+
+    for snapshot in snapshots {
+        // Validate digest
+        let computed = snapshot.compute_digest();
+        if computed != snapshot.digest {
+            state.add_error(format!(
+                "RiskSnapshot {}: digest mismatch, computed={}, stored={}",
+                snapshot.snapshot_id, computed, snapshot.digest
+            ));
+        }
+
+        // Validate schema version
+        if snapshot.schema_version != RISK_SNAPSHOT_SCHEMA_VERSION {
+            state.add_error(format!(
+                "RiskSnapshot {}: wrong schema version {}",
+                snapshot.snapshot_id, snapshot.schema_version
+            ));
+        }
+
+        // Track first snapshot timestamp (for INV-R1)
+        if state.first_snapshot_ts_ns.is_none() {
+            state.first_snapshot_ts_ns = Some(snapshot.ts_ns);
+        }
+
+        // Track snapshot
+        state
+            .risk_snapshots
+            .insert(snapshot.snapshot_id.0.clone(), snapshot.clone());
+        state.risk_snapshot_count += 1;
+
+        if verbose {
+            println!(
+                "✓ RiskSnapshot: {} (positions: {})",
+                snapshot.snapshot_id, snapshot.exposures.total_position_count
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_risk_decisions(
+    session_dir: &Path,
+    state: &mut ValidationState,
+    verbose: bool,
+) -> Result<()> {
+    let path = session_dir.join("risk_decisions.jsonl");
+    let decisions: Vec<RiskDecision> = read_jsonl(&path)?;
+
+    for decision in decisions {
+        // Validate digest
+        let computed = decision.compute_digest();
+        if computed != decision.digest {
+            state.add_error(format!(
+                "RiskDecision {}: digest mismatch, computed={}, stored={}",
+                decision.decision_id, computed, decision.digest
+            ));
+        }
+
+        // Validate schema version
+        if decision.schema_version != RISK_DECISION_SCHEMA_VERSION {
+            state.add_error(format!(
+                "RiskDecision {}: wrong schema version {}",
+                decision.decision_id, decision.schema_version
+            ));
+        }
+
+        // Track decision by intent ID (for INV-R2)
+        if let RiskDecisionScope::Order { ref intent_id } = decision.scope {
+            state
+                .risk_decisions_by_intent
+                .insert(intent_id.clone(), decision.clone());
+
+            // If decision is Reject or Halt, track it (for INV-R3)
+            if matches!(
+                decision.status,
+                RiskDecisionStatus::Reject | RiskDecisionStatus::Halt
+            ) {
+                state.rejected_intents.insert(intent_id.clone());
+            }
+        }
+
+        state.risk_decision_count += 1;
+
+        if verbose {
+            println!(
+                "✓ RiskDecision: {} ({:?})",
+                decision.decision_id, decision.status
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_risk_invariants(state: &ValidationState) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    // INV-R1: Risk snapshot must be computed before any order decisions
+    // (only check if both risk snapshots and intents exist)
+    if state.risk_snapshot_count > 0
+        && state.intent_count > 0
+        && let (Some(first_snapshot_ts), Some(first_intent_ts)) =
+            (state.first_snapshot_ts_ns, state.first_intent_ts_ns)
+        && first_intent_ts < first_snapshot_ts
+    {
+        errors.push(format!(
+            "INV-R1: First intent (ts={}) occurred before first risk snapshot (ts={})",
+            first_intent_ts, first_snapshot_ts
+        ));
+    }
+
+    // INV-R2: Every order intent should have a corresponding risk decision
+    // (only check if risk decisions exist - legacy sessions may not have them)
+    if state.risk_decision_count > 0 {
+        for intent_id in state.intents.keys() {
+            if !state.risk_decisions_by_intent.contains_key(intent_id) {
+                errors.push(format!(
+                    "INV-R2: Intent {} has no corresponding risk decision",
+                    intent_id
+                ));
+            }
+        }
+    }
+
+    // INV-R3: Risk violations with Reject/Halt status must trigger proper rejection
+    // (rejected intents should not have successful submits)
+    for intent_id in &state.rejected_intents {
+        // Check if this intent was submitted successfully (it shouldn't be)
+        if let Some(client_order_id) = state.intents.get(intent_id).and_then(|intent| {
+            state
+                .submits
+                .values()
+                .find(|s| s.intent_id.0 == intent.intent_id.0)
+                .map(|s| s.client_order_id.0.clone())
+        }) {
+            errors.push(format!(
+                "INV-R3: Intent {} was risk-rejected but still submitted (client_order={})",
+                intent_id, client_order_id
+            ));
+        }
+    }
+
+    errors
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -652,7 +839,7 @@ fn main() -> Result<()> {
 
     let mut state = ValidationState::default();
 
-    // Validate each event type
+    // Validate each event type (Phase 14.2)
     validate_intents(&cli.session_dir, &mut state, cli.verbose)?;
     validate_submits(&cli.session_dir, &mut state, cli.verbose)?;
     validate_acks(&cli.session_dir, &mut state, cli.verbose)?;
@@ -661,15 +848,25 @@ fn main() -> Result<()> {
     validate_cancels(&cli.session_dir, &mut state, cli.verbose)?;
     validate_position_closes(&cli.session_dir, &mut state, cli.verbose)?;
 
+    // Validate risk events (Phase 15.1)
+    validate_risk_snapshots(&cli.session_dir, &mut state, cli.verbose)?;
+    validate_risk_decisions(&cli.session_dir, &mut state, cli.verbose)?;
+
     // Validate budget balance
     let budget_errors = validate_budget_balance(&state);
     for error in budget_errors {
         state.add_error(error);
     }
 
+    // Validate risk invariants (Phase 15.1 INV-R1/R2/R3)
+    let risk_errors = validate_risk_invariants(&state);
+    for error in risk_errors {
+        state.add_error(error);
+    }
+
     // Print summary
     println!();
-    println!("=== Validation Summary ===");
+    println!("=== Validation Summary (Phase 14.2 + 15.1) ===");
     println!("Intents:         {}", state.intent_count);
     println!("Submits:         {}", state.submit_count);
     println!("Acks:            {}", state.ack_count);
@@ -677,6 +874,8 @@ fn main() -> Result<()> {
     println!("Fills:           {}", state.fill_count);
     println!("Cancels:         {}", state.cancel_count);
     println!("Position Closes: {}", state.position_close_count);
+    println!("Risk Snapshots:  {}", state.risk_snapshot_count);
+    println!("Risk Decisions:  {}", state.risk_decision_count);
     println!();
 
     // Print budget state

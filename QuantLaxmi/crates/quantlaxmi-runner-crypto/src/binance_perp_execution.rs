@@ -62,6 +62,12 @@ pub enum ExecutionError {
 
     #[error("WAL write error: {0}")]
     WalError(String),
+
+    #[error("Risk check failed: {0}")]
+    RiskCheckFailed(String),
+
+    #[error("Risk evaluation halted: {0}")]
+    RiskHalted(String),
 }
 
 // =============================================================================
@@ -388,16 +394,98 @@ impl WalInterface for StubWalWriter {
 }
 
 // =============================================================================
+// Risk Interface (Phase 15.1)
+// =============================================================================
+
+use quantlaxmi_gates::{BudgetView, RiskDecision, RiskDecisionStatus, RiskSnapshot};
+
+/// Risk evaluator interface for order gating.
+/// Gating order: RiskDecision → BudgetCheck → Reserve → Submit (frozen).
+pub trait RiskInterface: Send + Sync {
+    /// Evaluate risk for an order intent before budget check.
+    /// Returns RiskDecision with Allow/Reject/Halt status.
+    fn evaluate_order(
+        &mut self,
+        intent: &OrderIntentEvent,
+        risk_snapshot: &RiskSnapshot,
+        budget_view: Option<&BudgetView>,
+        ts_ns: i64,
+    ) -> RiskDecision;
+
+    /// Get the current risk snapshot (must be computed from PortfolioSnapshot).
+    fn current_snapshot(&self) -> Option<&RiskSnapshot>;
+}
+
+/// Stub risk evaluator for Phase 15.1 testing.
+/// Always allows orders (real implementation uses RiskEvaluator from quantlaxmi-gates).
+#[derive(Debug, Default)]
+pub struct StubRiskEvaluator {
+    /// Last snapshot for testing.
+    pub last_snapshot: Option<RiskSnapshot>,
+    /// Recorded decisions for testing.
+    pub decisions: Vec<RiskDecision>,
+}
+
+impl StubRiskEvaluator {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set a snapshot for testing.
+    pub fn set_snapshot(&mut self, snapshot: RiskSnapshot) {
+        self.last_snapshot = Some(snapshot);
+    }
+}
+
+impl RiskInterface for StubRiskEvaluator {
+    fn evaluate_order(
+        &mut self,
+        intent: &OrderIntentEvent,
+        _risk_snapshot: &RiskSnapshot,
+        _budget_view: Option<&BudgetView>,
+        ts_ns: i64,
+    ) -> RiskDecision {
+        // Stub: always allow
+        let mut decision = RiskDecision {
+            schema_version: quantlaxmi_gates::RISK_DECISION_SCHEMA_VERSION.to_string(),
+            ts_ns,
+            decision_id: quantlaxmi_gates::RiskDecisionId(format!("stub_{}", intent.intent_id.0)),
+            scope: quantlaxmi_gates::RiskDecisionScope::Order {
+                intent_id: intent.intent_id.0.clone(),
+            },
+            status: RiskDecisionStatus::Allow,
+            reasons: Vec::new(),
+            risk_snapshot_digest: "stub_snapshot_digest".to_string(),
+            digest: String::new(),
+        };
+        decision.digest = decision.compute_digest();
+        self.decisions.push(decision.clone());
+        decision
+    }
+
+    fn current_snapshot(&self) -> Option<&RiskSnapshot> {
+        self.last_snapshot.as_ref()
+    }
+}
+
+// =============================================================================
 // Live Execution Engine
 // =============================================================================
 
 /// Live execution engine for Binance Perp.
 /// Manages order lifecycle from intent to completion with deterministic budget tracking.
-pub struct LiveExecutionEngine<B: BudgetInterface, W: WalInterface> {
+/// Gating order: RiskDecision → BudgetCheck → Reserve → Submit (frozen).
+pub struct LiveExecutionEngine<
+    B: BudgetInterface,
+    W: WalInterface,
+    R: RiskInterface = StubRiskEvaluator,
+> {
     /// Budget manager for capital tracking.
     budget: B,
     /// WAL writer for event persistence.
     wal: W,
+    /// Risk evaluator for pre-order gating.
+    risk: R,
     /// Active orders by client order ID.
     orders_by_client_id: HashMap<ClientOrderId, LiveOrder>,
     /// Intent to client order ID mapping.
@@ -408,20 +496,56 @@ pub struct LiveExecutionEngine<B: BudgetInterface, W: WalInterface> {
     processed_keys: HashSet<IdempotencyKey>,
     /// Sequence counter for intent generation.
     intent_seq: u64,
+    /// Current risk snapshot (updated before order evaluation).
+    current_risk_snapshot: Option<RiskSnapshot>,
+    /// Risk decisions log for auditing.
+    risk_decisions: Vec<RiskDecision>,
 }
 
-impl<B: BudgetInterface, W: WalInterface> LiveExecutionEngine<B, W> {
-    /// Create a new execution engine.
+impl<B: BudgetInterface, W: WalInterface> LiveExecutionEngine<B, W, StubRiskEvaluator> {
+    /// Create a new execution engine with stub risk evaluator.
+    /// Use `new_with_risk` for production with real RiskEvaluator.
     pub fn new(budget: B, wal: W) -> Self {
         Self {
             budget,
             wal,
+            risk: StubRiskEvaluator::new(),
             orders_by_client_id: HashMap::new(),
             intent_to_client_id: HashMap::new(),
             exchange_to_client_id: HashMap::new(),
             processed_keys: HashSet::new(),
             intent_seq: 0,
+            current_risk_snapshot: None,
+            risk_decisions: Vec::new(),
         }
+    }
+}
+
+impl<B: BudgetInterface, W: WalInterface, R: RiskInterface> LiveExecutionEngine<B, W, R> {
+    /// Create a new execution engine with custom risk evaluator.
+    pub fn new_with_risk(budget: B, wal: W, risk: R) -> Self {
+        Self {
+            budget,
+            wal,
+            risk,
+            orders_by_client_id: HashMap::new(),
+            intent_to_client_id: HashMap::new(),
+            exchange_to_client_id: HashMap::new(),
+            processed_keys: HashSet::new(),
+            intent_seq: 0,
+            current_risk_snapshot: None,
+            risk_decisions: Vec::new(),
+        }
+    }
+
+    /// Update the current risk snapshot (must be called before order evaluation).
+    pub fn set_risk_snapshot(&mut self, snapshot: RiskSnapshot) {
+        self.current_risk_snapshot = Some(snapshot);
+    }
+
+    /// Get recorded risk decisions for auditing.
+    pub fn risk_decisions(&self) -> &[RiskDecision] {
+        &self.risk_decisions
     }
 
     /// Create order intent from strategy signal.
@@ -470,10 +594,12 @@ impl<B: BudgetInterface, W: WalInterface> LiveExecutionEngine<B, W> {
         Ok(event)
     }
 
-    /// Submit order to exchange (budget check → reserve → submit).
+    /// Submit order to exchange with risk gating.
+    /// Gating order: RiskDecision → BudgetCheck → Reserve → Submit (frozen).
     pub fn submit_order(
         &mut self,
         intent: &OrderIntentEvent,
+        budget_view: Option<&BudgetView>,
         ts_ns: i64,
     ) -> Result<OrderSubmitEvent, ExecutionError> {
         // Calculate notional for budget check
@@ -482,6 +608,43 @@ impl<B: BudgetInterface, W: WalInterface> LiveExecutionEngine<B, W> {
             .unwrap_or(intent.reference_price_mantissa);
         let notional_mantissa =
             (price * intent.quantity_mantissa) / 10i128.pow((-intent.quantity_exponent) as u32);
+
+        // Step 0: Risk check (MUST come BEFORE budget check - frozen gating order)
+        if let Some(ref snapshot) = self.current_risk_snapshot {
+            let risk_decision = self
+                .risk
+                .evaluate_order(intent, snapshot, budget_view, ts_ns);
+            self.risk_decisions.push(risk_decision.clone());
+
+            match risk_decision.status {
+                RiskDecisionStatus::Allow => {
+                    // Proceed to budget check
+                }
+                RiskDecisionStatus::Reject => {
+                    let reasons: Vec<String> = risk_decision
+                        .reasons
+                        .iter()
+                        .map(|v| v.code().to_string())
+                        .collect();
+                    return Err(ExecutionError::RiskCheckFailed(format!(
+                        "Risk rejected order {}: violations {:?}",
+                        intent.intent_id, reasons
+                    )));
+                }
+                RiskDecisionStatus::Halt => {
+                    let reasons: Vec<String> = risk_decision
+                        .reasons
+                        .iter()
+                        .map(|v| v.code().to_string())
+                        .collect();
+                    return Err(ExecutionError::RiskHalted(format!(
+                        "Execution halted due to risk violations: {:?}",
+                        reasons
+                    )));
+                }
+            }
+        }
+        // If no snapshot is set, skip risk check (allows legacy code paths)
 
         // Step 1: Budget check
         self.budget.check_order(
@@ -934,7 +1097,7 @@ mod tests {
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1234567891_000_000_000)
             .unwrap();
 
         assert_eq!(submit.intent_id, intent.intent_id);
@@ -969,7 +1132,7 @@ mod tests {
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1234567891_000_000_000)
             .unwrap();
 
         let ack = engine
@@ -1011,7 +1174,7 @@ mod tests {
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1234567891_000_000_000)
             .unwrap();
 
         engine
@@ -1084,7 +1247,7 @@ mod tests {
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1234567891_000_000_000)
             .unwrap();
 
         let reject = engine
@@ -1128,7 +1291,7 @@ mod tests {
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1234567891_000_000_000)
             .unwrap();
 
         engine
@@ -1177,7 +1340,7 @@ mod tests {
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1234567891_000_000_000)
             .unwrap();
 
         // First ack succeeds
@@ -1235,7 +1398,7 @@ mod tests {
             .unwrap();
 
         engine
-            .submit_order(&intent, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1234567891_000_000_000)
             .unwrap();
 
         assert_eq!(engine.active_order_count(), 1);
