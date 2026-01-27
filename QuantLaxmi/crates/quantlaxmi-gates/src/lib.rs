@@ -31,6 +31,7 @@ pub mod g1_replay_parity;
 pub mod g2_backtest_correctness;
 pub mod g3_robustness;
 pub mod g4_deployability;
+pub mod intent_shaping;
 pub mod mtm_drawdown;
 pub mod portfolio_selector;
 pub mod position_keeper;
@@ -62,6 +63,11 @@ pub use g1_replay_parity::{G1Config, G1ReplayParity};
 pub use g2_backtest_correctness::{G2BacktestCorrectness, G2Config};
 pub use g3_robustness::{G3Config, G3Robustness};
 pub use g4_deployability::{G4Config, G4Deployability};
+pub use intent_shaping::{
+    BlockReason, CapReason, INTENT_TRANSFORM_SCHEMA_VERSION, IntentShaper, IntentType,
+    ModeRestrictReason, OrderIntentTransform, SHAPING_POLICY_SCHEMA_VERSION, ShapingPolicy,
+    TransformAction, TransformId,
+};
 pub use mtm_drawdown::{
     DRAWDOWN_SNAPSHOT_SCHEMA_VERSION, DrawdownSnapshot, DrawdownSnapshotId,
     EQUITY_POLICY_SCHEMA_VERSION, EquityPolicy, EquityViolationType, MTM_SNAPSHOT_SCHEMA_VERSION,

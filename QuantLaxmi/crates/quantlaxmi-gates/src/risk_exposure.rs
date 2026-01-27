@@ -388,7 +388,7 @@ impl ExposureMetrics {
 // =============================================================================
 
 /// Risk violation type with explicit reason codes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum ViolationType {
     /// Symbol notional exceeds limit.
     SymbolNotionalExceeded {
@@ -547,8 +547,17 @@ impl ViolationType {
         }
     }
 
+    /// Check if this violation triggers HALT.
+    pub fn is_halt(&self) -> bool {
+        matches!(
+            self,
+            ViolationType::PortfolioNotionalExceeded { .. }
+                | ViolationType::PortfolioPositionCountExceeded { .. }
+        )
+    }
+
     /// Canonical bytes for hashing.
-    fn canonical_bytes(&self) -> Vec<u8> {
+    pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(self.code().as_bytes());
         bytes.push(b':');
