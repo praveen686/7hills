@@ -75,7 +75,9 @@ tempfile = "3.10"
 
 # Memory-safe build profiles to prevent OOM during compilation/tests
 [profile.dev]
-debug = 1  # Reduced debug info (faster compile, less memory)
+debug = 1        # Reduced debug info (faster compile, less memory)
+incremental = false  # Prevent 16GB+ cache bloat that causes OOM/system reboot
 
 [profile.test]
-opt-level = 1  # Slight optimization reduces test binary memory footprint
+opt-level = 1        # Slight optimization reduces test binary memory footprint
+incremental = false  # Prevent cache bloat during test builds

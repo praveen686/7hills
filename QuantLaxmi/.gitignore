@@ -61,3 +61,4 @@ yarn-error.log*
 
 # Large research PDFs (keep out of git)
 research/*.pdf
+memorysummary.txt

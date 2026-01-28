@@ -2,8 +2,10 @@
 # System has 16GB RAM, 8 cores - limit parallelism to stay within bounds
 
 [build]
-jobs = 4  # Limit parallel compile jobs (default: num_cpus)
+jobs = 2  # Limit parallel compile jobs to prevent OOM (was 4, still too high for 15GB RAM)
 
 [env]
 # Default test threads - override with: cargo test -- --test-threads=N
-RUST_TEST_THREADS = "2"
+RUST_TEST_THREADS = "1"
+# Disable incremental compilation - prevents 16GB+ cache bloat that causes OOM
+CARGO_INCREMENTAL = "0"
