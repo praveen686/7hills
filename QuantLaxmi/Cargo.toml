@@ -71,3 +71,10 @@ arrow = { version = "53", default-features = false, features = ["ipc"] }
 parquet = { version = "53", default-features = false, features = ["arrow", "snap"] }
 good_lp = { version = "1.8", default-features = false, features = ["microlp"] }
 tempfile = "3.10"
+
+# Memory-safe build profiles to prevent OOM during compilation/tests
+[profile.dev]
+debug = 1  # Reduced debug info (faster compile, less memory)
+
+[profile.test]
+opt-level = 1  # Slight optimization reduces test binary memory footprint
