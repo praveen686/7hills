@@ -94,6 +94,13 @@ pub use admission::{
     InternalField, SignalRequirements, VendorField, compute_digest,
 };
 
+// SignalFrame canonical structure (Phase 20A)
+pub mod signal_frame;
+pub use signal_frame::{
+    CorrelationId, ExponentKind, Invariant, L1Field, RefuseReason, RequiredL1, SignalFrame,
+    signal_frame_from_market,
+};
+
 /// Market data event from exchange or data feed.
 ///
 /// # Description

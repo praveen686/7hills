@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-28
-**Current Phase:** 19D Complete (WAL Enforcement)
+**Current Phase:** 20A Complete (SignalFrame Spine)
 
 ---
 
@@ -31,10 +31,69 @@
 | 19 | MarketSnapshot V2 + Canonical Encoding v3 | ✅ Complete | 2026-01-28 |
 | 19C | Signal Admission Gating | ✅ Complete | 2026-01-28 |
 | 19D | WAL Enforcement & Replay | ✅ Complete | 2026-01-28 |
+| 20A | SignalFrame Spine | ✅ Complete | 2026-01-28 |
 
 ---
 
 ## Recently Completed Phases (Detail)
+
+### Phase 20A: SignalFrame Spine
+
+**Goal:** Canonical normalized signal input for strategies, independent of vendor quirks.
+
+**Deliverables:**
+- `crates/quantlaxmi-models/src/signal_frame.rs`
+- `SignalFrame` struct with dual timestamps (event_ts_ns, book_ts_ns)
+- `CorrelationId` as `[u8; 16]` (fixed-size bytes, not String)
+- `L1Field` typed enum (BidPrice, AskPrice, BidQty, AskQty)
+- `RefuseReason` with typed variants (not stringly-typed)
+- `signal_frame_from_market()` conversion function
+- `RequiredL1` internal requirements structure
+
+**Tests:** 18 unit tests covering:
+- All L1-L5 hard laws
+- Zero-is-valid (L5) admission
+- Crossed book rejection
+- Exponent mismatch detection
+- V1 legacy semantics
+- i128 overflow-safe spread calculation
+- Determinism (100 runs identical)
+
+**Key Types:**
+```rust
+pub type CorrelationId = [u8; 16];
+
+pub struct SignalFrame {
+    pub correlation_id: CorrelationId,
+    pub symbol: String,
+    pub bid_px_m: i64,
+    pub ask_px_m: i64,
+    pub px_exp: i8,
+    pub bid_qty_m: i64,
+    pub ask_qty_m: i64,
+    pub qty_exp: i8,
+    pub l1_state_bits: u16,
+    pub spread_bps_m: Option<i64>,
+    pub event_ts_ns: i64,
+    pub book_ts_ns: i64,
+}
+
+pub enum RefuseReason {
+    FieldAbsent(L1Field),
+    FieldNull(L1Field),
+    FieldMalformed(L1Field),
+    ExponentMismatch { kind: ExponentKind, expected: i8, actual: i8 },
+    InvariantViolation(Invariant),
+}
+```
+
+**Hard Laws Enforced:**
+- L1: No Fabrication — Absent/Null/Malformed fields → Err
+- L2: Deterministic — Same inputs → identical result
+- L3: Explicit Refusal — Missing required fields enumerated
+- L5: Zero Is Valid — Value(0) is accepted
+
+---
 
 ### Phase 12.3: Promotion Tightening
 
@@ -130,13 +189,13 @@ pub struct PromotionDecision {
 | Crate | Tests | Status |
 |-------|-------|--------|
 | quantlaxmi-events | 184 | ✅ All passing |
-| quantlaxmi-models | 88 | ✅ All passing |
+| quantlaxmi-models | 106 | ✅ All passing |
 | quantlaxmi-gates | 87 | ✅ All passing |
 | quantlaxmi-runner-crypto | 70 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
 | quantlaxmi-wal | 26 | ✅ All passing |
 | Other crates | 166 | ✅ All passing |
-| **Workspace Total** | 660 | ✅ All passing |
+| **Workspace Total** | 678 | ✅ All passing |
 
 ---
 
