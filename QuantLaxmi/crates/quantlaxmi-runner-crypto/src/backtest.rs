@@ -1358,6 +1358,10 @@ impl BacktestEngine {
     ///
     /// Handles both live evaluation and WAL enforcement modes.
     /// Returns whether the event should be admitted and any decisions made.
+    ///
+    /// # Arguments
+    /// - `manifest_version_hash`: SHA-256 hash of signals_manifest.json (Phase 20B)
+    #[allow(clippy::too_many_arguments)]
     fn decide_admission(
         mode: &AdmissionMode,
         correlation_id: &str,
@@ -1366,6 +1370,7 @@ impl BacktestEngine {
         required_signals: &[SignalRequirements],
         vendor_snapshot: &VendorSnapshot,
         internal_snapshot: &InternalSnapshot,
+        manifest_version_hash: [u8; 32],
     ) -> Result<AdmissionDecisionResult> {
         match mode {
             AdmissionMode::EvaluateLive => {
@@ -1382,6 +1387,7 @@ impl BacktestEngine {
                         vendor_snapshot,
                         internal_snapshot,
                         admission_ctx,
+                        manifest_version_hash,
                     );
 
                     if decision.is_refused() {
@@ -1896,6 +1902,10 @@ impl BacktestEngine {
                 let vendor_snapshot = vendor_snapshot_from_market(&market_snapshot);
                 let internal_snapshot = InternalSnapshot::empty(); // TODO: build from engine state
 
+                // Phase 20B: Placeholder manifest hash until proper wiring
+                // TODO: Load manifest and compute hash at backtest initialization
+                const PLACEHOLDER_MANIFEST_HASH: [u8; 32] = [0u8; 32];
+
                 Self::decide_admission(
                     &admission_mode,
                     &correlation_id,
@@ -1904,6 +1914,7 @@ impl BacktestEngine {
                     &required_signals,
                     &vendor_snapshot,
                     &internal_snapshot,
+                    PLACEHOLDER_MANIFEST_HASH,
                 )?
             } else {
                 // No gating required → always admit

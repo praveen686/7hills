@@ -32,7 +32,7 @@
 | 19C | Signal Admission Gating | ✅ Complete | 2026-01-28 |
 | 19D | WAL Enforcement & Replay | ✅ Complete | 2026-01-28 |
 | 20A | SignalFrame Spine | ✅ Complete | 2026-01-28 |
-| 20B | Signals Manifest | 🟡 In Progress | - |
+| 20B | Signals Manifest (PR-1 Manifest + PR-2 WAL Provenance) | ✅ Complete | 2026-01-28 |
 
 ---
 

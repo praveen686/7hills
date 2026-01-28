@@ -224,6 +224,11 @@ pub struct AdmissionDecision {
     /// Optional linkage to upstream decision/intent context
     pub correlation_id: Option<String>,
 
+    /// SHA-256 hash of signals_manifest.json at evaluation time.
+    /// Binds the admission decision to a specific manifest version for WAL provenance.
+    /// Phase 20B: Enables audit trail of which manifest governed this decision.
+    pub manifest_version_hash: [u8; 32],
+
     /// SHA-256 digest of canonical representation
     pub digest: String,
 }
@@ -316,6 +321,7 @@ impl AdmissionCanonicalBytes for AdmissionOutcome {
 /// 7. null_vendor_fields (count + each field's canonical bytes)
 /// 8. missing_internal_fields (count + each field's canonical bytes)
 /// 9. correlation_id (0x00 for None, 0x01 + len-prefixed UTF-8 for Some)
+/// 10. manifest_version_hash (32 bytes raw)
 impl AdmissionCanonicalBytes for AdmissionDecision {
     fn canonical_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -376,6 +382,9 @@ impl AdmissionCanonicalBytes for AdmissionDecision {
             }
         }
 
+        // 10. manifest_version_hash (32 bytes raw)
+        bytes.extend_from_slice(&self.manifest_version_hash);
+
         bytes
     }
 }
@@ -395,6 +404,9 @@ pub fn compute_digest(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test manifest hash (all zeros for testing)
+    const TEST_MANIFEST_HASH: [u8; 32] = [0u8; 32];
 
     #[test]
     fn test_vendor_field_display() {
@@ -452,6 +464,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "test".to_string(),
         };
         assert!(admit.is_admitted());
@@ -470,7 +483,7 @@ mod tests {
     fn test_canonical_bytes_determinism() {
         let decision = AdmissionDecision {
             schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
-            ts_ns: 1706400000000000000,
+            ts_ns: 1_706_400_000_000_000_000,
             session_id: "sess_test".to_string(),
             signal_id: "book_imbalance".to_string(),
             outcome: AdmissionOutcome::Refuse,
@@ -478,6 +491,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: Some("corr_123".to_string()),
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: String::new(), // Not included in canonical bytes
         };
 
@@ -537,5 +551,61 @@ mod tests {
         assert_ne!(f1.canonical_bytes(), f2.canonical_bytes());
         assert_ne!(f1.canonical_bytes(), f3.canonical_bytes());
         assert_ne!(f2.canonical_bytes(), f3.canonical_bytes());
+    }
+
+    #[test]
+    fn test_admission_digest_includes_manifest_hash() {
+        // Phase 20B: manifest hash is included in canonical bytes
+        let decision = AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1_706_400_000_000_000_000,
+            session_id: "sess_test".to_string(),
+            signal_id: "spread".to_string(),
+            outcome: AdmissionOutcome::Admit,
+            missing_vendor_fields: vec![],
+            null_vendor_fields: vec![],
+            missing_internal_fields: vec![],
+            correlation_id: None,
+            manifest_version_hash: [0x01; 32], // Non-zero hash
+            digest: String::new(),
+        };
+
+        let bytes = decision.canonical_bytes();
+
+        // Last 32 bytes should be the manifest hash
+        assert!(bytes.len() >= 32);
+        let hash_portion = &bytes[bytes.len() - 32..];
+        assert_eq!(hash_portion, &[0x01; 32]);
+    }
+
+    #[test]
+    fn test_manifest_hash_changes_decision_digest() {
+        // Phase 20B: Different manifest versions → different digests
+        let base = AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1_706_400_000_000_000_000,
+            session_id: "sess_test".to_string(),
+            signal_id: "spread".to_string(),
+            outcome: AdmissionOutcome::Admit,
+            missing_vendor_fields: vec![],
+            null_vendor_fields: vec![],
+            missing_internal_fields: vec![],
+            correlation_id: None,
+            manifest_version_hash: [0x00; 32],
+            digest: String::new(),
+        };
+
+        let with_different_hash = AdmissionDecision {
+            manifest_version_hash: [0xFF; 32],
+            ..base.clone()
+        };
+
+        let digest1 = compute_digest(&base.canonical_bytes());
+        let digest2 = compute_digest(&with_different_hash.canonical_bytes());
+
+        assert_ne!(
+            digest1, digest2,
+            "Different manifest hashes must produce different decision digests"
+        );
     }
 }

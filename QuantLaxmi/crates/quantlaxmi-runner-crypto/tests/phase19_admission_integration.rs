@@ -32,6 +32,9 @@ use chrono::{TimeZone, Utc};
 use std::sync::atomic::{AtomicU32, Ordering};
 use uuid::Uuid;
 
+/// Test manifest hash (all zeros for testing)
+const TEST_MANIFEST_HASH: [u8; 32] = [0u8; 32];
+
 // =============================================================================
 // TEST 1: Strategy NOT called on refused admission
 // =============================================================================
@@ -101,6 +104,7 @@ fn test_strategy_not_called_on_refused_event() {
         &vendor_snapshot,
         &InternalSnapshot::empty(),
         ctx,
+        TEST_MANIFEST_HASH,
     );
 
     // Assert: refused because BuyQuantity is absent
@@ -167,6 +171,7 @@ fn test_wal_written_even_when_refused() {
         &vendor_snapshot,
         &InternalSnapshot::empty(),
         ctx,
+        TEST_MANIFEST_HASH,
     );
 
     // Write to WAL regardless of verdict (observability-first)
@@ -219,6 +224,7 @@ fn test_admission_determinism_same_segment_same_digests() {
                 &vendor,
                 &InternalSnapshot::empty(),
                 ctx,
+                TEST_MANIFEST_HASH,
             );
             decision.digest.clone()
         })
@@ -236,6 +242,7 @@ fn test_admission_determinism_same_segment_same_digests() {
                 &vendor,
                 &InternalSnapshot::empty(),
                 ctx,
+                TEST_MANIFEST_HASH,
             );
             decision.digest.clone()
         })
@@ -309,6 +316,7 @@ fn test_null_vs_absent_is_not_collapsed() {
         &vendor_absent.0,
         &InternalSnapshot::empty(),
         AdmissionContext::new(now_ns(), "test"),
+        TEST_MANIFEST_HASH,
     );
 
     let decision_null = SignalAdmissionController::evaluate(
@@ -316,6 +324,7 @@ fn test_null_vs_absent_is_not_collapsed() {
         &vendor_null.0,
         &InternalSnapshot::empty(),
         AdmissionContext::new(now_ns(), "test"),
+        TEST_MANIFEST_HASH,
     );
 
     // Both must refuse
@@ -377,6 +386,7 @@ fn test_zero_is_valid_vendor_value() {
         &vendor,
         &InternalSnapshot::empty(),
         ctx,
+        TEST_MANIFEST_HASH,
     );
 
     // Assert: ADMITTED (zero is valid, not missing)
@@ -701,6 +711,7 @@ fn test_v1_admits_when_prices_valid_and_qty_any() {
         &vendor,
         &InternalSnapshot::empty(),
         ctx,
+        TEST_MANIFEST_HASH,
     );
 
     // V1 with valid prices admits
@@ -743,6 +754,7 @@ fn test_v1_zero_is_valid_vendor_value() {
         &vendor,
         &InternalSnapshot::empty(),
         ctx,
+        TEST_MANIFEST_HASH,
     );
 
     // V1 zero is valid (L5: Zero Is Valid)
@@ -823,6 +835,7 @@ fn test_v1_strategy_called_when_admitted() {
         &vendor,
         &InternalSnapshot::empty(),
         ctx,
+        TEST_MANIFEST_HASH,
     );
 
     // V1 admits → strategy runs
@@ -892,6 +905,7 @@ fn test_v1_refuses_on_zero_or_negative_price() {
         &vendor_zero_bid,
         &InternalSnapshot::empty(),
         AdmissionContext::new(now_ns(), "test"),
+        TEST_MANIFEST_HASH,
     );
     assert!(
         decision_zero_bid.is_refused(),
@@ -911,6 +925,7 @@ fn test_v1_refuses_on_zero_or_negative_price() {
         &vendor_neg_ask,
         &InternalSnapshot::empty(),
         AdmissionContext::new(now_ns(), "test"),
+        TEST_MANIFEST_HASH,
     );
     assert!(
         decision_neg_ask.is_refused(),
@@ -930,6 +945,7 @@ fn test_v1_refuses_on_zero_or_negative_price() {
         &vendor_both,
         &InternalSnapshot::empty(),
         AdmissionContext::new(now_ns(), "test"),
+        TEST_MANIFEST_HASH,
     );
     assert!(
         decision_both.is_refused(),
@@ -976,6 +992,7 @@ fn test_v1_zero_qty_valid_but_zero_price_malformed() {
         &vendor,
         &InternalSnapshot::empty(),
         AdmissionContext::new(now_ns(), "test"),
+        TEST_MANIFEST_HASH,
     );
 
     // Zero qty is valid (L5), valid prices → admit
@@ -1538,7 +1555,7 @@ async fn test_replay_enforced_blocks_strategy_on_refuse() {
     // Create admission WAL with REFUSE decision
     let refuse_decision = AdmissionDecision {
         schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
-        ts_ns: 1706400000000000000,
+        ts_ns: 1_706_400_000_000_000_000,
         session_id: "test_session".to_string(),
         signal_id: "book_imbalance".to_string(),
         outcome: AdmissionOutcome::Refuse,
@@ -1546,6 +1563,7 @@ async fn test_replay_enforced_blocks_strategy_on_refuse() {
         null_vendor_fields: vec![],
         missing_internal_fields: vec![],
         correlation_id: Some("event_seq:1".to_string()),
+        manifest_version_hash: TEST_MANIFEST_HASH,
         digest: "refuse_digest_001".to_string(),
     };
 
@@ -1592,7 +1610,7 @@ async fn test_replay_enforced_calls_strategy_on_admit() {
     // Create admission WAL with ADMIT decision
     let admit_decision = AdmissionDecision {
         schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
-        ts_ns: 1706400000000000000,
+        ts_ns: 1_706_400_000_000_000_000,
         session_id: "test_session".to_string(),
         signal_id: "spread".to_string(),
         outcome: AdmissionOutcome::Admit,
@@ -1600,6 +1618,7 @@ async fn test_replay_enforced_calls_strategy_on_admit() {
         null_vendor_fields: vec![],
         missing_internal_fields: vec![],
         correlation_id: Some("event_seq:1".to_string()),
+        manifest_version_hash: TEST_MANIFEST_HASH,
         digest: "admit_digest_001".to_string(),
     };
 

@@ -141,11 +141,19 @@ impl SignalAdmissionController {
     /// - `Refuse` if any required field is missing
     ///
     /// The decision includes a deterministic digest for audit/replay.
+    ///
+    /// # Arguments
+    /// - `requirements`: Signal's data requirements
+    /// - `vendor_snapshot`: Current vendor data availability
+    /// - `internal_snapshot`: Current internal data availability
+    /// - `ctx`: Admission context (timestamp, session, correlation)
+    /// - `manifest_version_hash`: SHA-256 hash of signals_manifest.json (Phase 20B)
     pub fn evaluate(
         requirements: &SignalRequirements,
         vendor_snapshot: &VendorSnapshot,
         internal_snapshot: &InternalSnapshot,
         ctx: AdmissionContext,
+        manifest_version_hash: [u8; 32],
     ) -> AdmissionDecision {
         // Collect missing vendor fields
         let missing_vendor: Vec<VendorField> = requirements
@@ -181,6 +189,7 @@ impl SignalAdmissionController {
             null_vendor_fields: Vec::new(), // TODO: populate from VendorSnapshot with FieldState
             missing_internal_fields: missing_internal,
             correlation_id: ctx.correlation_id,
+            manifest_version_hash,
             digest: String::new(),
         };
 
@@ -200,8 +209,11 @@ impl SignalAdmissionController {
 mod tests {
     use super::*;
 
+    /// Test manifest hash (all zeros for testing)
+    const TEST_MANIFEST_HASH: [u8; 32] = [0u8; 32];
+
     fn make_ctx() -> AdmissionContext {
-        AdmissionContext::new(1706400000000000000, "test_session")
+        AdmissionContext::new(1_706_400_000_000_000_000, "test_session")
     }
 
     // -------------------------------------------------------------------------
@@ -226,6 +238,7 @@ mod tests {
             &vendor,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
 
         assert!(decision.is_refused());
@@ -254,6 +267,7 @@ mod tests {
             &VendorSnapshot::empty(),
             &internal,
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
 
         assert!(decision.is_refused());
@@ -287,6 +301,7 @@ mod tests {
             &vendor,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
 
         assert!(decision.is_admitted());
@@ -315,6 +330,7 @@ mod tests {
             &vendor,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
 
         assert!(
@@ -347,12 +363,14 @@ mod tests {
             &vendor,
             &InternalSnapshot::empty(),
             ctx.clone(),
+            TEST_MANIFEST_HASH,
         );
         let decision2 = SignalAdmissionController::evaluate(
             &requirements,
             &vendor,
             &InternalSnapshot::empty(),
             ctx,
+            TEST_MANIFEST_HASH,
         );
 
         assert_eq!(
@@ -385,6 +403,7 @@ mod tests {
             &vendor,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
 
         // Must refuse, not silently fabricate
@@ -426,8 +445,13 @@ mod tests {
             ..InternalSnapshot::empty()
         };
 
-        let decision =
-            SignalAdmissionController::evaluate(&requirements, &vendor, &internal, make_ctx());
+        let decision = SignalAdmissionController::evaluate(
+            &requirements,
+            &vendor,
+            &internal,
+            make_ctx(),
+            TEST_MANIFEST_HASH,
+        );
 
         assert!(decision.is_admitted());
         assert!(decision.missing_vendor_fields.is_empty());
@@ -451,6 +475,7 @@ mod tests {
             &vendor_present,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
         assert!(admit.is_admitted());
         assert!(!admit.digest.is_empty(), "Admit decision must have digest");
@@ -462,6 +487,7 @@ mod tests {
             &vendor_missing,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
         assert!(refuse.is_refused());
         assert!(
@@ -494,6 +520,7 @@ mod tests {
             &vendor_missing,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
         assert!(refuse.is_refused());
 
@@ -507,6 +534,7 @@ mod tests {
             &vendor_present,
             &InternalSnapshot::empty(),
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
         assert!(admit.is_admitted());
     }
@@ -526,6 +554,7 @@ mod tests {
             &VendorSnapshot::empty(),
             &internal_missing,
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
         assert!(refuse.is_refused());
         assert!(
@@ -544,6 +573,7 @@ mod tests {
             &VendorSnapshot::empty(),
             &internal_present,
             make_ctx(),
+            TEST_MANIFEST_HASH,
         );
         assert!(admit.is_admitted());
     }

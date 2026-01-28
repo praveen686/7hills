@@ -1063,6 +1063,9 @@ impl AdmissionIndex {
 mod tests {
     use super::*;
 
+    /// Test manifest hash (all zeros for testing)
+    const TEST_MANIFEST_HASH: [u8; 32] = [0u8; 32];
+
     #[tokio::test]
     async fn test_wal_writer_reader_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
@@ -1257,6 +1260,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: Some("corr_001".to_string()),
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "abc123".to_string(),
         };
         writer.write_admission(admit.clone()).await.unwrap();
@@ -1272,6 +1276,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "def456".to_string(),
         };
         writer.write_admission(refuse.clone()).await.unwrap();
@@ -1319,6 +1324,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "test".to_string(),
         };
         writer.write_admission(decision).await.unwrap();
@@ -1353,6 +1359,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: None,
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d1".to_string(),
             };
             writer.write_admission(decision).await.unwrap();
@@ -1373,6 +1380,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: None,
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d2".to_string(),
             };
             writer.write_admission(decision).await.unwrap();
@@ -1412,6 +1420,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "refuse_digest".to_string(),
         };
         writer.write_admission(refuse).await.unwrap();
@@ -1462,6 +1471,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_001".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d1".to_string(),
             },
             // Event 2 (corr_002): book_imbalance Refuse
@@ -1475,6 +1485,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_002".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d2".to_string(),
             },
             // Event 3 (corr_003): spread Admit, book_imbalance Refuse (event refused)
@@ -1488,6 +1499,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_003".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d3a".to_string(),
             },
             AdmissionDecision {
@@ -1500,6 +1512,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_003".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d3b".to_string(),
             },
         ];
@@ -1562,6 +1575,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("c2".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d2".to_string(),
             },
             AdmissionDecision {
@@ -1574,6 +1588,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("c1".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d1".to_string(),
             },
         ];
@@ -1610,6 +1625,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_a".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d1".to_string(),
             },
             AdmissionDecision {
@@ -1622,6 +1638,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_b".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d2".to_string(),
             },
         ];
@@ -1663,6 +1680,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_multi".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d1".to_string(),
             },
             // Signal 2: Refuse → event should be refused
@@ -1676,6 +1694,7 @@ mod tests {
                 null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: Some("corr_multi".to_string()),
+                manifest_version_hash: TEST_MANIFEST_HASH,
                 digest: "d2".to_string(),
             },
         ];
@@ -1706,6 +1725,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: Some("corr_x".to_string()),
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "d1".to_string(),
         }];
 
@@ -1730,6 +1750,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: Some("corr_x".to_string()),
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "d1_new".to_string(),
         }];
 
@@ -1751,6 +1772,7 @@ mod tests {
             null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: Some("corr_x".to_string()),
+            manifest_version_hash: TEST_MANIFEST_HASH,
             digest: "d1".to_string(),
         }];
 
