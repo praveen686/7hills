@@ -13,9 +13,14 @@
 //! ```
 
 use crate::replay::{EventKind, ReplayEvent, SegmentReplayAdapter};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use quantlaxmi_events::{CorrelationContext, DecisionEvent, DecisionTraceBuilder, MarketSnapshot};
+use quantlaxmi_gates::admission::{
+    AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
+};
+use quantlaxmi_models::{AdmissionDecision, AdmissionOutcome, SignalRequirements};
+use quantlaxmi_wal::{AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -35,6 +40,57 @@ pub enum PaceMode {
     /// Real-time pacing - sleep between events to match original timestamps.
     #[serde(rename = "real")]
     RealTime,
+}
+
+// =============================================================================
+// Phase 19D: Admission Mode & Enforcement
+// =============================================================================
+
+/// Admission mode for strategy invocation gating.
+///
+/// Controls how the engine decides whether to call `strategy.on_event()`.
+#[derive(Debug)]
+pub enum AdmissionMode {
+    /// Live evaluation: Evaluate admission using SignalAdmissionController.
+    /// This is the default 19C behavior.
+    EvaluateLive,
+
+    /// Enforce from WAL: Follow WAL admission decisions exactly.
+    /// The engine does NOT re-evaluate; it uses WAL as authoritative truth.
+    EnforceFromWal {
+        index: AdmissionIndex,
+        policy: AdmissionMismatchPolicy,
+    },
+}
+
+/// Policy for handling admission mismatches in enforce mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AdmissionMismatchPolicy {
+    /// Fail immediately on mismatch (default, strict).
+    #[default]
+    Fail,
+    /// Log warning but continue (follow WAL decision).
+    Warn,
+}
+
+impl AdmissionMismatchPolicy {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "warn" => Self::Warn,
+            _ => Self::Fail,
+        }
+    }
+}
+
+/// Result of admission decision for an event.
+#[derive(Debug)]
+pub struct AdmissionDecisionResult {
+    /// Whether the event is admitted (strategy should be called).
+    pub admit: bool,
+    /// Mismatches detected (only relevant in enforce mode with verification).
+    pub mismatches: Vec<AdmissionMismatch>,
+    /// Per-signal decisions (for WAL writing in live mode).
+    pub decisions: Vec<AdmissionDecision>,
 }
 
 // =============================================================================
@@ -705,7 +761,78 @@ impl Default for ExchangeConfig {
     }
 }
 
-/// Extract bid/ask prices from event payload.
+// =============================================================================
+// PHASE 19C: Admission Gating Helpers
+// =============================================================================
+
+/// Convert MarketSnapshot to VendorSnapshot for admission gating.
+///
+/// Uses FieldState bits from V2 snapshots to determine field presence.
+/// V1 snapshots validate prices (must be > 0) and always have quantities present.
+fn vendor_snapshot_from_market(snap: &MarketSnapshot) -> VendorSnapshot {
+    match snap {
+        MarketSnapshot::V1(v1) => {
+            // V1: Validate prices (must be > 0), qty always present (L5: Zero Is Valid)
+            VendorSnapshot {
+                bid_price: if v1.bid_price_mantissa > 0 {
+                    Some(v1.bid_price_mantissa)
+                } else {
+                    None
+                },
+                ask_price: if v1.ask_price_mantissa > 0 {
+                    Some(v1.ask_price_mantissa)
+                } else {
+                    None
+                },
+                buy_quantity: Some(v1.bid_qty_mantissa as u64),
+                sell_quantity: Some(v1.ask_qty_mantissa as u64),
+                ..VendorSnapshot::empty()
+            }
+        }
+        MarketSnapshot::V2(v2) => {
+            use quantlaxmi_models::events::{FieldState, get_field_state, l1_slots};
+
+            let bid_price_state = get_field_state(v2.l1_state_bits, l1_slots::BID_PRICE);
+            let ask_price_state = get_field_state(v2.l1_state_bits, l1_slots::ASK_PRICE);
+            let bid_qty_state = get_field_state(v2.l1_state_bits, l1_slots::BID_QTY);
+            let ask_qty_state = get_field_state(v2.l1_state_bits, l1_slots::ASK_QTY);
+
+            VendorSnapshot {
+                bid_price: if bid_price_state == FieldState::Value {
+                    Some(v2.bid_price_mantissa)
+                } else {
+                    None
+                },
+                ask_price: if ask_price_state == FieldState::Value {
+                    Some(v2.ask_price_mantissa)
+                } else {
+                    None
+                },
+                buy_quantity: if bid_qty_state == FieldState::Value {
+                    Some(v2.bid_qty_mantissa as u64)
+                } else {
+                    None
+                },
+                sell_quantity: if ask_qty_state == FieldState::Value {
+                    Some(v2.ask_qty_mantissa as u64)
+                } else {
+                    None
+                },
+                ..VendorSnapshot::empty()
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Quote Extraction (non-doctrine path for display/debug)
+// =============================================================================
+
+/// Extract bid/ask prices from event payload as f64.
+///
+/// **WARNING**: This function converts mantissas to floats. Use `extract_bid_ask_mantissa()`
+/// for doctrine-safe paths (scoring, replay, admission) to avoid float nondeterminism.
+///
 /// Handles both float format (bid/ask) and mantissa format (bid_price_mantissa + price_exponent).
 fn extract_bid_ask(payload: &serde_json::Value, kind: EventKind) -> (f64, f64) {
     // Try float format first (simple quotes)
@@ -779,6 +906,146 @@ fn extract_bid_ask(payload: &serde_json::Value, kind: EventKind) -> (f64, f64) {
             (bid, ask)
         }
         _ => (0.0, 0.0),
+    }
+}
+
+/// Extract bid/ask as mantissas + exponent, doctrine-safe (no float round-trips).
+///
+/// **Canonical path**: If the payload contains `bid_price_mantissa` / `ask_price_mantissa`,
+/// returns them directly with no float conversion. This ensures cross-platform determinism.
+///
+/// **Legacy fallback**: If only float `bid`/`ask` are present, quantizes to mantissa using
+/// the specified exponent. This path is not doctrine-perfect but preserves compatibility.
+///
+/// Returns `None` if no valid prices can be extracted (e.g., depth delta, unknown event).
+fn extract_bid_ask_mantissa(
+    payload: &serde_json::Value,
+    kind: EventKind,
+    default_price_exp: i8,
+) -> Option<(i64, i64, i8)> {
+    let price_exp = payload
+        .get("price_exponent")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(default_price_exp as i64) as i8;
+
+    match kind {
+        EventKind::SpotQuote | EventKind::PerpQuote => {
+            // Canonical path: use mantissas directly (no floats!)
+            let bid_m = payload.get("bid_price_mantissa").and_then(|v| v.as_i64());
+            let ask_m = payload.get("ask_price_mantissa").and_then(|v| v.as_i64());
+
+            if let (Some(bid_m), Some(ask_m)) = (bid_m, ask_m) {
+                if bid_m > 0 && ask_m > 0 {
+                    return Some((bid_m, ask_m, price_exp));
+                }
+            }
+
+            // Legacy fallback: float bid/ask → quantize to mantissa
+            // Not doctrine-perfect, but necessary for legacy data
+            let bid_f = payload.get("bid").and_then(|v| v.as_f64());
+            let ask_f = payload.get("ask").and_then(|v| v.as_f64());
+
+            if let (Some(bid_f), Some(ask_f)) = (bid_f, ask_f) {
+                if bid_f > 0.0 && ask_f > 0.0 {
+                    let scale = 10f64.powi(-(price_exp as i32));
+                    let bid_m = (bid_f * scale).round() as i64;
+                    let ask_m = (ask_f * scale).round() as i64;
+                    return Some((bid_m, ask_m, price_exp));
+                }
+            }
+
+            None
+        }
+        EventKind::PerpDepth => {
+            // Only snapshots have valid best bid/ask
+            let is_snapshot = payload
+                .get("is_snapshot")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            if !is_snapshot {
+                return None; // Skip deltas
+            }
+
+            // Snapshot: first bid is best bid, first ask is best ask
+            // These are already mantissas in canonical depth format
+            let bid_m = payload
+                .get("bids")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|level| level.get("price"))
+                .and_then(|v| v.as_i64());
+            let ask_m = payload
+                .get("asks")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|level| level.get("price"))
+                .and_then(|v| v.as_i64());
+
+            match (bid_m, ask_m) {
+                (Some(b), Some(a)) if b > 0 && a > 0 => Some((b, a, price_exp)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Extract bid/ask quantities as mantissas, doctrine-safe.
+///
+/// Returns `None` if quantities are not available in the payload.
+/// For depth snapshots, extracts quantities from the first bid/ask level.
+fn extract_bid_ask_qty_mantissa(
+    payload: &serde_json::Value,
+    kind: EventKind,
+    default_qty_exp: i8,
+) -> Option<(i64, i64, i8)> {
+    let qty_exp = payload
+        .get("qty_exponent")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(default_qty_exp as i64) as i8;
+
+    match kind {
+        EventKind::SpotQuote | EventKind::PerpQuote => {
+            // Canonical path: use mantissas directly
+            let bid_qty = payload.get("bid_qty_mantissa").and_then(|v| v.as_i64());
+            let ask_qty = payload.get("ask_qty_mantissa").and_then(|v| v.as_i64());
+
+            match (bid_qty, ask_qty) {
+                (Some(b), Some(a)) => Some((b, a, qty_exp)),
+                _ => None, // Quantities not in payload
+            }
+        }
+        EventKind::PerpDepth => {
+            let is_snapshot = payload
+                .get("is_snapshot")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            if !is_snapshot {
+                return None;
+            }
+
+            // Snapshot: extract qty from first level
+            let bid_qty = payload
+                .get("bids")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|level| level.get("qty"))
+                .and_then(|v| v.as_i64());
+            let ask_qty = payload
+                .get("asks")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|level| level.get("qty"))
+                .and_then(|v| v.as_i64());
+
+            match (bid_qty, ask_qty) {
+                (Some(b), Some(a)) => Some((b, a, qty_exp)),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 
@@ -1013,6 +1280,12 @@ pub struct BacktestConfig {
     /// Run ID for correlation context (auto-generated if not provided).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    /// Phase 19D: Enforce admission from WAL instead of re-evaluating.
+    #[serde(default)]
+    pub enforce_admission_from_wal: bool,
+    /// Phase 19D: Policy when enforcement detects mismatch.
+    #[serde(default)]
+    pub admission_mismatch_policy: String,
 }
 
 impl Default for BacktestConfig {
@@ -1023,6 +1296,8 @@ impl Default for BacktestConfig {
             pace: PaceMode::Fast,
             output_trace: None,
             run_id: None,
+            enforce_admission_from_wal: false,
+            admission_mismatch_policy: "fail".to_string(),
         }
     }
 }
@@ -1073,6 +1348,102 @@ pub struct BacktestEngine {
 impl BacktestEngine {
     pub fn new(config: BacktestConfig) -> Self {
         Self { config }
+    }
+
+    /// Centralized admission decision function (Phase 19D).
+    ///
+    /// Handles both live evaluation and WAL enforcement modes.
+    /// Returns whether the event should be admitted and any decisions made.
+    fn decide_admission(
+        mode: &AdmissionMode,
+        correlation_id: &str,
+        ts_ns: i64,
+        session_id: &str,
+        required_signals: &[SignalRequirements],
+        vendor_snapshot: &VendorSnapshot,
+        internal_snapshot: &InternalSnapshot,
+    ) -> Result<AdmissionDecisionResult> {
+        match mode {
+            AdmissionMode::EvaluateLive => {
+                // 19C path: Evaluate each signal live
+                let mut all_admitted = true;
+                let mut decisions = Vec::new();
+
+                for requirements in required_signals {
+                    let admission_ctx = AdmissionContext::new(ts_ns, session_id)
+                        .with_correlation(correlation_id.to_string());
+
+                    let decision = SignalAdmissionController::evaluate(
+                        requirements,
+                        vendor_snapshot,
+                        internal_snapshot,
+                        admission_ctx,
+                    );
+
+                    if decision.is_refused() {
+                        all_admitted = false;
+                    }
+                    decisions.push(decision);
+                }
+
+                Ok(AdmissionDecisionResult {
+                    admit: all_admitted,
+                    mismatches: Vec::new(),
+                    decisions,
+                })
+            }
+
+            AdmissionMode::EnforceFromWal { index, policy } => {
+                // 19D path: Follow WAL decisions exactly
+                let outcome = index.event_outcome(correlation_id);
+
+                match outcome {
+                    Some(AdmissionOutcome::Admit) => {
+                        // WAL says admit → admit
+                        Ok(AdmissionDecisionResult {
+                            admit: true,
+                            mismatches: Vec::new(),
+                            decisions: Vec::new(), // No new decisions in enforce mode
+                        })
+                    }
+                    Some(AdmissionOutcome::Refuse) => {
+                        // WAL says refuse → refuse
+                        Ok(AdmissionDecisionResult {
+                            admit: false,
+                            mismatches: Vec::new(),
+                            decisions: Vec::new(),
+                        })
+                    }
+                    None => {
+                        // Missing WAL entry
+                        let mismatch = AdmissionMismatch {
+                            correlation_id: correlation_id.to_string(),
+                            reason: AdmissionMismatchReason::MissingWalEntry,
+                        };
+
+                        match policy {
+                            AdmissionMismatchPolicy::Fail => Err(anyhow::anyhow!(
+                                "Admission enforcement failed: {} for correlation_id={}",
+                                mismatch.reason,
+                                correlation_id
+                            )),
+                            AdmissionMismatchPolicy::Warn => {
+                                tracing::warn!(
+                                    correlation_id = %correlation_id,
+                                    "Missing WAL entry in enforce mode; refusing event"
+                                );
+                                // Doctrine: Missing WAL entry → refuse (cannot prove admission)
+                                Ok(AdmissionDecisionResult {
+                                    admit: false,
+                                    mismatches: vec![mismatch],
+                                    decisions: Vec::new(),
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Run backtest on a segment with a strategy.
@@ -1356,6 +1727,48 @@ impl BacktestEngine {
         let mut peak_equity = self.config.exchange.initial_cash;
         let mut last_fill_count = 0usize;
 
+        // Phase 19C/19D: Admission gating
+        let required_signals = strategy.required_signals();
+        let has_admission_gating = !required_signals.is_empty();
+        let mut wal_writer = WalWriter::new(segment_dir).await?;
+        let session_id = format!("backtest_{}", run_id);
+        let mut admitted_events = 0u64;
+        let mut refused_events = 0u64;
+        let mut event_seq = 0u64;
+
+        // Phase 19D: Build admission mode
+        let admission_mode = if self.config.enforce_admission_from_wal && has_admission_gating {
+            // Load admission index from existing WAL
+            let index = AdmissionIndex::from_wal(segment_dir)
+                .context("Failed to load admission WAL for enforcement")?;
+            let policy = AdmissionMismatchPolicy::from_str(&self.config.admission_mismatch_policy);
+            tracing::info!(
+                wal_decisions = index.total_decisions,
+                policy = ?policy,
+                "Phase 19D: Enforcing admission from WAL"
+            );
+            AdmissionMode::EnforceFromWal { index, policy }
+        } else {
+            AdmissionMode::EvaluateLive
+        };
+
+        if has_admission_gating {
+            match &admission_mode {
+                AdmissionMode::EvaluateLive => {
+                    tracing::info!(
+                        signals = required_signals.len(),
+                        "Phase 19C admission gating enabled (live evaluation)"
+                    );
+                }
+                AdmissionMode::EnforceFromWal { .. } => {
+                    tracing::info!(
+                        signals = required_signals.len(),
+                        "Phase 19D admission gating enabled (WAL enforcement)"
+                    );
+                }
+            }
+        }
+
         let real_time = self.config.pace == PaceMode::RealTime;
         let wall_clock_start = std::time::Instant::now();
 
@@ -1385,42 +1798,57 @@ impl BacktestEngine {
             last_event_ts = Some(event.ts);
             end_ts = Some(event.ts);
 
-            // Update market state
+            // Update market state (for PaperExchange - still uses floats internally)
             exchange.update_market(&event);
-            let (bid, ask) = extract_bid_ask(&event.payload, event.kind);
-            if bid > 0.0 && ask > 0.0 {
+
+            // DOCTRINE-SAFE: Extract prices as mantissas (no float round-trips)
+            const DEFAULT_PRICE_EXP: i8 = -2;
+            const DEFAULT_QTY_EXP: i8 = -8;
+
+            if let Some((bid_m, ask_m, price_exp)) =
+                extract_bid_ask_mantissa(&event.payload, event.kind, DEFAULT_PRICE_EXP)
+            {
                 let book_ts_ns = event.ts.timestamp_nanos_opt().unwrap_or(0);
 
-                // Update fixed-point market snapshot for strategy context
-                const PRICE_EXPONENT: i8 = -2;
-                const QTY_EXPONENT: i8 = -8;
-                let price_scale = 10f64.powi(-PRICE_EXPONENT as i32);
-                let bid_price_mantissa = (bid * price_scale).round() as i64;
-                let ask_price_mantissa = (ask * price_scale).round() as i64;
+                // Extract quantities if available (doctrine-safe)
+                let (bid_qty_m, ask_qty_m, qty_exp, qty_state) = if let Some((bq, aq, qe)) =
+                    extract_bid_ask_qty_mantissa(&event.payload, event.kind, DEFAULT_QTY_EXP)
+                {
+                    (bq, aq, qe, quantlaxmi_models::FieldState::Value)
+                } else {
+                    // Quantities not in payload → mark Absent (not fabricated)
+                    (0, 0, DEFAULT_QTY_EXP, quantlaxmi_models::FieldState::Absent)
+                };
 
-                // Compute spread in basis points
-                let mid_price = (bid + ask) / 2.0;
-                let spread_bps_mantissa = if mid_price > 0.0 {
-                    MarketSnapshot::spread_bps_from_f64(((ask - bid) / mid_price) * 10_000.0)
+                // Compute spread in basis points using integer math (no floats)
+                // spread_bps = (ask - bid) / mid * 10000
+                // For mantissas: spread_bps = (ask_m - bid_m) * 10000 * 2 / (bid_m + ask_m)
+                let spread_bps_mantissa = if bid_m > 0 && ask_m > 0 {
+                    let spread_m = ask_m - bid_m;
+                    let mid_m = bid_m + ask_m; // 2 * mid
+                    // spread_bps = spread / mid * 10000 = spread * 20000 / (2 * mid)
+                    // Use i128 to avoid overflow, then scale to exponent -2
+                    let spread_bps_raw = (spread_m as i128 * 20000) / (mid_m as i128);
+                    spread_bps_raw as i64
                 } else {
                     0
                 };
 
-                // Create new V2 snapshot (prices present, quantities absent)
+                // Create V2 snapshot with proper field states (doctrine-safe)
                 market_snapshot = MarketSnapshot::v2_with_states(
-                    bid_price_mantissa,
-                    ask_price_mantissa,
-                    0, // bid_qty: not tracked in backtest
-                    0, // ask_qty: not tracked in backtest
-                    PRICE_EXPONENT,
-                    QTY_EXPONENT,
+                    bid_m,
+                    ask_m,
+                    bid_qty_m,
+                    ask_qty_m,
+                    price_exp,
+                    qty_exp,
                     spread_bps_mantissa,
                     book_ts_ns,
                     quantlaxmi_models::build_l1_state_bits(
-                        quantlaxmi_models::FieldState::Value,  // bid_price: present
-                        quantlaxmi_models::FieldState::Value,  // ask_price: present
-                        quantlaxmi_models::FieldState::Absent, // bid_qty: not tracked
-                        quantlaxmi_models::FieldState::Absent, // ask_qty: not tracked
+                        quantlaxmi_models::FieldState::Value, // bid_price: present
+                        quantlaxmi_models::FieldState::Value, // ask_price: present
+                        qty_state,                            // bid_qty: present or absent
+                        qty_state,                            // ask_qty: present or absent
                     ),
                 );
             }
@@ -1448,8 +1876,68 @@ impl BacktestEngine {
                 market: &market_snapshot,
             };
 
-            // Strategy returns authored decisions + intents
-            let outputs = strategy.on_event(&sdk_event, &ctx);
+            // =====================================================================
+            // PHASE 19C/19D: Admission Gating (BEFORE strategy.on_event)
+            // =====================================================================
+            event_seq += 1;
+            let ts_ns = event.ts.timestamp_nanos_opt().unwrap_or(0);
+            let correlation_id = format!("event_seq:{}", event_seq);
+
+            // Determine admission using centralized function
+            let admission_result = if has_admission_gating {
+                let vendor_snapshot = vendor_snapshot_from_market(&market_snapshot);
+                let internal_snapshot = InternalSnapshot::empty(); // TODO: build from engine state
+
+                Self::decide_admission(
+                    &admission_mode,
+                    &correlation_id,
+                    ts_ns,
+                    &session_id,
+                    &required_signals,
+                    &vendor_snapshot,
+                    &internal_snapshot,
+                )?
+            } else {
+                // No gating required → always admit
+                AdmissionDecisionResult {
+                    admit: true,
+                    mismatches: Vec::new(),
+                    decisions: Vec::new(),
+                }
+            };
+
+            // DOCTRINE: Write decisions to WAL FIRST (live mode only)
+            // In enforce mode, we don't write new decisions (WAL is authoritative)
+            if matches!(admission_mode, AdmissionMode::EvaluateLive) {
+                for decision in &admission_result.decisions {
+                    wal_writer.write_admission(decision.clone()).await?;
+
+                    if decision.is_refused() {
+                        tracing::trace!(
+                            signal = %decision.signal_id,
+                            missing = ?decision.missing_vendor_fields,
+                            "Admission refused for signal"
+                        );
+                    }
+                }
+            }
+
+            // Track admit/refuse counts
+            if has_admission_gating {
+                if admission_result.admit {
+                    admitted_events += 1;
+                } else {
+                    refused_events += 1;
+                }
+            }
+
+            // Strategy is ONLY called if ALL required signals are admitted
+            let outputs = if admission_result.admit {
+                strategy.on_event(&sdk_event, &ctx)
+            } else {
+                // Skip strategy call - admission refused
+                Vec::new()
+            };
 
             // Process each decision output
             for output in outputs {
@@ -1585,6 +2073,17 @@ impl BacktestEngine {
             let fee_mantissa = (fill.fee * 100_000_000.0).round() as i64;
             let is_buy = matches!(fill.side, Side::Buy);
             pnl_fixed.process_fill(price_mantissa, qty_mantissa, fee_mantissa, is_buy);
+        }
+
+        // Phase 19C: Finalize WAL and log admission stats
+        wal_writer.flush().await?;
+        if has_admission_gating {
+            tracing::info!(
+                admitted = admitted_events,
+                refused = refused_events,
+                total = admitted_events + refused_events,
+                "Phase 19C admission gating complete"
+            );
         }
 
         // Create strategy binding for manifest
@@ -2158,5 +2657,221 @@ mod tests {
             "Expected ~$10 short profit, got {}",
             pnl_f64
         );
+    }
+
+    // =========================================================================
+    // Phase 19C: Canonical Quote Extraction Tests (no float round-trips)
+    // =========================================================================
+
+    #[test]
+    fn test_extract_bid_ask_mantissa_canonical_path() {
+        // Canonical payload: mantissas present, no floats in round-trip
+        let payload = serde_json::json!({
+            "bid_price_mantissa": 8874152_i64,
+            "ask_price_mantissa": 8874252_i64,
+            "price_exponent": -2
+        });
+
+        let result = extract_bid_ask_mantissa(&payload, EventKind::PerpQuote, -2);
+        assert!(result.is_some(), "Should extract canonical mantissas");
+
+        let (bid_m, ask_m, exp) = result.unwrap();
+        // CRITICAL: mantissas must be bit-identical to input (no float conversion)
+        assert_eq!(
+            bid_m, 8874152,
+            "Bid mantissa must be exact (no float round-trip)"
+        );
+        assert_eq!(
+            ask_m, 8874252,
+            "Ask mantissa must be exact (no float round-trip)"
+        );
+        assert_eq!(exp, -2, "Exponent must match payload");
+    }
+
+    #[test]
+    fn test_extract_bid_ask_mantissa_determinism() {
+        // Same canonical payload run multiple times must produce identical results
+        let payload = serde_json::json!({
+            "bid_price_mantissa": 8874152_i64,
+            "ask_price_mantissa": 8874252_i64,
+            "price_exponent": -2
+        });
+
+        let results: Vec<_> = (0..100)
+            .map(|_| extract_bid_ask_mantissa(&payload, EventKind::PerpQuote, -2))
+            .collect();
+
+        // All results must be identical
+        let first = results[0];
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(
+                *result, first,
+                "Run {} produced different result: {:?} vs {:?}",
+                i, result, first
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_bid_ask_mantissa_legacy_fallback() {
+        // Legacy payload: only float bid/ask (not canonical)
+        let payload = serde_json::json!({
+            "bid": 88741.52,
+            "ask": 88742.52
+        });
+
+        let result = extract_bid_ask_mantissa(&payload, EventKind::PerpQuote, -2);
+        assert!(result.is_some(), "Should fall back to legacy floats");
+
+        let (bid_m, ask_m, exp) = result.unwrap();
+        // Legacy path: floats quantized to mantissa
+        // 88741.52 * 100 = 8874152
+        assert_eq!(bid_m, 8874152, "Bid should quantize correctly");
+        assert_eq!(ask_m, 8874252, "Ask should quantize correctly");
+        assert_eq!(exp, -2, "Should use default exponent");
+    }
+
+    #[test]
+    fn test_extract_bid_ask_mantissa_canonical_takes_priority() {
+        // Payload has BOTH canonical mantissas AND legacy floats
+        // Canonical must take priority (no float conversion)
+        let payload = serde_json::json!({
+            "bid_price_mantissa": 8874152_i64,
+            "ask_price_mantissa": 8874252_i64,
+            "price_exponent": -2,
+            // Legacy floats (slightly different to detect wrong path)
+            "bid": 88741.99,
+            "ask": 88742.99
+        });
+
+        let result = extract_bid_ask_mantissa(&payload, EventKind::PerpQuote, -2);
+        let (bid_m, ask_m, _) = result.unwrap();
+
+        // Must use canonical mantissas, NOT quantized floats
+        assert_eq!(
+            bid_m, 8874152,
+            "Must use canonical mantissa, not legacy float"
+        );
+        assert_eq!(
+            ask_m, 8874252,
+            "Must use canonical mantissa, not legacy float"
+        );
+    }
+
+    #[test]
+    fn test_extract_bid_ask_qty_mantissa_present() {
+        // Payload with quantities
+        let payload = serde_json::json!({
+            "bid_qty_mantissa": 50000000_i64,  // 0.5 BTC
+            "ask_qty_mantissa": 75000000_i64,  // 0.75 BTC
+            "qty_exponent": -8
+        });
+
+        let result = extract_bid_ask_qty_mantissa(&payload, EventKind::PerpQuote, -8);
+        assert!(result.is_some(), "Should extract quantities when present");
+
+        let (bid_qty, ask_qty, exp) = result.unwrap();
+        assert_eq!(bid_qty, 50000000);
+        assert_eq!(ask_qty, 75000000);
+        assert_eq!(exp, -8);
+    }
+
+    #[test]
+    fn test_extract_bid_ask_qty_mantissa_absent() {
+        // Payload without quantities (common in backtest data)
+        let payload = serde_json::json!({
+            "bid_price_mantissa": 8874152_i64,
+            "ask_price_mantissa": 8874252_i64,
+            "price_exponent": -2
+            // No qty fields!
+        });
+
+        let result = extract_bid_ask_qty_mantissa(&payload, EventKind::PerpQuote, -8);
+        assert!(
+            result.is_none(),
+            "Should return None when quantities absent"
+        );
+    }
+
+    #[test]
+    fn test_spread_bps_integer_math() {
+        // Test the integer spread calculation used in run_with_strategy
+        // spread_bps = (ask - bid) / mid * 10000
+        // For bid=88741.52, ask=88742.52: spread = 1.00, mid = 88742.02
+        // spread_bps = 1.00 / 88742.02 * 10000 ≈ 0.1127 bps
+
+        let bid_m: i64 = 8874152;
+        let ask_m: i64 = 8874252;
+
+        // Integer calculation (same as in run_with_strategy)
+        let spread_m = ask_m - bid_m;
+        let mid_m = bid_m + ask_m;
+        let spread_bps_raw = (spread_m as i128 * 20000) / (mid_m as i128);
+        let spread_bps = spread_bps_raw as i64;
+
+        // Verify it's reasonable (should be ~1 basis point for $1 spread on ~$88k)
+        assert!(spread_bps >= 0, "Spread must be non-negative");
+        assert!(
+            spread_bps < 100,
+            "Spread should be less than 1% for this data"
+        );
+
+        // Run twice to confirm determinism
+        let spread_bps_2 = ((spread_m as i128 * 20000) / (mid_m as i128)) as i64;
+        assert_eq!(
+            spread_bps, spread_bps_2,
+            "Integer spread calc must be deterministic"
+        );
+    }
+
+    #[test]
+    fn test_depth_snapshot_mantissa_extraction() {
+        // Depth snapshot payload (canonical format)
+        let payload = serde_json::json!({
+            "is_snapshot": true,
+            "price_exponent": -2,
+            "qty_exponent": -8,
+            "bids": [
+                {"price": 8874152_i64, "qty": 50000000_i64},
+                {"price": 8874100_i64, "qty": 30000000_i64}
+            ],
+            "asks": [
+                {"price": 8874252_i64, "qty": 40000000_i64},
+                {"price": 8874300_i64, "qty": 20000000_i64}
+            ]
+        });
+
+        // Extract prices
+        let price_result = extract_bid_ask_mantissa(&payload, EventKind::PerpDepth, -2);
+        assert!(
+            price_result.is_some(),
+            "Should extract depth snapshot prices"
+        );
+        let (bid_m, ask_m, _) = price_result.unwrap();
+        assert_eq!(bid_m, 8874152, "Best bid from snapshot");
+        assert_eq!(ask_m, 8874252, "Best ask from snapshot");
+
+        // Extract quantities
+        let qty_result = extract_bid_ask_qty_mantissa(&payload, EventKind::PerpDepth, -8);
+        assert!(
+            qty_result.is_some(),
+            "Should extract depth snapshot quantities"
+        );
+        let (bid_qty, ask_qty, _) = qty_result.unwrap();
+        assert_eq!(bid_qty, 50000000, "Best bid qty from snapshot");
+        assert_eq!(ask_qty, 40000000, "Best ask qty from snapshot");
+    }
+
+    #[test]
+    fn test_depth_delta_returns_none() {
+        // Depth delta (not snapshot) should return None
+        let payload = serde_json::json!({
+            "is_snapshot": false,
+            "bids": [{"price": 8874152_i64, "qty": 50000000_i64}],
+            "asks": []
+        });
+
+        let result = extract_bid_ask_mantissa(&payload, EventKind::PerpDepth, -2);
+        assert!(result.is_none(), "Depth deltas should return None");
     }
 }

@@ -455,6 +455,11 @@ impl WalReader {
         self.read_jsonl("wal/risk.jsonl")
     }
 
+    /// Read signal admission decisions (Phase 18/19C).
+    pub fn read_admission_decisions(&self) -> Result<Vec<AdmissionDecision>> {
+        self.read_jsonl("wal/signals_admission.jsonl")
+    }
+
     /// Read JSONL file into typed records.
     fn read_jsonl<T: DeserializeOwned>(&self, rel_path: &str) -> Result<Vec<T>> {
         let path = self.session_dir.join(rel_path);
@@ -622,6 +627,436 @@ pub fn sha256_file_hex(path: &Path) -> Result<String> {
     }
 
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+// =============================================================================
+// PHASE 19D: ADMISSION SUMMARY & REPLAY ENFORCEMENT
+// =============================================================================
+
+use std::collections::BTreeMap;
+
+/// Schema version for admission summary serialization.
+pub const ADMISSION_SUMMARY_SCHEMA_VERSION: &str = "1.0.0";
+
+/// Per-signal admission statistics.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SignalAdmissionStats {
+    /// Total events where this signal was evaluated
+    pub evaluated: u64,
+    /// Events where this signal was admitted
+    pub admitted: u64,
+    /// Events where this signal was refused
+    pub refused: u64,
+    /// Refusal reason counts (sorted for determinism)
+    pub refusal_reason_counts: BTreeMap<String, u64>,
+}
+
+/// Time range for admission summary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdmissionTimeRange {
+    pub first_ts_ns: i64,
+    pub last_ts_ns: i64,
+}
+
+/// Segment admission summary (Phase 19D).
+///
+/// Materialized from WAL admission records. Provides operator-readable
+/// aggregates without requiring re-processing of raw events.
+///
+/// ## Invariants
+/// - All maps are `BTreeMap` for deterministic serialization order
+/// - Counts are integers (no floats)
+/// - Summary is byte-reproducible from the same WAL
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SegmentAdmissionSummary {
+    /// Schema version for forward compatibility
+    pub schema_version: String,
+    /// Session identifier
+    pub session_id: String,
+    /// Time range of evaluated events
+    pub time_range: Option<AdmissionTimeRange>,
+
+    // === Totals ===
+    /// Events where admission gating was evaluated (required_signals non-empty)
+    pub evaluated_events: u64,
+    /// Events where ALL signals were admitted (strategy was called)
+    pub admitted_events: u64,
+    /// Events where ANY signal was refused (strategy NOT called)
+    pub refused_events: u64,
+
+    // === Per-signal breakdown ===
+    /// Per-signal statistics (sorted by signal_id)
+    pub per_signal: BTreeMap<String, SignalAdmissionStats>,
+
+    // === Global refusal reasons ===
+    /// Missing vendor fields histogram (merged across all signals)
+    pub missing_vendor_field_counts: BTreeMap<String, u64>,
+    /// Missing internal fields histogram (merged across all signals)
+    pub missing_internal_field_counts: BTreeMap<String, u64>,
+    /// Null vendor fields histogram (merged across all signals)
+    pub null_vendor_field_counts: BTreeMap<String, u64>,
+}
+
+impl SegmentAdmissionSummary {
+    /// Create empty summary for a session.
+    pub fn new(session_id: impl Into<String>) -> Self {
+        Self {
+            schema_version: ADMISSION_SUMMARY_SCHEMA_VERSION.to_string(),
+            session_id: session_id.into(),
+            time_range: None,
+            evaluated_events: 0,
+            admitted_events: 0,
+            refused_events: 0,
+            per_signal: BTreeMap::new(),
+            missing_vendor_field_counts: BTreeMap::new(),
+            missing_internal_field_counts: BTreeMap::new(),
+            null_vendor_field_counts: BTreeMap::new(),
+        }
+    }
+
+    /// Materialize summary from WAL admission decisions.
+    ///
+    /// Groups decisions by correlation_id to compute event-level outcomes.
+    /// An event is "admitted" only if ALL per-signal decisions are Admit.
+    pub fn from_decisions(session_id: impl Into<String>, decisions: &[AdmissionDecision]) -> Self {
+        let mut summary = Self::new(session_id);
+
+        if decisions.is_empty() {
+            return summary;
+        }
+
+        // Track time range
+        let mut first_ts_ns = i64::MAX;
+        let mut last_ts_ns = i64::MIN;
+
+        // Group by correlation_id to determine event-level outcome
+        let mut events_by_correlation: BTreeMap<String, Vec<&AdmissionDecision>> = BTreeMap::new();
+
+        for decision in decisions {
+            // Update time range
+            first_ts_ns = first_ts_ns.min(decision.ts_ns);
+            last_ts_ns = last_ts_ns.max(decision.ts_ns);
+
+            // Group by correlation_id (or use digest if no correlation)
+            let key = decision
+                .correlation_id
+                .clone()
+                .unwrap_or_else(|| decision.digest.clone());
+            events_by_correlation.entry(key).or_default().push(decision);
+
+            // Per-signal stats
+            let signal_stats = summary
+                .per_signal
+                .entry(decision.signal_id.clone())
+                .or_default();
+            signal_stats.evaluated += 1;
+
+            if decision.outcome == AdmissionOutcome::Admit {
+                signal_stats.admitted += 1;
+            } else {
+                signal_stats.refused += 1;
+
+                // Track refusal reasons
+                for field in &decision.missing_vendor_fields {
+                    let key = format!("missing:{}", field);
+                    *signal_stats
+                        .refusal_reason_counts
+                        .entry(key.clone())
+                        .or_default() += 1;
+                    *summary
+                        .missing_vendor_field_counts
+                        .entry(field.to_string())
+                        .or_default() += 1;
+                }
+                for field in &decision.null_vendor_fields {
+                    let key = format!("null:{}", field);
+                    *signal_stats
+                        .refusal_reason_counts
+                        .entry(key.clone())
+                        .or_default() += 1;
+                    *summary
+                        .null_vendor_field_counts
+                        .entry(field.to_string())
+                        .or_default() += 1;
+                }
+                for field in &decision.missing_internal_fields {
+                    let key = format!("missing_internal:{}", field);
+                    *signal_stats
+                        .refusal_reason_counts
+                        .entry(key.clone())
+                        .or_default() += 1;
+                    *summary
+                        .missing_internal_field_counts
+                        .entry(field.to_string())
+                        .or_default() += 1;
+                }
+            }
+        }
+
+        // Compute event-level outcomes
+        for event_decisions in events_by_correlation.values() {
+            summary.evaluated_events += 1;
+
+            // Event is admitted only if ALL signals are admitted
+            let all_admitted = event_decisions
+                .iter()
+                .all(|d| d.outcome == AdmissionOutcome::Admit);
+
+            if all_admitted {
+                summary.admitted_events += 1;
+            } else {
+                summary.refused_events += 1;
+            }
+        }
+
+        // Set time range
+        if first_ts_ns != i64::MAX {
+            summary.time_range = Some(AdmissionTimeRange {
+                first_ts_ns,
+                last_ts_ns,
+            });
+        }
+
+        summary
+    }
+
+    /// Write summary to a JSON file.
+    pub fn write(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self).context("serialize admission summary")?;
+        std::fs::write(path, json).context("write admission summary")?;
+        Ok(())
+    }
+
+    /// Load summary from a JSON file.
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = std::fs::read_to_string(path).context("read admission summary")?;
+        let summary: Self = serde_json::from_str(&content).context("parse admission summary")?;
+        Ok(summary)
+    }
+}
+
+// =============================================================================
+// ADMISSION INDEX (for replay enforcement)
+// =============================================================================
+
+/// Index of admission decisions for replay enforcement.
+///
+/// Provides O(1) lookup by correlation_id during replay.
+/// Used when `--enforce-admission-from-wal` is enabled.
+#[derive(Debug, Clone)]
+pub struct AdmissionIndex {
+    /// Decisions indexed by correlation_id
+    by_correlation: HashMap<String, Vec<AdmissionDecision>>,
+    /// Total decisions in index
+    pub total_decisions: usize,
+}
+
+/// Mismatch detected during admission enforcement.
+#[derive(Debug, Clone)]
+pub struct AdmissionMismatch {
+    pub correlation_id: String,
+    pub reason: AdmissionMismatchReason,
+}
+
+/// Reason for admission enforcement mismatch.
+#[derive(Debug, Clone)]
+pub enum AdmissionMismatchReason {
+    /// No WAL entry found for this correlation_id
+    MissingWalEntry,
+    /// WAL says Admit but current state would Refuse
+    AdmitButWouldRefuse { current_missing: Vec<String> },
+    /// WAL says Refuse but current state would Admit
+    RefuseButWouldAdmit,
+    /// Signal set mismatch (strategy requirements changed)
+    SignalSetMismatch {
+        wal_signals: Vec<String>,
+        current_signals: Vec<String>,
+    },
+    /// Missing fields don't match
+    MissingFieldsMismatch {
+        wal_missing: Vec<String>,
+        current_missing: Vec<String>,
+    },
+}
+
+impl std::fmt::Display for AdmissionMismatchReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingWalEntry => write!(f, "no WAL entry for correlation_id"),
+            Self::AdmitButWouldRefuse { current_missing } => {
+                write!(
+                    f,
+                    "WAL=Admit but current would Refuse (missing: {:?})",
+                    current_missing
+                )
+            }
+            Self::RefuseButWouldAdmit => write!(f, "WAL=Refuse but current would Admit"),
+            Self::SignalSetMismatch {
+                wal_signals,
+                current_signals,
+            } => {
+                write!(
+                    f,
+                    "signal set changed: WAL={:?}, current={:?}",
+                    wal_signals, current_signals
+                )
+            }
+            Self::MissingFieldsMismatch {
+                wal_missing,
+                current_missing,
+            } => {
+                write!(
+                    f,
+                    "missing fields differ: WAL={:?}, current={:?}",
+                    wal_missing, current_missing
+                )
+            }
+        }
+    }
+}
+
+impl AdmissionIndex {
+    /// Build index from WAL decisions.
+    pub fn from_decisions(decisions: Vec<AdmissionDecision>) -> Self {
+        let total_decisions = decisions.len();
+        let mut by_correlation: HashMap<String, Vec<AdmissionDecision>> = HashMap::new();
+
+        for decision in decisions {
+            let key = decision
+                .correlation_id
+                .clone()
+                .unwrap_or_else(|| decision.digest.clone());
+            by_correlation.entry(key).or_default().push(decision);
+        }
+
+        Self {
+            by_correlation,
+            total_decisions,
+        }
+    }
+
+    /// Load index from WAL file.
+    pub fn from_wal(session_dir: &Path) -> Result<Self> {
+        let reader = WalReader::open(session_dir)?;
+        let decisions = reader.read_admission_decisions()?;
+        Ok(Self::from_decisions(decisions))
+    }
+
+    /// Look up decisions for a correlation_id.
+    pub fn get(&self, correlation_id: &str) -> Option<&Vec<AdmissionDecision>> {
+        self.by_correlation.get(correlation_id)
+    }
+
+    /// Check if correlation_id exists in index.
+    pub fn contains(&self, correlation_id: &str) -> bool {
+        self.by_correlation.contains_key(correlation_id)
+    }
+
+    /// Get the event-level outcome for a correlation_id.
+    ///
+    /// Returns Admit only if ALL per-signal decisions are Admit.
+    pub fn event_outcome(&self, correlation_id: &str) -> Option<AdmissionOutcome> {
+        self.by_correlation.get(correlation_id).map(|decisions| {
+            if decisions
+                .iter()
+                .all(|d| d.outcome == AdmissionOutcome::Admit)
+            {
+                AdmissionOutcome::Admit
+            } else {
+                AdmissionOutcome::Refuse
+            }
+        })
+    }
+
+    /// Verify that current evaluation matches WAL record.
+    ///
+    /// Returns Ok(outcome) if matches, Err(mismatch) if differs.
+    pub fn verify_decision(
+        &self,
+        correlation_id: &str,
+        current_decisions: &[AdmissionDecision],
+    ) -> std::result::Result<AdmissionOutcome, AdmissionMismatch> {
+        let wal_decisions = match self.by_correlation.get(correlation_id) {
+            Some(d) => d,
+            None => {
+                return Err(AdmissionMismatch {
+                    correlation_id: correlation_id.to_string(),
+                    reason: AdmissionMismatchReason::MissingWalEntry,
+                });
+            }
+        };
+
+        // Check signal set match
+        let mut wal_signals: Vec<String> =
+            wal_decisions.iter().map(|d| d.signal_id.clone()).collect();
+        let mut current_signals: Vec<String> = current_decisions
+            .iter()
+            .map(|d| d.signal_id.clone())
+            .collect();
+        wal_signals.sort();
+        current_signals.sort();
+
+        if wal_signals != current_signals {
+            return Err(AdmissionMismatch {
+                correlation_id: correlation_id.to_string(),
+                reason: AdmissionMismatchReason::SignalSetMismatch {
+                    wal_signals,
+                    current_signals,
+                },
+            });
+        }
+
+        // Check per-signal outcomes match
+        let wal_outcome = if wal_decisions
+            .iter()
+            .all(|d| d.outcome == AdmissionOutcome::Admit)
+        {
+            AdmissionOutcome::Admit
+        } else {
+            AdmissionOutcome::Refuse
+        };
+
+        let current_outcome = if current_decisions
+            .iter()
+            .all(|d| d.outcome == AdmissionOutcome::Admit)
+        {
+            AdmissionOutcome::Admit
+        } else {
+            AdmissionOutcome::Refuse
+        };
+
+        if wal_outcome != current_outcome {
+            match (wal_outcome, current_outcome) {
+                (AdmissionOutcome::Admit, AdmissionOutcome::Refuse) => {
+                    let current_missing: Vec<String> = current_decisions
+                        .iter()
+                        .flat_map(|d| d.missing_vendor_fields.iter().map(|f| f.to_string()))
+                        .collect();
+                    return Err(AdmissionMismatch {
+                        correlation_id: correlation_id.to_string(),
+                        reason: AdmissionMismatchReason::AdmitButWouldRefuse { current_missing },
+                    });
+                }
+                (AdmissionOutcome::Refuse, AdmissionOutcome::Admit) => {
+                    return Err(AdmissionMismatch {
+                        correlation_id: correlation_id.to_string(),
+                        reason: AdmissionMismatchReason::RefuseButWouldAdmit,
+                    });
+                }
+                _ => {} // Same outcome
+            }
+        }
+
+        // Optionally verify missing fields match (stricter check)
+        // For now, we only check outcome match
+
+        Ok(wal_outcome)
+    }
+
+    /// Number of unique correlation_ids (events) in index.
+    pub fn event_count(&self) -> usize {
+        self.by_correlation.len()
+    }
 }
 
 #[cfg(test)]
@@ -819,6 +1254,7 @@ mod tests {
             signal_id: "book_imbalance".to_string(),
             outcome: AdmissionOutcome::Admit,
             missing_vendor_fields: vec![],
+            null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: Some("corr_001".to_string()),
             digest: "abc123".to_string(),
@@ -833,6 +1269,7 @@ mod tests {
             signal_id: "book_imbalance".to_string(),
             outcome: AdmissionOutcome::Refuse,
             missing_vendor_fields: vec![VendorField::BuyQuantity],
+            null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
             digest: "def456".to_string(),
@@ -879,6 +1316,7 @@ mod tests {
             signal_id: "test_signal".to_string(),
             outcome: AdmissionOutcome::Admit,
             missing_vendor_fields: vec![],
+            null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
             digest: "test".to_string(),
@@ -912,6 +1350,7 @@ mod tests {
                 signal_id: "sig".to_string(),
                 outcome: AdmissionOutcome::Admit,
                 missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: None,
                 digest: "d1".to_string(),
@@ -931,6 +1370,7 @@ mod tests {
                 signal_id: "sig".to_string(),
                 outcome: AdmissionOutcome::Refuse,
                 missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
                 missing_internal_fields: vec![],
                 correlation_id: None,
                 digest: "d2".to_string(),
@@ -969,6 +1409,7 @@ mod tests {
             signal_id: "book_imbalance".to_string(),
             outcome: AdmissionOutcome::Refuse,
             missing_vendor_fields: vec![VendorField::SellQuantity],
+            null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
             digest: "refuse_digest".to_string(),
@@ -996,5 +1437,325 @@ mod tests {
             "WAL should contain missing field: {}",
             content
         );
+    }
+
+    // =========================================================================
+    // PHASE 19D: Admission Summary & Index Tests
+    // =========================================================================
+
+    #[test]
+    fn test_segment_admission_summary_counts_match_wal() {
+        use quantlaxmi_models::{
+            ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome, VendorField,
+        };
+
+        // Create test decisions
+        let decisions = vec![
+            // Event 1 (corr_001): book_imbalance Admit
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 1000,
+                session_id: "sess".to_string(),
+                signal_id: "book_imbalance".to_string(),
+                outcome: AdmissionOutcome::Admit,
+                missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_001".to_string()),
+                digest: "d1".to_string(),
+            },
+            // Event 2 (corr_002): book_imbalance Refuse
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 2000,
+                session_id: "sess".to_string(),
+                signal_id: "book_imbalance".to_string(),
+                outcome: AdmissionOutcome::Refuse,
+                missing_vendor_fields: vec![VendorField::BuyQuantity],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_002".to_string()),
+                digest: "d2".to_string(),
+            },
+            // Event 3 (corr_003): spread Admit, book_imbalance Refuse (event refused)
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 3000,
+                session_id: "sess".to_string(),
+                signal_id: "spread".to_string(),
+                outcome: AdmissionOutcome::Admit,
+                missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_003".to_string()),
+                digest: "d3a".to_string(),
+            },
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 3000,
+                session_id: "sess".to_string(),
+                signal_id: "book_imbalance".to_string(),
+                outcome: AdmissionOutcome::Refuse,
+                missing_vendor_fields: vec![VendorField::SellQuantity],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_003".to_string()),
+                digest: "d3b".to_string(),
+            },
+        ];
+
+        let summary = SegmentAdmissionSummary::from_decisions("test_session", &decisions);
+
+        // Verify totals
+        assert_eq!(summary.evaluated_events, 3, "3 unique correlation_ids");
+        assert_eq!(summary.admitted_events, 1, "Only corr_001 fully admitted");
+        assert_eq!(summary.refused_events, 2, "corr_002 and corr_003 refused");
+
+        // Verify per-signal stats
+        let book_stats = summary.per_signal.get("book_imbalance").unwrap();
+        assert_eq!(book_stats.evaluated, 3);
+        assert_eq!(book_stats.admitted, 1);
+        assert_eq!(book_stats.refused, 2);
+
+        let spread_stats = summary.per_signal.get("spread").unwrap();
+        assert_eq!(spread_stats.evaluated, 1);
+        assert_eq!(spread_stats.admitted, 1);
+        assert_eq!(spread_stats.refused, 0);
+
+        // Verify missing field counts (VendorField::Display uses snake_case)
+        assert_eq!(
+            *summary
+                .missing_vendor_field_counts
+                .get("buy_quantity")
+                .unwrap_or(&0),
+            1
+        );
+        assert_eq!(
+            *summary
+                .missing_vendor_field_counts
+                .get("sell_quantity")
+                .unwrap_or(&0),
+            1
+        );
+
+        // Verify time range
+        let range = summary.time_range.as_ref().unwrap();
+        assert_eq!(range.first_ts_ns, 1000);
+        assert_eq!(range.last_ts_ns, 3000);
+    }
+
+    #[test]
+    fn test_segment_admission_summary_deterministic_ordering() {
+        use quantlaxmi_models::{
+            ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome, VendorField,
+        };
+
+        // Create decisions in random order
+        let decisions1 = vec![
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 2000,
+                session_id: "s".to_string(),
+                signal_id: "zebra".to_string(),
+                outcome: AdmissionOutcome::Refuse,
+                missing_vendor_fields: vec![VendorField::AskPrice],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("c2".to_string()),
+                digest: "d2".to_string(),
+            },
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 1000,
+                session_id: "s".to_string(),
+                signal_id: "alpha".to_string(),
+                outcome: AdmissionOutcome::Admit,
+                missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("c1".to_string()),
+                digest: "d1".to_string(),
+            },
+        ];
+
+        // Create same decisions in different order
+        let decisions2 = vec![decisions1[1].clone(), decisions1[0].clone()];
+
+        let summary1 = SegmentAdmissionSummary::from_decisions("s", &decisions1);
+        let summary2 = SegmentAdmissionSummary::from_decisions("s", &decisions2);
+
+        // Serialize both
+        let json1 = serde_json::to_string_pretty(&summary1).unwrap();
+        let json2 = serde_json::to_string_pretty(&summary2).unwrap();
+
+        // Should be byte-identical (BTreeMap ensures sorted keys)
+        assert_eq!(
+            json1, json2,
+            "Summary should be deterministic regardless of input order"
+        );
+    }
+
+    #[test]
+    fn test_admission_index_lookup() {
+        use quantlaxmi_models::{ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome};
+
+        let decisions = vec![
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 1000,
+                session_id: "s".to_string(),
+                signal_id: "sig1".to_string(),
+                outcome: AdmissionOutcome::Admit,
+                missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_a".to_string()),
+                digest: "d1".to_string(),
+            },
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 2000,
+                session_id: "s".to_string(),
+                signal_id: "sig1".to_string(),
+                outcome: AdmissionOutcome::Refuse,
+                missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_b".to_string()),
+                digest: "d2".to_string(),
+            },
+        ];
+
+        let index = AdmissionIndex::from_decisions(decisions);
+
+        // Test lookup
+        assert!(index.contains("corr_a"));
+        assert!(index.contains("corr_b"));
+        assert!(!index.contains("corr_c"));
+
+        // Test event outcome
+        assert_eq!(index.event_outcome("corr_a"), Some(AdmissionOutcome::Admit));
+        assert_eq!(
+            index.event_outcome("corr_b"),
+            Some(AdmissionOutcome::Refuse)
+        );
+        assert_eq!(index.event_outcome("corr_c"), None);
+
+        // Test counts
+        assert_eq!(index.event_count(), 2);
+        assert_eq!(index.total_decisions, 2);
+    }
+
+    #[test]
+    fn test_admission_index_multi_signal_event_outcome() {
+        use quantlaxmi_models::{ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome};
+
+        // Event with multiple signals - ALL must admit for event to admit
+        let decisions = vec![
+            // Signal 1: Admit
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 1000,
+                session_id: "s".to_string(),
+                signal_id: "sig1".to_string(),
+                outcome: AdmissionOutcome::Admit,
+                missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_multi".to_string()),
+                digest: "d1".to_string(),
+            },
+            // Signal 2: Refuse → event should be refused
+            AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 1000,
+                session_id: "s".to_string(),
+                signal_id: "sig2".to_string(),
+                outcome: AdmissionOutcome::Refuse,
+                missing_vendor_fields: vec![],
+                null_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: Some("corr_multi".to_string()),
+                digest: "d2".to_string(),
+            },
+        ];
+
+        let index = AdmissionIndex::from_decisions(decisions);
+
+        // Event has one Refuse → overall outcome is Refuse
+        assert_eq!(
+            index.event_outcome("corr_multi"),
+            Some(AdmissionOutcome::Refuse),
+            "Event with ANY refused signal should be refused"
+        );
+    }
+
+    #[test]
+    fn test_admission_index_verify_decision_mismatch() {
+        use quantlaxmi_models::{
+            ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome, VendorField,
+        };
+
+        let wal_decisions = vec![AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1000,
+            session_id: "s".to_string(),
+            signal_id: "sig1".to_string(),
+            outcome: AdmissionOutcome::Admit,
+            missing_vendor_fields: vec![],
+            null_vendor_fields: vec![],
+            missing_internal_fields: vec![],
+            correlation_id: Some("corr_x".to_string()),
+            digest: "d1".to_string(),
+        }];
+
+        let index = AdmissionIndex::from_decisions(wal_decisions);
+
+        // Test: Missing WAL entry
+        let result = index.verify_decision("corr_unknown", &[]);
+        assert!(result.is_err());
+        match result.unwrap_err().reason {
+            AdmissionMismatchReason::MissingWalEntry => {}
+            other => panic!("Expected MissingWalEntry, got {:?}", other),
+        }
+
+        // Test: WAL says Admit but current would Refuse
+        let current_refuse = vec![AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1000,
+            session_id: "s".to_string(),
+            signal_id: "sig1".to_string(),
+            outcome: AdmissionOutcome::Refuse,
+            missing_vendor_fields: vec![VendorField::BidPrice],
+            null_vendor_fields: vec![],
+            missing_internal_fields: vec![],
+            correlation_id: Some("corr_x".to_string()),
+            digest: "d1_new".to_string(),
+        }];
+
+        let result = index.verify_decision("corr_x", &current_refuse);
+        assert!(result.is_err());
+        match result.unwrap_err().reason {
+            AdmissionMismatchReason::AdmitButWouldRefuse { .. } => {}
+            other => panic!("Expected AdmitButWouldRefuse, got {:?}", other),
+        }
+
+        // Test: Matching decision
+        let current_admit = vec![AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1000,
+            session_id: "s".to_string(),
+            signal_id: "sig1".to_string(),
+            outcome: AdmissionOutcome::Admit,
+            missing_vendor_fields: vec![],
+            null_vendor_fields: vec![],
+            missing_internal_fields: vec![],
+            correlation_id: Some("corr_x".to_string()),
+            digest: "d1".to_string(),
+        }];
+
+        let result = index.verify_decision("corr_x", &current_admit);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), AdmissionOutcome::Admit);
     }
 }

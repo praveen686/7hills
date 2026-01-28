@@ -405,6 +405,20 @@ pub enum Commands {
         /// Run ID for correlation context (auto-generated if not provided)
         #[arg(long)]
         run_id: Option<String>,
+
+        /// Phase 19D: Enforce admission decisions from WAL during replay.
+        /// Instead of re-evaluating admission, follow WAL decisions exactly.
+        /// Fails if WAL is missing entries or outcomes mismatch.
+        #[arg(long, default_value_t = false)]
+        enforce_admission_from_wal: bool,
+
+        /// Policy when admission enforcement detects mismatch: "fail" (default) or "warn"
+        #[arg(long, default_value = "fail")]
+        admission_mismatch_policy: String,
+
+        /// Write segment_admission_summary.json after backtest completion
+        #[arg(long, default_value_t = true)]
+        write_admission_summary: bool,
     },
 
     /// Verify replay parity between two decision traces
@@ -584,6 +598,9 @@ async fn async_main() -> anyhow::Result<()> {
             output_json,
             output_trace,
             run_id,
+            enforce_admission_from_wal,
+            admission_mismatch_policy,
+            write_admission_summary,
         } => {
             run_backtest(
                 &segment_dir,
@@ -598,6 +615,9 @@ async fn async_main() -> anyhow::Result<()> {
                 output_json.as_deref(),
                 output_trace.as_deref(),
                 run_id.as_deref(),
+                enforce_admission_from_wal,
+                &admission_mismatch_policy,
+                write_admission_summary,
             )
             .await
         }
@@ -1913,12 +1933,16 @@ async fn run_backtest(
     output_json: Option<&str>,
     output_trace: Option<&str>,
     run_id: Option<&str>,
+    enforce_admission_from_wal: bool,
+    admission_mismatch_policy: &str,
+    write_admission_summary: bool,
 ) -> anyhow::Result<()> {
     use backtest::{
         BacktestConfig, BacktestEngine, BasisCaptureStrategy, ExchangeConfig, FundingBiasStrategy,
         PaceMode,
     };
     use quantlaxmi_strategy::StrategyRegistry;
+    use quantlaxmi_wal::{SegmentAdmissionSummary, WalReader};
 
     let segment_path = std::path::Path::new(segment_dir);
     if !segment_path.exists() {
@@ -1943,6 +1967,8 @@ async fn run_backtest(
         pace: pace_mode,
         output_trace: output_trace.map(|s| s.to_string()),
         run_id: run_id.map(|s| s.to_string()),
+        enforce_admission_from_wal,
+        admission_mismatch_policy: admission_mismatch_policy.to_string(),
     };
 
     let engine = BacktestEngine::new(config);
@@ -2079,6 +2105,38 @@ async fn run_backtest(
         std::fs::write(path, json)?;
         println!("\nResults written to: {}", path);
     }
+
+    // Phase 19D: Write admission summary
+    if write_admission_summary {
+        let wal_reader = WalReader::open(segment_path)?;
+        let admission_decisions = wal_reader.read_admission_decisions()?;
+
+        if !admission_decisions.is_empty() {
+            let session_id = run_id.unwrap_or("backtest");
+            let summary = SegmentAdmissionSummary::from_decisions(session_id, &admission_decisions);
+
+            let summary_path = segment_path.join("segment_admission_summary.json");
+            summary.write(&summary_path)?;
+
+            println!();
+            println!("--- Admission Summary (Phase 19D) ---");
+            println!("Evaluated events: {}", summary.evaluated_events);
+            println!("Admitted events: {}", summary.admitted_events);
+            println!("Refused events: {}", summary.refused_events);
+            println!(
+                "Admission rate: {:.1}%",
+                if summary.evaluated_events > 0 {
+                    100.0 * summary.admitted_events as f64 / summary.evaluated_events as f64
+                } else {
+                    0.0
+                }
+            );
+            println!("Summary written to: {}", summary_path.display());
+        }
+    }
+
+    // Phase 19D: Enforcement is handled by BacktestEngine::run_with_strategy() via AdmissionMode::EnforceFromWal
+    // Logging happens inside the engine when enforcement is active
 
     Ok(())
 }

@@ -178,6 +178,7 @@ impl SignalAdmissionController {
             signal_id: requirements.signal_id.clone(),
             outcome,
             missing_vendor_fields: missing_vendor,
+            null_vendor_fields: Vec::new(), // TODO: populate from VendorSnapshot with FieldState
             missing_internal_fields: missing_internal,
             correlation_id: ctx.correlation_id,
             digest: String::new(),

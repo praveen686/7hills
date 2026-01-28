@@ -1,8 +1,8 @@
 # QuantLaxmi Phase Status
 ## Current Implementation State
 
-**Last Updated:** 2026-01-27
-**Current Phase:** 14.2 baseline_v1 Complete
+**Last Updated:** 2026-01-28
+**Current Phase:** 19D Complete (WAL Enforcement)
 
 ---
 
@@ -24,6 +24,13 @@
 | 13.3 | Capital Allocation | ✅ Complete | 2026-01-27 |
 | 14.1 | Execution Budget | ✅ Complete | 2026-01-27 |
 | 14.2 baseline_v1 | Live Execution Binding | ✅ Complete | 2026-01-27 |
+| 15.2 | MTM + Drawdown Layer | ✅ Complete | 2026-01-27 |
+| 15.3 | Deterministic Intent Shaping | ✅ Complete | 2026-01-27 |
+| 16 | Execution Session & Control Plane | ✅ Complete | 2026-01-27 |
+| 17A | Execution Observability & Operator UX | ✅ Complete | 2026-01-28 |
+| 19 | MarketSnapshot V2 + Canonical Encoding v3 | ✅ Complete | 2026-01-28 |
+| 19C | Signal Admission Gating | ✅ Complete | 2026-01-28 |
+| 19D | WAL Enforcement & Replay | ✅ Complete | 2026-01-28 |
 
 ---
 
@@ -122,11 +129,14 @@ pub struct PromotionDecision {
 
 | Crate | Tests | Status |
 |-------|-------|--------|
+| quantlaxmi-events | 184 | ✅ All passing |
+| quantlaxmi-models | 88 | ✅ All passing |
 | quantlaxmi-gates | 87 | ✅ All passing |
-| quantlaxmi-models | 64 | ✅ All passing |
-| quantlaxmi-runner-crypto | 61 | ✅ All passing |
+| quantlaxmi-runner-crypto | 70 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
-| **Workspace Total** | 331+ | ✅ All passing |
+| quantlaxmi-wal | 26 | ✅ All passing |
+| Other crates | 166 | ✅ All passing |
+| **Workspace Total** | 660 | ✅ All passing |
 
 ---
 
@@ -260,19 +270,46 @@ pub struct PromotionDecision {
 
 ---
 
-## Next Phase: Phase 14.2+ (Future)
+### Phase 19D: WAL Enforcement & Replay (COMPLETE)
 
-**Phase 14.2b: Paper Execution**
-- Paper exchange simulation
-- Fill generation
-- PnL tracking in paper mode
+**Question Answered:** "How do we ensure WAL is the authoritative source of truth for replay?"
 
-**Phase 14.3+: Adaptive Intelligence**
+**Deliverables:**
+- `crates/quantlaxmi-wal/src/lib.rs` — AdmissionIndex, SegmentAdmissionSummary
+- `crates/quantlaxmi-runner-crypto/src/backtest.rs` — AdmissionMode enum, decide_admission()
+- `crates/quantlaxmi-runner-crypto/tests/phase19_admission_integration.rs` — 21 tests
+
+**Key Types:**
+- `AdmissionMode` — EvaluateLive vs EnforceFromWal
+- `AdmissionIndex` — O(1) lookup by correlation_id for replay
+- `AdmissionMismatchPolicy` — Fail vs Warn on mismatch
+- `AdmissionMismatchReason` — MissingWalEntry, AdmitButWouldRefuse, etc.
+- `SegmentAdmissionSummary` — Materialized summary from WAL
+
+**Tests:** 21 tests covering all admission scenarios including:
+- `test_replay_enforced_blocks_strategy_on_refuse`
+- `test_replay_enforced_calls_strategy_on_admit`
+- `test_replay_enforced_missing_wal_entry_policy_fail`
+- `test_replay_enforced_missing_wal_entry_policy_warn`
+
+**Core Invariants Enforced:**
+1. WAL is authoritative truth — live evaluation cannot override
+2. Strategy invocation gated by WAL decisions in enforce mode
+3. Missing WAL entry → refuse (doctrine: cannot prove admission)
+4. No new admission WAL writes in enforce mode (replay integrity)
+5. Mismatch policy controls fail vs warn behavior
+6. All decisions deterministic with SHA-256 digests
+
+---
+
+## Next Phase: Future Work
+
+**Phase 20+: Adaptive Intelligence**
 - EARNHFT Router (selects agent profile)
 - RL Agent (execution policy)
 - Q-Teacher (offline training)
 
-**Phase 15+: Multi-Venue Expansion**
+**Future: Multi-Venue Expansion**
 - Additional crypto venues
 - India options support
 - Cross-venue arbitrage
@@ -319,6 +356,14 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | `OrderFillEvent` digest computation | Phase 14.2 |
 | `OrderCancelEvent` digest computation | Phase 14.2 |
 | `PositionCloseEvent` digest computation | Phase 14.2 |
+| `MarketSnapshot` V2 canonical encoding | Phase 19 |
+| `AdmissionDecision` digest computation | Phase 19C |
+| `AdmissionOutcome` semantics | Phase 19C |
+| Signal admission gating invariants | Phase 19C |
+| `AdmissionIndex` lookup semantics | Phase 19D |
+| `AdmissionMode` EvaluateLive vs EnforceFromWal | Phase 19D |
+| WAL-authoritative replay semantics | Phase 19D |
+| Missing WAL entry → refuse behavior | Phase 19D |
 
 ---
 

@@ -365,6 +365,7 @@ fn create_backtest_config(args: &Args, run_id: &str, fee_multiplier: f64) -> Bac
         pace: PaceMode::Fast,
         output_trace: None,
         run_id: Some(run_id.to_string()),
+        ..Default::default()
     }
 }
 

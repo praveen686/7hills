@@ -383,6 +383,8 @@ async fn run_single_evaluation(
                 .to_string(),
         ),
         run_id: Some(run_id.clone()),
+        enforce_admission_from_wal: false,
+        admission_mismatch_policy: "fail".to_string(),
     };
 
     let engine = BacktestEngine::new(backtest_config);

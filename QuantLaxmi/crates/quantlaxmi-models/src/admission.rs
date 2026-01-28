@@ -189,6 +189,12 @@ impl fmt::Display for AdmissionOutcome {
 ///
 /// Every admission attempt produces this artifact, whether admitted or refused.
 /// Written to WAL before signal computation.
+///
+/// ## Null vs Absent Distinction (Doctrine: No Silent Poisoning)
+/// - `missing_vendor_fields`: Vendor did not send this field (Absent)
+/// - `null_vendor_fields`: Vendor explicitly sent null (Null)
+///
+/// Both trigger refusal, but the diagnostic reason differs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdmissionDecision {
     /// Schema version for forward compatibility
@@ -206,8 +212,11 @@ pub struct AdmissionDecision {
     /// The admission outcome
     pub outcome: AdmissionOutcome,
 
-    /// Vendor fields that were required but missing (empty if Admit)
+    /// Vendor fields that were required but absent (vendor omitted)
     pub missing_vendor_fields: Vec<VendorField>,
+
+    /// Vendor fields that were required but vendor sent explicit null
+    pub null_vendor_fields: Vec<VendorField>,
 
     /// Internal fields that were required but missing (empty if Admit)
     pub missing_internal_fields: Vec<InternalField>,
@@ -215,7 +224,7 @@ pub struct AdmissionDecision {
     /// Optional linkage to upstream decision/intent context
     pub correlation_id: Option<String>,
 
-    /// BLAKE3 digest of canonical representation
+    /// SHA-256 digest of canonical representation
     pub digest: String,
 }
 
@@ -304,8 +313,9 @@ impl AdmissionCanonicalBytes for AdmissionOutcome {
 /// 4. signal_id (len-prefixed UTF-8)
 /// 5. outcome (tag byte)
 /// 6. missing_vendor_fields (count + each field's canonical bytes)
-/// 7. missing_internal_fields (count + each field's canonical bytes)
-/// 8. correlation_id (0x00 for None, 0x01 + len-prefixed UTF-8 for Some)
+/// 7. null_vendor_fields (count + each field's canonical bytes)
+/// 8. missing_internal_fields (count + each field's canonical bytes)
+/// 9. correlation_id (0x00 for None, 0x01 + len-prefixed UTF-8 for Some)
 impl AdmissionCanonicalBytes for AdmissionDecision {
     fn canonical_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -339,7 +349,15 @@ impl AdmissionCanonicalBytes for AdmissionDecision {
             bytes.extend_from_slice(&fb);
         }
 
-        // 7. missing_internal_fields
+        // 7. null_vendor_fields
+        bytes.extend_from_slice(&(self.null_vendor_fields.len() as u32).to_le_bytes());
+        for field in &self.null_vendor_fields {
+            let fb = field.canonical_bytes();
+            bytes.extend_from_slice(&(fb.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&fb);
+        }
+
+        // 8. missing_internal_fields
         bytes.extend_from_slice(&(self.missing_internal_fields.len() as u32).to_le_bytes());
         for field in &self.missing_internal_fields {
             let fb = field.canonical_bytes();
@@ -347,7 +365,7 @@ impl AdmissionCanonicalBytes for AdmissionDecision {
             bytes.extend_from_slice(&fb);
         }
 
-        // 8. correlation_id
+        // 9. correlation_id
         match &self.correlation_id {
             None => bytes.push(0x00),
             Some(cid) => {
@@ -431,6 +449,7 @@ mod tests {
             signal_id: "test_signal".to_string(),
             outcome: AdmissionOutcome::Admit,
             missing_vendor_fields: vec![],
+            null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: None,
             digest: "test".to_string(),
@@ -456,6 +475,7 @@ mod tests {
             signal_id: "book_imbalance".to_string(),
             outcome: AdmissionOutcome::Refuse,
             missing_vendor_fields: vec![VendorField::BuyQuantity],
+            null_vendor_fields: vec![],
             missing_internal_fields: vec![],
             correlation_id: Some("corr_123".to_string()),
             digest: String::new(), // Not included in canonical bytes

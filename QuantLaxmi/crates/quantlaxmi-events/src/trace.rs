@@ -57,7 +57,7 @@ use uuid::Uuid;
 /// ## Version History
 /// - v1 (0x01): Initial encoding with f64 confidence and spread_bps
 /// - v2 (0x02): Fixed-point confidence_mantissa and spread_bps_mantissa (no floats)
-/// - v3 (0x03): MarketSnapshot versioned enum with explicit presence tracking (V1/V2).
+/// - v3 (0x03): MarketSnapshot V2 with l1_state_bits + versioned enum with explicit presence tracking.
 ///   MarketSnapshot now has internal schema discriminant (0x01 for V1, 0x02 for V2).
 ///
 /// ## Replay Parity Note
@@ -1037,9 +1037,12 @@ mod tests {
     }
 
     #[test]
-    fn test_encoding_version_v3() {
-        // Verify we're using encoding version 3 (MarketSnapshot V1/V2 enum)
-        assert_eq!(ENCODING_VERSION, 0x03, "Should be encoding version 3");
+    fn test_trace_encoding_version_is_current() {
+        // Canonical literal version test - update this when ENCODING_VERSION changes
+        assert_eq!(
+            ENCODING_VERSION, 0x03,
+            "Update this test when encoding version changes"
+        );
 
         let decision = make_test_decision(1, 1);
         let bytes = canonical_bytes(&decision);

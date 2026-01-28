@@ -129,6 +129,22 @@ pub trait Strategy: Send {
     fn on_fill(&mut self, _fill: &FillNotification, _ctx: &StrategyContext) {
         // Default: no-op
     }
+
+    /// Declare required signals for admission gating.
+    ///
+    /// The engine will evaluate admission for each declared signal before calling `on_event()`.
+    /// If ANY required signal is refused (missing vendor/internal fields), the strategy
+    /// will NOT be invoked for that event.
+    ///
+    /// Default: empty (no admission gating, strategy runs on all events).
+    ///
+    /// # Doctrine
+    /// This is Phase 19C enforcement: signals must have their required data present.
+    /// If your strategy computes book_imbalance, declare it here with its field requirements.
+    fn required_signals(&self) -> Vec<quantlaxmi_models::SignalRequirements> {
+        // Default: no required signals (backwards compatible)
+        Vec::new()
+    }
 }
 
 #[cfg(test)]
