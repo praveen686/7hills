@@ -39,10 +39,12 @@ pub mod portfolio_selector;
 pub mod position_keeper;
 pub mod promotion;
 pub mod promotion_pipeline;
+pub mod promotion_resolver;
 pub mod risk_exposure;
 pub mod signal_gates;
 pub mod signals_manifest;
 pub mod strategies_manifest;
+pub mod strategy_admission_engine;
 
 pub use admission::{
     AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
@@ -113,6 +115,7 @@ pub use promotion_pipeline::{
     promotion_dir, promotion_record_path, segment_summary_path, session_wal_path, sha256_file,
     sha256_hex,
 };
+pub use promotion_resolver::{PromotionCacheEntry, PromotionResolver, PromotionStatus};
 pub use risk_exposure::{
     BudgetView, ExposureMetrics, RISK_DECISION_SCHEMA_VERSION, RISK_POLICY_SCHEMA_VERSION,
     RISK_SNAPSHOT_SCHEMA_VERSION, RiskDecision, RiskDecisionId, RiskDecisionScope,
@@ -127,6 +130,10 @@ pub use signal_gates::{
 pub use strategies_manifest::{
     ExecutionClass, STRATEGIES_MANIFEST_SCHEMA_VERSION, StrategiesManifest,
     StrategiesManifestError, StrategyDefaults, StrategySpec,
+};
+pub use strategy_admission_engine::{
+    AdmissionVerdict, StrategyAdmissionEngine, StrategyAdmissionEngineConfig,
+    StrategyAdmissionEngineError,
 };
 
 use chrono::{DateTime, Utc};
