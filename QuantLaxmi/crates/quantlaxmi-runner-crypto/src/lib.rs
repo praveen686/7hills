@@ -1969,6 +1969,7 @@ async fn run_backtest(
         run_id: run_id.map(|s| s.to_string()),
         enforce_admission_from_wal,
         admission_mismatch_policy: admission_mismatch_policy.to_string(),
+        strategy_spec: None, // Phase 22C: CLI doesn't set strategy_spec yet
     };
 
     let engine = BacktestEngine::new(config);

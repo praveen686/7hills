@@ -385,6 +385,7 @@ async fn run_single_evaluation(
         run_id: Some(run_id.clone()),
         enforce_admission_from_wal: false,
         admission_mismatch_policy: "fail".to_string(),
+        strategy_spec: None, // Phase 22C: No permission gating in tournament mode
     };
 
     let engine = BacktestEngine::new(backtest_config);

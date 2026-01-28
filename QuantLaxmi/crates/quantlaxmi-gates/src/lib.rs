@@ -35,6 +35,7 @@ pub mod g3_robustness;
 pub mod g4_deployability;
 pub mod intent_shaping;
 pub mod mtm_drawdown;
+pub mod order_permission;
 pub mod portfolio_selector;
 pub mod position_keeper;
 pub mod promotion;
@@ -134,6 +135,9 @@ pub use strategies_manifest::{
 pub use strategy_admission_engine::{
     AdmissionVerdict, StrategyAdmissionEngine, StrategyAdmissionEngineConfig,
     StrategyAdmissionEngineError,
+};
+pub use order_permission::{
+    OrderIntentRef, OrderPermission, OrderPermissionGate, OrderRefuseReason, OrderSide, OrderType,
 };
 
 use chrono::{DateTime, Utc};

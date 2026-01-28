@@ -19,6 +19,10 @@ use quantlaxmi_events::{CorrelationContext, DecisionEvent, DecisionTraceBuilder,
 use quantlaxmi_gates::admission::{
     AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
 };
+use quantlaxmi_gates::{
+    OrderIntentRef, OrderPermission, OrderPermissionGate, OrderSide as GateSide,
+    OrderType as GateOrderType, StrategySpec,
+};
 use quantlaxmi_models::{AdmissionDecision, AdmissionOutcome, SignalRequirements};
 use quantlaxmi_wal::{AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalWriter};
 use serde::{Deserialize, Serialize};
@@ -1290,6 +1294,10 @@ pub struct BacktestConfig {
     /// Phase 19D: Policy when enforcement detects mismatch.
     #[serde(default)]
     pub admission_mismatch_policy: String,
+    /// Phase 22C: Strategy specification for order permission gating.
+    /// If provided, all order intents are checked against execution class constraints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_spec: Option<StrategySpec>,
 }
 
 impl Default for BacktestConfig {
@@ -1302,6 +1310,7 @@ impl Default for BacktestConfig {
             run_id: None,
             enforce_admission_from_wal: false,
             admission_mismatch_policy: "fail".to_string(),
+            strategy_spec: None,
         }
     }
 }
@@ -1746,6 +1755,10 @@ impl BacktestEngine {
         let mut refused_events = 0u64;
         let mut event_seq = 0u64;
 
+        // Phase 22C: Order permission counters
+        let mut permitted_orders = 0u64;
+        let mut refused_orders = 0u64;
+
         // Phase 19D: Build admission mode
         let admission_mode = if self.config.enforce_admission_from_wal && has_admission_gating {
             // Load admission index from existing WAL
@@ -1931,11 +1944,25 @@ impl BacktestEngine {
                 for decision in &admission_result.decisions {
                     wal_writer.write_admission(decision.clone()).await?;
 
+                    // Phase 22C: Admission refusal logging (required fields)
                     if decision.is_refused() {
-                        tracing::trace!(
-                            signal = %decision.signal_id,
-                            missing = ?decision.missing_vendor_fields,
-                            "Admission refused for signal"
+                        let strategy_id = self
+                            .config
+                            .strategy_spec
+                            .as_ref()
+                            .map(|s| s.strategy_id.as_str())
+                            .unwrap_or("unknown");
+                        let refuse_reasons: Vec<String> = decision
+                            .missing_vendor_fields
+                            .iter()
+                            .map(|f| f.to_string())
+                            .collect();
+                        tracing::warn!(
+                            strategy_id = %strategy_id,
+                            signal_id = %decision.signal_id,
+                            refuse_reasons = ?refuse_reasons,
+                            correlation_id = %correlation_id,
+                            "Admission refused"
                         );
                     }
                 }
@@ -1981,6 +2008,43 @@ impl BacktestEngine {
                             .map(|m| m as f64 * 10f64.powi(intent.price_exponent as i32)),
                         tag: intent.tag.clone(),
                     };
+
+                    // =========================================================
+                    // PHASE 22C: Order Permission Gate (BEFORE exchange.execute)
+                    // =========================================================
+                    if let Some(ref spec) = self.config.strategy_spec {
+                        // Build gate-compatible intent reference
+                        let gate_side = match intent.side {
+                            quantlaxmi_strategy::Side::Buy => GateSide::Buy,
+                            quantlaxmi_strategy::Side::Sell => GateSide::Sell,
+                        };
+                        let gate_order_type = if intent.limit_price_mantissa.is_some() {
+                            GateOrderType::Limit
+                        } else {
+                            GateOrderType::Market
+                        };
+                        let intent_ref = OrderIntentRef {
+                            side: gate_side,
+                            order_type: gate_order_type,
+                            quantity: local_intent.qty,
+                            strategy_id: &spec.strategy_id,
+                        };
+
+                        // Check permission
+                        let permission = OrderPermissionGate::authorize(spec, &intent_ref);
+                        if let OrderPermission::Refuse(reason) = permission {
+                            // Log refusal (Phase 22C requirement)
+                            tracing::warn!(
+                                strategy_id = %spec.strategy_id,
+                                correlation_id = %correlation_id,
+                                reason = %reason.description(),
+                                "Order permission refused"
+                            );
+                            refused_orders += 1;
+                            continue; // Skip this order
+                        }
+                        permitted_orders += 1;
+                    }
 
                     if let Some(fill) =
                         exchange.execute(&local_intent, event.ts, parent_decision_id)
@@ -2102,6 +2166,16 @@ impl BacktestEngine {
                 refused = refused_events,
                 total = admitted_events + refused_events,
                 "Phase 19C admission gating complete"
+            );
+        }
+
+        // Phase 22C: Log order permission stats
+        if self.config.strategy_spec.is_some() {
+            tracing::info!(
+                permitted = permitted_orders,
+                refused = refused_orders,
+                total = permitted_orders + refused_orders,
+                "Phase 22C order permission gating complete"
             );
         }
 
