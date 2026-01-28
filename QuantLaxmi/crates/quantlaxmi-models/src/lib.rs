@@ -97,8 +97,8 @@ pub use admission::{
 // Strategy Admission Control types (Phase 21B)
 pub mod strategy_admission;
 pub use strategy_admission::{
-    STRATEGY_ADMISSION_SCHEMA_VERSION, StrategyAdmissionDecision, StrategyAdmissionOutcome,
-    StrategyRefuseReason,
+    STRATEGY_ADMISSION_SCHEMA_VERSION, StrategyAdmissionDecision, StrategyAdmissionDecisionBuilder,
+    StrategyAdmissionOutcome, StrategyRefuseReason,
 };
 
 // SignalFrame canonical structure (Phase 20A)

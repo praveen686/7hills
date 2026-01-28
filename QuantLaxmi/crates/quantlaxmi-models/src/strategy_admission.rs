@@ -257,80 +257,120 @@ impl StrategyAdmissionDecision {
         hex::encode(result)
     }
 
-    /// Create a new decision with computed digest.
-    pub fn new(
-        ts_ns: i64,
-        session_id: String,
-        strategy_id: String,
-        signal_id: String,
+    /// Create a builder for constructing a StrategyAdmissionDecision.
+    pub fn builder(
+        strategy_id: impl Into<String>,
+        signal_id: impl Into<String>,
+    ) -> StrategyAdmissionDecisionBuilder {
+        StrategyAdmissionDecisionBuilder::new(strategy_id, signal_id)
+    }
+}
+
+// =============================================================================
+// StrategyAdmissionDecisionBuilder — Fluent construction
+// =============================================================================
+
+/// Builder for constructing StrategyAdmissionDecision with fluent API.
+///
+/// # Example
+/// ```ignore
+/// let decision = StrategyAdmissionDecision::builder("spread_passive", "spread")
+///     .ts_ns(1000000000)
+///     .session_id("session_1")
+///     .correlation_id("corr_123")
+///     .strategies_manifest_hash([1u8; 32])
+///     .signals_manifest_hash([2u8; 32])
+///     .build_admit();
+/// ```
+#[derive(Debug, Clone)]
+pub struct StrategyAdmissionDecisionBuilder {
+    strategy_id: String,
+    signal_id: String,
+    ts_ns: i64,
+    session_id: String,
+    correlation_id: String,
+    strategies_manifest_hash: [u8; 32],
+    signals_manifest_hash: [u8; 32],
+}
+
+impl StrategyAdmissionDecisionBuilder {
+    /// Create a new builder with required strategy and signal identifiers.
+    pub fn new(strategy_id: impl Into<String>, signal_id: impl Into<String>) -> Self {
+        Self {
+            strategy_id: strategy_id.into(),
+            signal_id: signal_id.into(),
+            ts_ns: 0,
+            session_id: String::new(),
+            correlation_id: String::new(),
+            strategies_manifest_hash: [0u8; 32],
+            signals_manifest_hash: [0u8; 32],
+        }
+    }
+
+    /// Set the timestamp in nanoseconds since epoch.
+    pub fn ts_ns(mut self, ts_ns: i64) -> Self {
+        self.ts_ns = ts_ns;
+        self
+    }
+
+    /// Set the session identifier.
+    pub fn session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = session_id.into();
+        self
+    }
+
+    /// Set the correlation ID for linkage to upstream context.
+    pub fn correlation_id(mut self, correlation_id: impl Into<String>) -> Self {
+        self.correlation_id = correlation_id.into();
+        self
+    }
+
+    /// Set the strategies manifest hash.
+    pub fn strategies_manifest_hash(mut self, hash: [u8; 32]) -> Self {
+        self.strategies_manifest_hash = hash;
+        self
+    }
+
+    /// Set the signals manifest hash.
+    pub fn signals_manifest_hash(mut self, hash: [u8; 32]) -> Self {
+        self.signals_manifest_hash = hash;
+        self
+    }
+
+    /// Build an Admit decision (no refuse reasons).
+    pub fn build_admit(self) -> StrategyAdmissionDecision {
+        self.build_with_outcome(StrategyAdmissionOutcome::Admit, vec![])
+    }
+
+    /// Build a Refuse decision with the given reasons.
+    pub fn build_refuse(
+        self,
+        refuse_reasons: Vec<StrategyRefuseReason>,
+    ) -> StrategyAdmissionDecision {
+        self.build_with_outcome(StrategyAdmissionOutcome::Refuse, refuse_reasons)
+    }
+
+    /// Internal: build decision with given outcome and reasons.
+    fn build_with_outcome(
+        self,
         outcome: StrategyAdmissionOutcome,
         refuse_reasons: Vec<StrategyRefuseReason>,
-        correlation_id: String,
-        strategies_manifest_hash: [u8; 32],
-        signals_manifest_hash: [u8; 32],
-    ) -> Self {
-        let mut decision = Self {
+    ) -> StrategyAdmissionDecision {
+        let mut decision = StrategyAdmissionDecision {
             schema_version: STRATEGY_ADMISSION_SCHEMA_VERSION.to_string(),
-            ts_ns,
-            session_id,
-            strategy_id,
-            signal_id,
+            ts_ns: self.ts_ns,
+            session_id: self.session_id,
+            strategy_id: self.strategy_id,
+            signal_id: self.signal_id,
             outcome,
             refuse_reasons,
-            correlation_id,
-            strategies_manifest_hash,
-            signals_manifest_hash,
+            correlation_id: self.correlation_id,
+            strategies_manifest_hash: self.strategies_manifest_hash,
+            signals_manifest_hash: self.signals_manifest_hash,
             digest: String::new(),
         };
         decision.digest = decision.compute_digest();
         decision
-    }
-
-    /// Create an Admit decision.
-    pub fn admit(
-        ts_ns: i64,
-        session_id: String,
-        strategy_id: String,
-        signal_id: String,
-        correlation_id: String,
-        strategies_manifest_hash: [u8; 32],
-        signals_manifest_hash: [u8; 32],
-    ) -> Self {
-        Self::new(
-            ts_ns,
-            session_id,
-            strategy_id,
-            signal_id,
-            StrategyAdmissionOutcome::Admit,
-            vec![],
-            correlation_id,
-            strategies_manifest_hash,
-            signals_manifest_hash,
-        )
-    }
-
-    /// Create a Refuse decision.
-    pub fn refuse(
-        ts_ns: i64,
-        session_id: String,
-        strategy_id: String,
-        signal_id: String,
-        refuse_reasons: Vec<StrategyRefuseReason>,
-        correlation_id: String,
-        strategies_manifest_hash: [u8; 32],
-        signals_manifest_hash: [u8; 32],
-    ) -> Self {
-        Self::new(
-            ts_ns,
-            session_id,
-            strategy_id,
-            signal_id,
-            StrategyAdmissionOutcome::Refuse,
-            refuse_reasons,
-            correlation_id,
-            strategies_manifest_hash,
-            signals_manifest_hash,
-        )
     }
 }
 
@@ -382,112 +422,94 @@ mod tests {
 
     #[test]
     fn test_decision_digest_deterministic() {
-        let decision1 = StrategyAdmissionDecision::admit(
-            1000000000,
-            "session_1".to_string(),
-            "spread_passive".to_string(),
-            "spread".to_string(),
-            "corr_123".to_string(),
-            [1u8; 32],
-            [2u8; 32],
-        );
+        let decision1 = StrategyAdmissionDecision::builder("spread_passive", "spread")
+            .ts_ns(1000000000)
+            .session_id("session_1")
+            .correlation_id("corr_123")
+            .strategies_manifest_hash([1u8; 32])
+            .signals_manifest_hash([2u8; 32])
+            .build_admit();
 
-        let decision2 = StrategyAdmissionDecision::admit(
-            1000000000,
-            "session_1".to_string(),
-            "spread_passive".to_string(),
-            "spread".to_string(),
-            "corr_123".to_string(),
-            [1u8; 32],
-            [2u8; 32],
-        );
+        let decision2 = StrategyAdmissionDecision::builder("spread_passive", "spread")
+            .ts_ns(1000000000)
+            .session_id("session_1")
+            .correlation_id("corr_123")
+            .strategies_manifest_hash([1u8; 32])
+            .signals_manifest_hash([2u8; 32])
+            .build_admit();
 
         assert_eq!(decision1.digest, decision2.digest);
 
         // Run 100 times to prove determinism
         for _ in 0..100 {
-            let d = StrategyAdmissionDecision::admit(
-                1000000000,
-                "session_1".to_string(),
-                "spread_passive".to_string(),
-                "spread".to_string(),
-                "corr_123".to_string(),
-                [1u8; 32],
-                [2u8; 32],
-            );
+            let d = StrategyAdmissionDecision::builder("spread_passive", "spread")
+                .ts_ns(1000000000)
+                .session_id("session_1")
+                .correlation_id("corr_123")
+                .strategies_manifest_hash([1u8; 32])
+                .signals_manifest_hash([2u8; 32])
+                .build_admit();
             assert_eq!(d.digest, decision1.digest);
         }
     }
 
     #[test]
     fn test_decision_digest_changes_with_content() {
-        let decision1 = StrategyAdmissionDecision::admit(
-            1000000000,
-            "session_1".to_string(),
-            "spread_passive".to_string(),
-            "spread".to_string(),
-            "corr_123".to_string(),
-            [1u8; 32],
-            [2u8; 32],
-        );
+        let decision1 = StrategyAdmissionDecision::builder("spread_passive", "spread")
+            .ts_ns(1000000000)
+            .session_id("session_1")
+            .correlation_id("corr_123")
+            .strategies_manifest_hash([1u8; 32])
+            .signals_manifest_hash([2u8; 32])
+            .build_admit();
 
         // Change timestamp
-        let decision2 = StrategyAdmissionDecision::admit(
-            1000000001,
-            "session_1".to_string(),
-            "spread_passive".to_string(),
-            "spread".to_string(),
-            "corr_123".to_string(),
-            [1u8; 32],
-            [2u8; 32],
-        );
+        let decision2 = StrategyAdmissionDecision::builder("spread_passive", "spread")
+            .ts_ns(1000000001)
+            .session_id("session_1")
+            .correlation_id("corr_123")
+            .strategies_manifest_hash([1u8; 32])
+            .signals_manifest_hash([2u8; 32])
+            .build_admit();
 
         assert_ne!(decision1.digest, decision2.digest);
 
         // Change outcome
-        let decision3 = StrategyAdmissionDecision::refuse(
-            1000000000,
-            "session_1".to_string(),
-            "spread_passive".to_string(),
-            "spread".to_string(),
-            vec![StrategyRefuseReason::SignalNotAdmitted {
+        let decision3 = StrategyAdmissionDecision::builder("spread_passive", "spread")
+            .ts_ns(1000000000)
+            .session_id("session_1")
+            .correlation_id("corr_123")
+            .strategies_manifest_hash([1u8; 32])
+            .signals_manifest_hash([2u8; 32])
+            .build_refuse(vec![StrategyRefuseReason::SignalNotAdmitted {
                 signal_id: "spread".to_string(),
-            }],
-            "corr_123".to_string(),
-            [1u8; 32],
-            [2u8; 32],
-        );
+            }]);
 
         assert_ne!(decision1.digest, decision3.digest);
     }
 
     #[test]
-    fn test_admit_refuse_helpers() {
-        let admit = StrategyAdmissionDecision::admit(
-            1000000000,
-            "session".to_string(),
-            "strategy".to_string(),
-            "signal".to_string(),
-            "corr".to_string(),
-            [0u8; 32],
-            [0u8; 32],
-        );
+    fn test_admit_refuse_builders() {
+        let admit = StrategyAdmissionDecision::builder("strategy", "signal")
+            .ts_ns(1000000000)
+            .session_id("session")
+            .correlation_id("corr")
+            .strategies_manifest_hash([0u8; 32])
+            .signals_manifest_hash([0u8; 32])
+            .build_admit();
         assert!(admit.is_admitted());
         assert!(!admit.is_refused());
         assert!(admit.refuse_reasons.is_empty());
 
-        let refuse = StrategyAdmissionDecision::refuse(
-            1000000000,
-            "session".to_string(),
-            "strategy".to_string(),
-            "signal".to_string(),
-            vec![StrategyRefuseReason::StrategyNotFound {
+        let refuse = StrategyAdmissionDecision::builder("strategy", "signal")
+            .ts_ns(1000000000)
+            .session_id("session")
+            .correlation_id("corr")
+            .strategies_manifest_hash([0u8; 32])
+            .signals_manifest_hash([0u8; 32])
+            .build_refuse(vec![StrategyRefuseReason::StrategyNotFound {
                 strategy_id: "strategy".to_string(),
-            }],
-            "corr".to_string(),
-            [0u8; 32],
-            [0u8; 32],
-        );
+            }]);
         assert!(!refuse.is_admitted());
         assert!(refuse.is_refused());
         assert_eq!(refuse.refuse_reasons.len(), 1);
@@ -518,19 +540,16 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip() {
-        let decision = StrategyAdmissionDecision::refuse(
-            1000000000,
-            "session_1".to_string(),
-            "spread_passive".to_string(),
-            "spread".to_string(),
-            vec![StrategyRefuseReason::SignalNotBound {
+        let decision = StrategyAdmissionDecision::builder("spread_passive", "spread")
+            .ts_ns(1000000000)
+            .session_id("session_1")
+            .correlation_id("corr_123")
+            .strategies_manifest_hash([1u8; 32])
+            .signals_manifest_hash([2u8; 32])
+            .build_refuse(vec![StrategyRefuseReason::SignalNotBound {
                 signal_id: "spread".to_string(),
                 strategy_id: "other_strategy".to_string(),
-            }],
-            "corr_123".to_string(),
-            [1u8; 32],
-            [2u8; 32],
-        );
+            }]);
 
         let json = serde_json::to_string(&decision).unwrap();
         let parsed: StrategyAdmissionDecision = serde_json::from_str(&json).unwrap();
@@ -553,15 +572,13 @@ mod tests {
 
     #[test]
     fn test_schema_version() {
-        let decision = StrategyAdmissionDecision::admit(
-            1000000000,
-            "session".to_string(),
-            "strategy".to_string(),
-            "signal".to_string(),
-            "corr".to_string(),
-            [0u8; 32],
-            [0u8; 32],
-        );
+        let decision = StrategyAdmissionDecision::builder("strategy", "signal")
+            .ts_ns(1000000000)
+            .session_id("session")
+            .correlation_id("corr")
+            .strategies_manifest_hash([0u8; 32])
+            .signals_manifest_hash([0u8; 32])
+            .build_admit();
         assert_eq!(decision.schema_version, "1.0.0");
     }
 }
