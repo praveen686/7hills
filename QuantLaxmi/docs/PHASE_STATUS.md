@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-28
-**Current Phase:** 20A Complete (SignalFrame Spine)
+**Current Phase:** 20B In Progress (Signals Manifest)
 
 ---
 
@@ -32,6 +32,7 @@
 | 19C | Signal Admission Gating | ✅ Complete | 2026-01-28 |
 | 19D | WAL Enforcement & Replay | ✅ Complete | 2026-01-28 |
 | 20A | SignalFrame Spine | ✅ Complete | 2026-01-28 |
+| 20B | Signals Manifest | 🟡 In Progress | - |
 
 ---
 
@@ -190,12 +191,12 @@ pub struct PromotionDecision {
 |-------|-------|--------|
 | quantlaxmi-events | 184 | ✅ All passing |
 | quantlaxmi-models | 106 | ✅ All passing |
-| quantlaxmi-gates | 87 | ✅ All passing |
+| quantlaxmi-gates | 198 | ✅ All passing |
 | quantlaxmi-runner-crypto | 70 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
 | quantlaxmi-wal | 26 | ✅ All passing |
 | Other crates | 166 | ✅ All passing |
-| **Workspace Total** | 678 | ✅ All passing |
+| **Workspace Total** | 789 | ✅ All passing |
 
 ---
 

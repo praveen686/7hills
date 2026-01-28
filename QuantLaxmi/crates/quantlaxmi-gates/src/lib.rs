@@ -39,6 +39,7 @@ pub mod portfolio_selector;
 pub mod position_keeper;
 pub mod promotion;
 pub mod risk_exposure;
+pub mod signals_manifest;
 
 pub use admission::{
     AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
