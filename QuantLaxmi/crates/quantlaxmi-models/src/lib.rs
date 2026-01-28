@@ -101,6 +101,13 @@ pub use strategy_admission::{
     StrategyAdmissionOutcome, StrategyRefuseReason,
 };
 
+// Order Intent types for WAL observability (Phase 23B)
+pub mod order_intent;
+pub use order_intent::{
+    ORDER_INTENT_SCHEMA_VERSION, OrderIntentPermission, OrderIntentRecord,
+    OrderIntentRecordBuilder, OrderIntentSide, OrderIntentType, OrderRefuseReason,
+};
+
 // SignalFrame canonical structure (Phase 20A)
 pub mod signal_frame;
 pub use signal_frame::{

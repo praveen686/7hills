@@ -34,6 +34,7 @@ pub mod g2_backtest_correctness;
 pub mod g3_robustness;
 pub mod g4_admission_determinism;
 pub mod g4_deployability;
+pub mod g5_order_intent_determinism;
 pub mod intent_shaping;
 pub mod mtm_drawdown;
 pub mod order_permission;
@@ -88,6 +89,9 @@ pub use g4_admission_determinism::{
     G4AdmissionDeterminismGate, G4DecisionKey, G4Mismatch, G4MismatchKind, G4Result,
 };
 pub use g4_deployability::{G4Config, G4Deployability};
+pub use g5_order_intent_determinism::{
+    G5Mismatch, G5MismatchKind, G5OrderIntentDeterminismGate, G5OrderIntentKey, G5Result,
+};
 pub use intent_shaping::{
     BlockReason, CapReason, INTENT_TRANSFORM_SCHEMA_VERSION, IntentShaper, IntentType,
     ModeRestrictReason, OrderIntentTransform, SHAPING_POLICY_SCHEMA_VERSION, ShapingPolicy,

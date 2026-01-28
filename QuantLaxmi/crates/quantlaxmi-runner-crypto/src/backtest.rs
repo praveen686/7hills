@@ -23,7 +23,10 @@ use quantlaxmi_gates::{
     OrderIntentRef, OrderPermission, OrderPermissionGate, OrderSide as GateSide,
     OrderType as GateOrderType, StrategySpec,
 };
-use quantlaxmi_models::{AdmissionDecision, AdmissionOutcome, SignalRequirements};
+use quantlaxmi_models::{
+    AdmissionDecision, AdmissionOutcome, OrderIntentRecord, OrderIntentSide, OrderIntentType,
+    OrderRefuseReason, SignalRequirements,
+};
 use quantlaxmi_wal::{AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1869,6 +1872,9 @@ impl BacktestEngine {
         let mut permitted_orders = 0u64;
         let mut refused_orders = 0u64;
 
+        // Phase 23B: Order intent WAL sequence counter
+        let mut order_intent_seq = 0u64;
+
         // Phase 19D: Build admission mode
         let admission_mode = if self.config.enforce_admission_from_wal && has_admission_gating {
             // Load admission index from existing WAL
@@ -2142,6 +2148,54 @@ impl BacktestEngine {
 
                         // Check permission
                         let permission = OrderPermissionGate::authorize(spec, &intent_ref);
+
+                        // =======================================================
+                        // PHASE 23B: Write order_intent WAL BEFORE acting on permission
+                        // =======================================================
+                        order_intent_seq += 1;
+                        let oi_side = match intent.side {
+                            quantlaxmi_strategy::Side::Buy => OrderIntentSide::Buy,
+                            quantlaxmi_strategy::Side::Sell => OrderIntentSide::Sell,
+                        };
+                        let oi_type = if intent.limit_price_mantissa.is_some() {
+                            OrderIntentType::Limit
+                        } else {
+                            OrderIntentType::Market
+                        };
+
+                        // Build common fields
+                        let mut oi_builder = OrderIntentRecord::builder(
+                            &spec.strategy_id,
+                            &intent.symbol,
+                        )
+                        .ts_ns(ts_ns)
+                        .session_id(&session_id)
+                        .seq(order_intent_seq)
+                        .side(oi_side)
+                        .order_type(oi_type)
+                        .qty(intent.qty_mantissa, intent.qty_exponent)
+                        .price_exponent(intent.price_exponent)
+                        .correlation_id(&correlation_id)
+                        .parent_admission_digest(&correlation_id);
+
+                        // Set limit price through builder if present
+                        if let Some(lp) = intent.limit_price_mantissa {
+                            oi_builder = oi_builder.limit_price(lp, intent.price_exponent);
+                        }
+
+                        let oi_record = match &permission {
+                            OrderPermission::Permit => oi_builder.build_permit(),
+                            OrderPermission::Refuse(reason) => {
+                                let oi_reason = OrderRefuseReason::Custom {
+                                    reason: reason.description(),
+                                };
+                                oi_builder.build_refuse(oi_reason)
+                            }
+                        };
+
+                        wal_writer.write_order_intent(oi_record).await?;
+
+                        // Now act on permission
                         if let OrderPermission::Refuse(reason) = permission {
                             // Log refusal (Phase 22C requirement)
                             tracing::warn!(

@@ -47,6 +47,9 @@ pub use quantlaxmi_models::{FillEvent, OrderEvent, RiskEvent};
 // Re-export admission types (Phase 18)
 pub use quantlaxmi_models::{AdmissionDecision, AdmissionOutcome};
 
+// Re-export order intent types (Phase 23B)
+pub use quantlaxmi_models::OrderIntentRecord;
+
 /// WAL record types for polymorphic storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -126,6 +129,7 @@ pub struct WalWriter {
     fill_file: Option<tokio::fs::File>,
     risk_file: Option<tokio::fs::File>,
     admission_file: Option<tokio::fs::File>,
+    order_intent_file: Option<tokio::fs::File>,
     counts: WalCounts,
 }
 
@@ -138,6 +142,7 @@ pub struct WalCounts {
     pub fill_events: u64,
     pub risk_events: u64,
     pub admission_events: u64,
+    pub order_intent_events: u64,
 }
 
 impl WalWriter {
@@ -156,6 +161,7 @@ impl WalWriter {
             fill_file: None,
             risk_file: None,
             admission_file: None,
+            order_intent_file: None,
             counts: WalCounts::default(),
         })
     }
@@ -314,6 +320,36 @@ impl WalWriter {
         Ok(())
     }
 
+    /// Write an order intent record (Phase 23B).
+    ///
+    /// Written BEFORE acting on permission — every order intent produces
+    /// an auditable artifact regardless of permit/refuse outcome.
+    pub async fn write_order_intent(&mut self, record: OrderIntentRecord) -> Result<()> {
+        let file = if let Some(ref mut f) = self.order_intent_file {
+            f
+        } else {
+            let path = self.session_dir.join("wal/order_intent.jsonl");
+            self.order_intent_file = Some(
+                tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .await
+                    .context("open order_intent WAL")?,
+            );
+            self.order_intent_file.as_mut().unwrap()
+        };
+
+        let mut line =
+            serde_json::to_vec(&record).context("serialize order intent record")?;
+        line.push(b'\n');
+        file.write_all(&line)
+            .await
+            .context("write order intent record")?;
+        self.counts.order_intent_events += 1;
+        Ok(())
+    }
+
     /// Flush all WAL files.
     pub async fn flush(&mut self) -> Result<()> {
         if let Some(ref mut f) = self.market_file {
@@ -332,6 +368,9 @@ impl WalWriter {
             f.flush().await?;
         }
         if let Some(ref mut f) = self.admission_file {
+            f.flush().await?;
+        }
+        if let Some(ref mut f) = self.order_intent_file {
             f.flush().await?;
         }
         Ok(())
@@ -357,6 +396,7 @@ impl WalWriter {
             ("fills.jsonl", self.counts.fill_events),
             ("risk.jsonl", self.counts.risk_events),
             ("signals_admission.jsonl", self.counts.admission_events),
+            ("order_intent.jsonl", self.counts.order_intent_events),
         ] {
             let path = wal_dir.join(name);
             if path.exists() {
@@ -458,6 +498,11 @@ impl WalReader {
     /// Read signal admission decisions (Phase 18/19C).
     pub fn read_admission_decisions(&self) -> Result<Vec<AdmissionDecision>> {
         self.read_jsonl("wal/signals_admission.jsonl")
+    }
+
+    /// Read order intent records (Phase 23B).
+    pub fn read_order_intent_records(&self) -> Result<Vec<OrderIntentRecord>> {
+        self.read_jsonl("wal/order_intent.jsonl")
     }
 
     /// Read JSONL file into typed records.
@@ -1779,5 +1824,199 @@ mod tests {
         let result = index.verify_decision("corr_x", &current_admit);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), AdmissionOutcome::Admit);
+    }
+
+    // =========================================================================
+    // PHASE 23B: Order Intent WAL Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_order_intent_wal_roundtrip() {
+        use quantlaxmi_models::{
+            ORDER_INTENT_SCHEMA_VERSION, OrderIntentPermission, OrderIntentRecord,
+            OrderIntentSide, OrderIntentType, OrderRefuseReason,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("order_intent_test");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write Permit record
+        let permit = OrderIntentRecord::builder("spread_passive", "BTCUSDT")
+            .ts_ns(1706400000000000000)
+            .session_id("test_session")
+            .seq(1)
+            .side(OrderIntentSide::Buy)
+            .order_type(OrderIntentType::Limit)
+            .qty(100000000, -8)
+            .limit_price(5000000, -2)
+            .correlation_id("corr_001")
+            .parent_admission_digest("admit_digest_abc")
+            .build_permit();
+
+        writer.write_order_intent(permit.clone()).await.unwrap();
+
+        // Write Refuse record
+        let refuse = OrderIntentRecord::builder("spread_passive", "BTCUSDT")
+            .ts_ns(1706400000001000000)
+            .session_id("test_session")
+            .seq(2)
+            .side(OrderIntentSide::Sell)
+            .order_type(OrderIntentType::Market)
+            .qty(50000000, -8)
+            .price_exponent(-2)
+            .correlation_id("corr_002")
+            .parent_admission_digest("admit_digest_def")
+            .build_refuse(OrderRefuseReason::Custom {
+                reason: "Passive strategy cannot emit market orders".to_string(),
+            });
+
+        writer.write_order_intent(refuse.clone()).await.unwrap();
+
+        let manifest = writer.finalize().await.unwrap();
+
+        // Verify counts
+        assert_eq!(
+            manifest.counts.order_intent_events, 2,
+            "Should have 2 order intent events"
+        );
+
+        // Verify file exists in manifest
+        assert!(
+            manifest.files.contains_key("order_intent.jsonl"),
+            "Manifest should contain order_intent.jsonl"
+        );
+
+        // Read back via WalReader
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_order_intent_records().unwrap();
+
+        assert_eq!(records.len(), 2, "Should read 2 records");
+
+        // Verify Permit record
+        let read_permit = &records[0];
+        assert_eq!(read_permit.schema_version, ORDER_INTENT_SCHEMA_VERSION);
+        assert_eq!(read_permit.session_id, "test_session");
+        assert_eq!(read_permit.seq, 1);
+        assert_eq!(read_permit.strategy_id, "spread_passive");
+        assert_eq!(read_permit.symbol, "BTCUSDT");
+        assert_eq!(read_permit.side, OrderIntentSide::Buy);
+        assert_eq!(read_permit.order_type, OrderIntentType::Limit);
+        assert_eq!(read_permit.qty_mantissa, 100000000);
+        assert_eq!(read_permit.qty_exponent, -8);
+        assert_eq!(read_permit.limit_price_mantissa, Some(5000000));
+        assert_eq!(read_permit.price_exponent, -2);
+        assert_eq!(read_permit.permission, OrderIntentPermission::Permit);
+        assert!(read_permit.refuse_reason.is_none());
+        assert_eq!(read_permit.correlation_id, "corr_001");
+        assert_eq!(read_permit.parent_admission_digest, "admit_digest_abc");
+        assert!(!read_permit.digest.is_empty());
+        assert_eq!(read_permit.digest, permit.digest);
+
+        // Verify Refuse record
+        let read_refuse = &records[1];
+        assert_eq!(read_refuse.seq, 2);
+        assert_eq!(read_refuse.side, OrderIntentSide::Sell);
+        assert_eq!(read_refuse.order_type, OrderIntentType::Market);
+        assert!(read_refuse.limit_price_mantissa.is_none());
+        assert_eq!(read_refuse.permission, OrderIntentPermission::Refuse);
+        assert!(read_refuse.refuse_reason.is_some());
+        assert_eq!(read_refuse.digest, refuse.digest);
+
+        // Verify refuse reason content
+        if let Some(OrderRefuseReason::Custom { reason }) = &read_refuse.refuse_reason {
+            assert!(reason.contains("market orders"));
+        } else {
+            panic!("Expected Custom refuse reason");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_order_intent_wal_append_only() {
+        use quantlaxmi_models::{OrderIntentRecord, OrderIntentSide};
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("append_test");
+
+        // First write
+        {
+            let mut writer = WalWriter::new(&session_dir).await.unwrap();
+            let record = OrderIntentRecord::builder("strategy_a", "BTCUSDT")
+                .ts_ns(1)
+                .session_id("sess")
+                .seq(1)
+                .side(OrderIntentSide::Buy)
+                .qty(1000, -8)
+                .correlation_id("c1")
+                .parent_admission_digest("d1")
+                .build_permit();
+            writer.write_order_intent(record).await.unwrap();
+            writer.flush().await.unwrap();
+        }
+
+        // Second write (reopen)
+        {
+            let mut writer = WalWriter::new(&session_dir).await.unwrap();
+            let record = OrderIntentRecord::builder("strategy_a", "BTCUSDT")
+                .ts_ns(2)
+                .session_id("sess")
+                .seq(2)
+                .side(OrderIntentSide::Sell)
+                .qty(2000, -8)
+                .correlation_id("c2")
+                .parent_admission_digest("d2")
+                .build_permit();
+            writer.write_order_intent(record).await.unwrap();
+            writer.flush().await.unwrap();
+        }
+
+        // Verify both records exist
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_order_intent_records().unwrap();
+
+        assert_eq!(records.len(), 2, "File should have 2 records after reopen + write");
+        assert_eq!(records[0].seq, 1);
+        assert_eq!(records[1].seq, 2);
+    }
+
+    #[tokio::test]
+    async fn test_order_intent_wal_manifest_includes_hash() {
+        use quantlaxmi_models::{OrderIntentRecord, OrderIntentSide};
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("hash_test");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write a record
+        let record = OrderIntentRecord::builder("test_strat", "ETHUSDT")
+            .ts_ns(1000)
+            .session_id("sess")
+            .seq(1)
+            .side(OrderIntentSide::Buy)
+            .qty(5000, -8)
+            .correlation_id("corr")
+            .parent_admission_digest("parent")
+            .build_permit();
+        writer.write_order_intent(record).await.unwrap();
+
+        let manifest = writer.finalize().await.unwrap();
+
+        // Verify manifest has file info
+        let file_info = manifest.files.get("order_intent.jsonl").unwrap();
+        assert_eq!(file_info.path, "wal/order_intent.jsonl");
+        assert_eq!(file_info.record_count, 1);
+        assert!(!file_info.sha256.is_empty(), "SHA256 hash should be computed");
+        assert!(file_info.bytes_len > 0, "File should have content");
+
+        // Verify integrity
+        let reader = WalReader::open(&session_dir).unwrap();
+        let report = reader.verify_integrity(&manifest).unwrap();
+        assert!(report.passed, "Integrity check should pass");
+        assert!(
+            report.verified_files.contains(&"order_intent.jsonl".to_string()),
+            "order_intent.jsonl should be verified"
+        );
     }
 }

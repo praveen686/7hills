@@ -823,6 +823,7 @@ mod tests {
                 fill_events: 0,
                 risk_events: 0,
                 admission_events: 0,
+                order_intent_events: 0,
             },
             files,
         };

@@ -44,6 +44,7 @@ use quantlaxmi_gates::promotion_pipeline::{
     promotion_dir, promotion_record_path, session_wal_path, sha256_hex,
 };
 use quantlaxmi_gates::g4_admission_determinism::G4AdmissionDeterminismGate;
+use quantlaxmi_gates::g5_order_intent_determinism::G5OrderIntentDeterminismGate;
 use quantlaxmi_gates::signal_gates::{
     G0SchemaGate, G1DeterminismGate, G2DataIntegrityGate, G3ExecutionContractGate,
     SignalGatesResult, check_names,
@@ -135,6 +136,17 @@ enum Commands {
         replay: PathBuf,
     },
 
+    /// G5: Order intent determinism gate (compares order_intent WALs)
+    G5 {
+        /// Path to live WAL file (order_intent.jsonl)
+        #[arg(long, short = 'l')]
+        live: PathBuf,
+
+        /// Path to replay WAL file (order_intent.jsonl)
+        #[arg(long, short = 'r')]
+        replay: PathBuf,
+    },
+
     /// Run all gates (without artifact writing)
     All {
         /// Path to signals_manifest.json
@@ -160,6 +172,22 @@ enum Commands {
         /// Minimum events for G2
         #[arg(long, short = 'n', default_value = "1")]
         min_events: usize,
+
+        /// Path to live strategy_admission.jsonl for G4 (optional)
+        #[arg(long)]
+        g4_live: Option<PathBuf>,
+
+        /// Path to replay strategy_admission.jsonl for G4 (required if g4-live is provided)
+        #[arg(long)]
+        g4_replay: Option<PathBuf>,
+
+        /// Path to live order_intent.jsonl for G5 (optional)
+        #[arg(long)]
+        g5_live: Option<PathBuf>,
+
+        /// Path to replay order_intent.jsonl for G5 (required if g5-live is provided)
+        #[arg(long)]
+        g5_replay: Option<PathBuf>,
     },
 
     /// Phase 20D: Run gates and write promotion artifacts
@@ -236,6 +264,7 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
             cli.format,
         ),
         Commands::G4 { live, replay } => run_g4(&live, &replay, cli.format),
+        Commands::G5 { live, replay } => run_g5(&live, &replay, cli.format),
         Commands::All {
             manifest,
             live,
@@ -243,6 +272,10 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
             wal,
             threshold,
             min_events,
+            g4_live,
+            g4_replay,
+            g5_live,
+            g5_replay,
         } => run_all(
             &manifest,
             live.as_deref(),
@@ -250,6 +283,10 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
             wal.as_deref(),
             threshold,
             min_events,
+            g4_live.as_deref(),
+            g4_replay.as_deref(),
+            g5_live.as_deref(),
+            g5_replay.as_deref(),
             cli.format,
         ),
         Commands::Promote {
@@ -480,6 +517,48 @@ fn run_g4(
     Ok(result.passed)
 }
 
+fn run_g5(
+    live: &Path,
+    replay: &Path,
+    format: OutputFormat,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let result = G5OrderIntentDeterminismGate::compare(live, replay)
+        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+
+    match format {
+        OutputFormat::Text => {
+            println!(
+                "[{}] {}",
+                quantlaxmi_gates::g5_order_intent_determinism::check_names::G5_ORDER_INTENT_PARITY,
+                result.message()
+            );
+            println!(
+                "  Live entries: {}, Replay entries: {}, Matched: {}",
+                result.live_entry_count, result.replay_entry_count, result.matched_count
+            );
+
+            if !result.mismatches.is_empty() {
+                println!("\nMismatches ({}):", result.mismatches.len());
+                for (i, m) in result.mismatches.iter().enumerate() {
+                    if i >= 10 {
+                        println!("  ... and {} more", result.mismatches.len() - 10);
+                        break;
+                    }
+                    println!("  - {}", m.description());
+                }
+            }
+
+            println!("\nG5 {}", if result.passed { "PASSED" } else { "FAILED" });
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+    }
+
+    Ok(result.passed)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_all(
     manifest: &Path,
     live: Option<&Path>,
@@ -487,6 +566,10 @@ fn run_all(
     wal: Option<&Path>,
     threshold: f64,
     min_events: usize,
+    g4_live: Option<&Path>,
+    g4_replay: Option<&Path>,
+    g5_live: Option<&Path>,
+    g5_replay: Option<&Path>,
     format: OutputFormat,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let mut combined = SignalGatesResult::new();
@@ -523,7 +606,42 @@ fn run_all(
         combined = combined.with_g2(r.clone());
     }
 
+    // G4: Run if both g4_live and g4_replay are provided
+    let g4 = match (g4_live, g4_replay) {
+        (Some(l), Some(r)) => Some(
+            G4AdmissionDeterminismGate::compare(l, r)
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+        ),
+        (Some(_), None) => {
+            return Err("G4 requires both --g4-live and --g4-replay".into());
+        }
+        (None, Some(_)) => {
+            return Err("G4 requires both --g4-live and --g4-replay".into());
+        }
+        (None, None) => None,
+    };
+
+    // G5: Run if both g5_live and g5_replay are provided
+    let g5 = match (g5_live, g5_replay) {
+        (Some(l), Some(r)) => Some(
+            G5OrderIntentDeterminismGate::compare(l, r)
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+        ),
+        (Some(_), None) => {
+            return Err("G5 requires both --g5-live and --g5-replay".into());
+        }
+        (None, Some(_)) => {
+            return Err("G5 requires both --g5-live and --g5-replay".into());
+        }
+        (None, None) => None,
+    };
+
     let combined = combined.finalize();
+
+    // Calculate overall pass including G4/G5
+    let g4_passed = g4.as_ref().map(|r| r.passed).unwrap_or(true);
+    let g5_passed = g5.as_ref().map(|r| r.passed).unwrap_or(true);
+    let all_passed = combined.passed && g4_passed && g5_passed;
 
     match format {
         OutputFormat::Text => {
@@ -570,14 +688,62 @@ fn run_all(
                 );
             }
 
-            println!("\n=== {} ===", combined.summary);
+            // G4
+            if let Some(ref r) = g4 {
+                println!(
+                    "\n[{}] {}",
+                    quantlaxmi_gates::g4_admission_determinism::check_names::G4_DECISION_PARITY,
+                    if r.passed { "PASS" } else { "FAIL" }
+                );
+                println!("  {}", r.message);
+                if !r.mismatches.is_empty() {
+                    println!("  Mismatches: {}", r.mismatches.len());
+                }
+            } else {
+                println!(
+                    "\n[{}] SKIPPED (no --g4-live/--g4-replay)",
+                    quantlaxmi_gates::g4_admission_determinism::check_names::G4_DECISION_PARITY
+                );
+            }
+
+            // G5
+            if let Some(ref r) = g5 {
+                println!(
+                    "\n[{}] {}",
+                    quantlaxmi_gates::g5_order_intent_determinism::check_names::G5_ORDER_INTENT_PARITY,
+                    if r.passed { "PASS" } else { "FAIL" }
+                );
+                println!("  {}", r.message());
+                if !r.mismatches.is_empty() {
+                    println!("  Mismatches: {}", r.mismatches.len());
+                }
+            } else {
+                println!(
+                    "\n[{}] SKIPPED (no --g5-live/--g5-replay)",
+                    quantlaxmi_gates::g5_order_intent_determinism::check_names::G5_ORDER_INTENT_PARITY
+                );
+            }
+
+            let overall = if all_passed { "ALL PASSED" } else { "FAILED" };
+            println!("\n=== {} ===", overall);
         }
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&combined)?);
+            // Build combined JSON with G4/G5 results
+            let mut result = serde_json::json!({
+                "passed": all_passed,
+                "signal_gates": combined,
+            });
+            if let Some(ref r) = g4 {
+                result["g4"] = serde_json::to_value(r)?;
+            }
+            if let Some(ref r) = g5 {
+                result["g5"] = serde_json::to_value(r)?;
+            }
+            println!("{}", serde_json::to_string_pretty(&result)?);
         }
     }
 
-    Ok(combined.passed)
+    Ok(all_passed)
 }
 
 /// Phase 20D: Run gates with artifact writing.
