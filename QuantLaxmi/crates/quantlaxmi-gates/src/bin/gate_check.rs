@@ -43,6 +43,7 @@ use quantlaxmi_gates::promotion_pipeline::{
     gates_dir, gates_summary_path, get_git_branch, get_git_clean, get_git_commit, get_hostname,
     promotion_dir, promotion_record_path, session_wal_path, sha256_hex,
 };
+use quantlaxmi_gates::g4_admission_determinism::G4AdmissionDeterminismGate;
 use quantlaxmi_gates::signal_gates::{
     G0SchemaGate, G1DeterminismGate, G2DataIntegrityGate, G3ExecutionContractGate,
     SignalGatesResult, check_names,
@@ -121,6 +122,17 @@ enum Commands {
         /// Path to promotion directory (optional, enables promotion status check)
         #[arg(long)]
         promotion_root: Option<PathBuf>,
+    },
+
+    /// G4: Strategy admission determinism gate (compares strategy_admission WALs)
+    G4 {
+        /// Path to live WAL file (strategy_admission.jsonl)
+        #[arg(long, short = 'l')]
+        live: PathBuf,
+
+        /// Path to replay WAL file (strategy_admission.jsonl)
+        #[arg(long, short = 'r')]
+        replay: PathBuf,
     },
 
     /// Run all gates (without artifact writing)
@@ -223,6 +235,7 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
             promotion_root.as_deref(),
             cli.format,
         ),
+        Commands::G4 { live, replay } => run_g4(&live, &replay, cli.format),
         Commands::All {
             manifest,
             live,
@@ -410,6 +423,54 @@ fn run_g3(
             }
 
             println!("\nG3 {}", if result.passed { "PASSED" } else { "FAILED" });
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+    }
+
+    Ok(result.passed)
+}
+
+fn run_g4(
+    live: &Path,
+    replay: &Path,
+    format: OutputFormat,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let result = G4AdmissionDeterminismGate::compare(live, replay)
+        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+
+    match format {
+        OutputFormat::Text => {
+            println!("[{}] {}", result.check_name, result.message);
+            println!(
+                "  Live entries: {}, Replay entries: {}, Matched: {}",
+                result.live_entry_count, result.replay_entry_count, result.matched_count
+            );
+
+            if !result.mismatches.is_empty() {
+                println!("\nMismatches ({}):", result.mismatches.len());
+                for (i, m) in result.mismatches.iter().enumerate() {
+                    if i >= 10 {
+                        println!("  ... and {} more", result.mismatches.len() - 10);
+                        break;
+                    }
+                    println!("  - {}", m.description());
+                }
+            }
+
+            if !result.parse_errors.is_empty() {
+                println!("\nParse errors ({}):", result.parse_errors.len());
+                for (i, e) in result.parse_errors.iter().enumerate() {
+                    if i >= 5 {
+                        println!("  ... and {} more", result.parse_errors.len() - 5);
+                        break;
+                    }
+                    println!("  - {}", e);
+                }
+            }
+
+            println!("\nG4 {}", if result.passed { "PASSED" } else { "FAILED" });
         }
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&result)?);

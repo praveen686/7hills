@@ -32,6 +32,7 @@ pub mod g0_data_truth;
 pub mod g1_replay_parity;
 pub mod g2_backtest_correctness;
 pub mod g3_robustness;
+pub mod g4_admission_determinism;
 pub mod g4_deployability;
 pub mod intent_shaping;
 pub mod mtm_drawdown;
@@ -83,6 +84,9 @@ pub use g0_data_truth::{G0Config, G0DataTruth};
 pub use g1_replay_parity::{G1Config, G1ReplayParity};
 pub use g2_backtest_correctness::{G2BacktestCorrectness, G2Config};
 pub use g3_robustness::{G3Config, G3Robustness};
+pub use g4_admission_determinism::{
+    G4AdmissionDeterminismGate, G4DecisionKey, G4Mismatch, G4MismatchKind, G4Result,
+};
 pub use g4_deployability::{G4Config, G4Deployability};
 pub use intent_shaping::{
     BlockReason, CapReason, INTENT_TRANSFORM_SCHEMA_VERSION, IntentShaper, IntentType,
