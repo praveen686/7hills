@@ -42,6 +42,7 @@ pub mod promotion_pipeline;
 pub mod risk_exposure;
 pub mod signal_gates;
 pub mod signals_manifest;
+pub mod strategies_manifest;
 
 pub use admission::{
     AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
@@ -120,7 +121,12 @@ pub use risk_exposure::{
 };
 pub use signal_gates::{
     DecisionFingerprint, G0Result, G0SchemaGate, G1DecisionKey, G1DeterminismGate, G1MismatchKind,
-    G1Result, G1Source, G2DataIntegrityGate, G2Result, SignalGatesResult, check_names,
+    G1Result, G1Source, G2DataIntegrityGate, G2Result, G3ExecutionContractGate, G3Result,
+    G3Violation, SignalGatesResult, check_names,
+};
+pub use strategies_manifest::{
+    ExecutionClass, STRATEGIES_MANIFEST_SCHEMA_VERSION, StrategiesManifest,
+    StrategiesManifestError, StrategyDefaults, StrategySpec,
 };
 
 use chrono::{DateTime, Utc};

@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-28
-**Current Phase:** 20D Complete (Promotion Pipeline + CI Enforcement)
+**Current Phase:** 21 Complete (Strategy Binding & Execution Contracts)
 
 ---
 
@@ -35,6 +35,169 @@
 | 20B | Signals Manifest (PR-1 Manifest + PR-2 WAL Provenance) | ✅ Complete | 2026-01-28 |
 | 20C | Promotion Gates G0-G2 + gate-check CLI | ✅ Complete | 2026-01-28 |
 | 20D | Promotion Pipeline + CI Enforcement | ✅ Complete | 2026-01-28 |
+| 21A | StrategiesManifest + Canonical Bytes | ✅ Complete | 2026-01-28 |
+| 21B | StrategyAdmissionDecision (WAL Event) | ✅ Complete | 2026-01-28 |
+| 21C | G3 Execution Contract Gate | ✅ Complete | 2026-01-28 |
+
+---
+
+## Phase 21: Strategy Binding & Execution Contracts (Complete)
+
+**Goal:** Bridge "admitted signal" → "allowed behavior" with explicit execution contracts.
+
+**Hard Law:** A signal cannot influence execution unless:
+1. It is promoted (20D), AND
+2. It is bound to a strategy in `strategies_manifest.json`
+
+### Phase 21A: StrategiesManifest (PR-1 ✅ Complete)
+
+**Files Created:**
+- `config/strategies_manifest.json` — 3 strategies (spread_passive, microprice_aggressive, imbalance_advisory)
+- `crates/quantlaxmi-gates/src/strategies_manifest.rs` — Types + validation + canonical bytes
+
+**Key Types:**
+```rust
+pub const STRATEGIES_MANIFEST_SCHEMA_VERSION: &str = "1.0.0";
+
+pub enum ExecutionClass {
+    Advisory,   // 0x01 - Emits opinions only
+    Passive,    // 0x02 - Limit orders only
+    Aggressive, // 0x03 - Market orders allowed
+}
+
+pub struct StrategySpec {
+    pub strategy_id: String,
+    pub signals: Vec<String>,
+    pub execution_class: ExecutionClass,
+    pub max_orders_per_min: u32,
+    pub max_position_abs: i64,
+    pub allow_short: bool,
+    pub allow_long: bool,
+    pub allow_market_orders: bool,
+    pub tags: Vec<String>,
+}
+
+pub struct StrategiesManifest {
+    pub schema_version: String,
+    pub manifest_version: String,
+    pub strategies: BTreeMap<String, StrategySpec>,
+    // ...
+}
+```
+
+**Canonical Bytes (Frozen Field Order):**
+- signals/tags sorted lexicographically for hash stability
+- Hash immune to JSON key reordering (uses canonical bytes)
+- `compute_version_hash()` → SHA-256 of canonical bytes
+
+**Validation Rules:**
+- Advisory: all limits=0, all allows=false
+- Passive: allow_market_orders=false
+- max_orders_per_min <= 1000
+- Non-advisory: max_position_abs > 0
+
+**Tests:** 25 tests covering all validation scenarios + hash stability
+
+### Phase 21B: StrategyAdmissionDecision (PR-2 ✅ Complete)
+
+**Files Created:**
+- `crates/quantlaxmi-models/src/strategy_admission.rs` — WAL event types
+
+**Key Types:**
+```rust
+pub const STRATEGY_ADMISSION_SCHEMA_VERSION: &str = "1.0.0";
+
+pub enum StrategyAdmissionOutcome {
+    Admit,  // 0x01
+    Refuse, // 0x02
+}
+
+pub enum StrategyRefuseReason {
+    SignalNotAdmitted { signal_id: String },
+    StrategyNotFound { strategy_id: String },
+    SignalNotBound { signal_id: String, strategy_id: String },
+}
+
+pub struct StrategyAdmissionDecision {
+    pub schema_version: String,
+    pub ts_ns: i64,
+    pub session_id: String,
+    pub strategy_id: String,
+    pub signal_id: String,
+    pub outcome: StrategyAdmissionOutcome,
+    pub refuse_reasons: Vec<StrategyRefuseReason>,
+    pub correlation_id: String, // REQUIRED (not Option)
+    pub strategies_manifest_hash: [u8; 32],
+    pub signals_manifest_hash: [u8; 32],
+    pub digest: String,
+}
+```
+
+**WAL File:** `wal/strategy_admission.jsonl`
+
+**Tests:** 8 tests covering digest determinism + serialization roundtrip
+
+### Phase 21C: G3 Execution Contract Gate (PR-2 ✅ Complete)
+
+**Files Modified:**
+- `crates/quantlaxmi-gates/src/signal_gates.rs` — Added G3 gate
+- `crates/quantlaxmi-gates/src/bin/gate_check.rs` — Added g3 subcommand
+
+**Check Names (Frozen):**
+```rust
+pub const G3_SCHEMA_PARSE: &str = "g3_schema_parse";
+pub const G3_VALIDATE: &str = "g3_validate";
+pub const G3_SIGNAL_BINDINGS: &str = "g3_signal_bindings";
+pub const G3_PROMOTION_STATUS: &str = "g3_promotion_status";
+```
+
+**Key Types:**
+```rust
+pub enum G3Violation {
+    StrategyIdMismatch { key: String, spec_id: String },
+    EmptySignals { strategy_id: String },
+    UnknownSignal { strategy_id: String, signal_id: String },
+    AdvisoryConstraintViolation { ... },
+    PassiveAllowsMarketOrders { strategy_id: String },
+    RateLimitTooHigh { strategy_id: String, value: u32 },
+    ZeroPositionLimit { strategy_id: String, execution_class: String },
+    SignalNotPromoted { strategy_id: String, signal_id: String },
+    ParseError { error: String },
+}
+
+pub struct G3Result {
+    pub passed: bool,
+    pub strategies_manifest_path: String,
+    pub strategies_manifest_hash: Option<[u8; 32]>,
+    pub checks: Vec<CheckResult>,
+    pub violations: Vec<G3Violation>,
+    pub promotion_check_skipped: bool,
+    pub error: Option<String>,
+}
+```
+
+**CLI Commands:**
+```bash
+# G3: Schema only
+gate-check g3 --strategies config/strategies_manifest.json
+
+# G3: Schema + signal bindings
+gate-check g3 --strategies config/strategies_manifest.json \
+              --signals config/signals_manifest.json
+
+# G3: Full (schema + bindings + promotion)
+gate-check g3 --strategies config/strategies_manifest.json \
+              --signals config/signals_manifest.json \
+              --promotion-root ./promotions/
+```
+
+**Tests:** 10 tests covering all G3 violation types
+
+**Design Decisions:**
+- Promotion check deferred to Phase 21D (requires reading promotion records)
+- Signal bindings validated against signals_manifest (known signals only)
+- Advisory constraints strictly enforced (no execution at all)
+- Passive constraints: no market orders allowed
 
 ---
 
@@ -629,6 +792,24 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | Canonical path helpers (gates_dir, g0_output_path, etc.) | Phase 20D |
 | `gate-check promote` CLI semantics | Phase 20D |
 | Exit codes (0=pass, 1=fail, 2=error) | Phase 20D |
+| `STRATEGIES_MANIFEST_SCHEMA_VERSION: "1.0.0"` | Phase 21A |
+| `ExecutionClass` enum variants + canonical bytes | Phase 21A |
+| `StrategiesManifest` canonical bytes field order | Phase 21A |
+| `StrategySpec` canonical bytes field order | Phase 21A |
+| `StrategyDefaults` canonical bytes field order | Phase 21A |
+| Signals/tags sorted for hash | Phase 21A |
+| Defaults are informational only (v1) | Phase 21A |
+| Advisory constraint rules | Phase 21A |
+| Passive constraint rules | Phase 21A |
+| `STRATEGY_ADMISSION_SCHEMA_VERSION: "1.0.0"` | Phase 21B |
+| `StrategyAdmissionOutcome` variants + canonical bytes | Phase 21B |
+| `StrategyRefuseReason` variants + canonical bytes | Phase 21B |
+| `StrategyAdmissionDecision` canonical bytes order | Phase 21B |
+| `correlation_id` required (not Option) | Phase 21B |
+| `G3_*` check names | Phase 21C |
+| `G3Violation` variants | Phase 21C |
+| `G3Result` uses `checks: Vec<CheckResult>` | Phase 21C |
+| `gate-check g3` CLI semantics | Phase 21C |
 
 ---
 

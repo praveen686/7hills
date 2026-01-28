@@ -94,6 +94,13 @@ pub use admission::{
     InternalField, SignalRequirements, VendorField, compute_digest,
 };
 
+// Strategy Admission Control types (Phase 21B)
+pub mod strategy_admission;
+pub use strategy_admission::{
+    STRATEGY_ADMISSION_SCHEMA_VERSION, StrategyAdmissionDecision, StrategyAdmissionOutcome,
+    StrategyRefuseReason,
+};
+
 // SignalFrame canonical structure (Phase 20A)
 pub mod signal_frame;
 pub use signal_frame::{

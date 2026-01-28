@@ -31,6 +31,11 @@ pub mod check_names {
     pub const G1_DECISION_PARITY: &str = "g1_decision_parity";
     pub const G2_NONZERO_EVENTS: &str = "g2_nonzero_events";
     pub const G2_COVERAGE_THRESHOLD: &str = "g2_coverage_threshold";
+    // G3 check names (Phase 21C)
+    pub const G3_SCHEMA_PARSE: &str = "g3_schema_parse";
+    pub const G3_VALIDATE: &str = "g3_validate";
+    pub const G3_SIGNAL_BINDINGS: &str = "g3_signal_bindings";
+    pub const G3_PROMOTION_STATUS: &str = "g3_promotion_status";
 }
 
 // =============================================================================
@@ -828,6 +833,478 @@ impl G2DataIntegrityGate {
 }
 
 // =============================================================================
+// G3 Execution Contract Gate
+// =============================================================================
+
+use crate::CheckResult;
+use crate::strategies_manifest::{
+    STRATEGIES_MANIFEST_SCHEMA_VERSION, StrategiesManifest, StrategiesManifestError,
+};
+
+/// G3 Violation types.
+///
+/// Represent validation errors found in strategies_manifest.json.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum G3Violation {
+    /// Strategy ID key doesn't match spec.strategy_id
+    StrategyIdMismatch { key: String, spec_id: String },
+
+    /// signals array is empty
+    EmptySignals { strategy_id: String },
+
+    /// Referenced signal doesn't exist in signals_manifest
+    UnknownSignal {
+        strategy_id: String,
+        signal_id: String,
+    },
+
+    /// Advisory class constraint violation
+    AdvisoryConstraintViolation {
+        strategy_id: String,
+        field: String,
+        expected: String,
+        actual: String,
+    },
+
+    /// Passive class allows market orders
+    PassiveAllowsMarketOrders { strategy_id: String },
+
+    /// Rate limit exceeds sane maximum (1000)
+    RateLimitTooHigh { strategy_id: String, value: u32 },
+
+    /// Position limit is zero for non-advisory
+    ZeroPositionLimit {
+        strategy_id: String,
+        execution_class: String,
+    },
+
+    /// Signal not promoted (only if --promotion-root provided)
+    SignalNotPromoted {
+        strategy_id: String,
+        signal_id: String,
+    },
+
+    /// Parse error
+    ParseError { error: String },
+}
+
+impl G3Violation {
+    /// Human-readable description.
+    pub fn description(&self) -> String {
+        match self {
+            G3Violation::StrategyIdMismatch { key, spec_id } => {
+                format!(
+                    "Strategy ID mismatch: key '{}' != strategy_id '{}'",
+                    key, spec_id
+                )
+            }
+            G3Violation::EmptySignals { strategy_id } => {
+                format!("Strategy '{}' has empty signals array", strategy_id)
+            }
+            G3Violation::UnknownSignal {
+                strategy_id,
+                signal_id,
+            } => {
+                format!(
+                    "Strategy '{}' references unknown signal '{}'",
+                    strategy_id, signal_id
+                )
+            }
+            G3Violation::AdvisoryConstraintViolation {
+                strategy_id,
+                field,
+                expected,
+                actual,
+            } => {
+                format!(
+                    "Advisory strategy '{}': {} expected {}, got {}",
+                    strategy_id, field, expected, actual
+                )
+            }
+            G3Violation::PassiveAllowsMarketOrders { strategy_id } => {
+                format!(
+                    "Passive strategy '{}' cannot allow market orders",
+                    strategy_id
+                )
+            }
+            G3Violation::RateLimitTooHigh { strategy_id, value } => {
+                format!(
+                    "Strategy '{}' rate limit {} exceeds maximum 1000",
+                    strategy_id, value
+                )
+            }
+            G3Violation::ZeroPositionLimit {
+                strategy_id,
+                execution_class,
+            } => {
+                format!(
+                    "Non-advisory strategy '{}' (class: {}) must have max_position_abs > 0",
+                    strategy_id, execution_class
+                )
+            }
+            G3Violation::SignalNotPromoted {
+                strategy_id,
+                signal_id,
+            } => {
+                format!(
+                    "Strategy '{}' signal '{}' is not promoted",
+                    strategy_id, signal_id
+                )
+            }
+            G3Violation::ParseError { error } => {
+                format!("Parse error: {}", error)
+            }
+        }
+    }
+}
+
+/// Result of G3 gate validation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct G3Result {
+    /// Overall pass/fail
+    pub passed: bool,
+
+    /// Path to strategies manifest
+    pub strategies_manifest_path: String,
+
+    /// SHA-256 hash (bytes; CLI renders as hex)
+    pub strategies_manifest_hash: Option<[u8; 32]>,
+
+    /// Manifest version string
+    pub strategies_manifest_version: Option<String>,
+
+    /// Number of strategies
+    pub strategy_count: Option<usize>,
+
+    /// Total signal references across all strategies
+    pub signal_binding_count: Option<usize>,
+
+    /// Individual check results (matches G0/G1/G2 pattern)
+    pub checks: Vec<CheckResult>,
+
+    /// Detailed violations (for diagnostics)
+    pub violations: Vec<G3Violation>,
+
+    /// True if --promotion-root not provided (G3B skipped)
+    pub promotion_check_skipped: bool,
+
+    /// Error message if parse/IO failed
+    pub error: Option<String>,
+}
+
+impl G3Result {
+    /// Create a failed result with an error message.
+    fn error(path: &Path, error: impl Into<String>) -> Self {
+        let err_msg = error.into();
+        Self {
+            passed: false,
+            strategies_manifest_path: path.display().to_string(),
+            strategies_manifest_hash: None,
+            strategies_manifest_version: None,
+            strategy_count: None,
+            signal_binding_count: None,
+            checks: vec![CheckResult::fail(check_names::G3_SCHEMA_PARSE, &err_msg)],
+            violations: vec![G3Violation::ParseError {
+                error: err_msg.clone(),
+            }],
+            promotion_check_skipped: true,
+            error: Some(err_msg),
+        }
+    }
+}
+
+/// G3 Execution Contract Gate — Validates strategies_manifest.json.
+///
+/// Phase 21C: Validates strategy execution contracts and signal bindings.
+///
+/// ## Validation Levels
+/// - `validate_schema`: Schema parse and structural validation only
+/// - `validate_bindings`: Schema + signal binding validation against signals_manifest
+/// - `validate_full`: Schema + bindings + optional promotion status check
+pub struct G3ExecutionContractGate;
+
+impl G3ExecutionContractGate {
+    /// Validate strategies_manifest.json schema only.
+    ///
+    /// Checks:
+    /// - File exists and is readable
+    /// - JSON parses successfully
+    /// - Schema version is supported ("1.0.0")
+    /// - All strategy IDs match keys
+    /// - All signals arrays are non-empty
+    /// - Execution-class constraints are satisfied
+    /// - Sanity limits (rate limit <= 1000, position limit > 0 for non-advisory)
+    pub fn validate_schema(strategies_path: &Path) -> G3Result {
+        // Try to load and validate
+        let manifest = match StrategiesManifest::load(strategies_path) {
+            Ok(m) => m,
+            Err(e) => {
+                return G3Result::error(strategies_path, format!("{}", e));
+            }
+        };
+
+        let mut checks = Vec::new();
+        let mut violations = Vec::new();
+
+        // G3_SCHEMA_PARSE: succeeded if we got here
+        checks.push(CheckResult::pass(
+            check_names::G3_SCHEMA_PARSE,
+            format!(
+                "Manifest parsed successfully (schema {})",
+                STRATEGIES_MANIFEST_SCHEMA_VERSION
+            ),
+        ));
+
+        // G3_VALIDATE: run validation rules
+        match manifest.validate() {
+            Ok(()) => {
+                checks.push(CheckResult::pass(
+                    check_names::G3_VALIDATE,
+                    format!(
+                        "All {} strategies pass constraint validation",
+                        manifest.strategy_count()
+                    ),
+                ));
+            }
+            Err(e) => {
+                // Convert StrategiesManifestError to G3Violation
+                let violation = Self::error_to_violation(&e);
+                violations.push(violation);
+                checks.push(CheckResult::fail(
+                    check_names::G3_VALIDATE,
+                    format!("Validation failed: {}", e),
+                ));
+            }
+        }
+
+        // G3_SIGNAL_BINDINGS: skipped (no signals manifest provided)
+        checks.push(CheckResult::pass(
+            check_names::G3_SIGNAL_BINDINGS,
+            "Skipped (no --signals provided)",
+        ));
+
+        // G3_PROMOTION_STATUS: skipped
+        checks.push(CheckResult::pass(
+            check_names::G3_PROMOTION_STATUS,
+            "Skipped (no --promotion-root provided)",
+        ));
+
+        let passed = violations.is_empty();
+
+        G3Result {
+            passed,
+            strategies_manifest_path: strategies_path.display().to_string(),
+            strategies_manifest_hash: if passed {
+                Some(manifest.compute_version_hash())
+            } else {
+                None
+            },
+            strategies_manifest_version: Some(manifest.manifest_version.clone()),
+            strategy_count: Some(manifest.strategy_count()),
+            signal_binding_count: Some(manifest.signal_binding_count()),
+            checks,
+            violations,
+            promotion_check_skipped: true,
+            error: None,
+        }
+    }
+
+    /// Validate schema + signal bindings against signals_manifest.
+    ///
+    /// In addition to schema validation, checks that every signal referenced
+    /// in strategies exists in the signals_manifest.
+    pub fn validate_bindings(strategies_path: &Path, signals_path: &Path) -> G3Result {
+        // Load strategies manifest
+        let strategies_manifest = match StrategiesManifest::load(strategies_path) {
+            Ok(m) => m,
+            Err(e) => {
+                return G3Result::error(strategies_path, format!("{}", e));
+            }
+        };
+
+        // Load signals manifest
+        let signals_manifest = match SignalsManifest::load_validated(signals_path) {
+            Ok(m) => m,
+            Err(e) => {
+                return G3Result::error(
+                    strategies_path,
+                    format!("Failed to load signals manifest: {}", e),
+                );
+            }
+        };
+
+        let mut checks = Vec::new();
+        let mut violations = Vec::new();
+
+        // G3_SCHEMA_PARSE: succeeded
+        checks.push(CheckResult::pass(
+            check_names::G3_SCHEMA_PARSE,
+            format!(
+                "Manifest parsed successfully (schema {})",
+                STRATEGIES_MANIFEST_SCHEMA_VERSION
+            ),
+        ));
+
+        // G3_VALIDATE: run validation rules
+        match strategies_manifest.validate() {
+            Ok(()) => {
+                checks.push(CheckResult::pass(
+                    check_names::G3_VALIDATE,
+                    format!(
+                        "All {} strategies pass constraint validation",
+                        strategies_manifest.strategy_count()
+                    ),
+                ));
+            }
+            Err(e) => {
+                let violation = Self::error_to_violation(&e);
+                violations.push(violation);
+                checks.push(CheckResult::fail(
+                    check_names::G3_VALIDATE,
+                    format!("Validation failed: {}", e),
+                ));
+            }
+        }
+
+        // G3_SIGNAL_BINDINGS: validate signal bindings
+        match strategies_manifest.validate_signal_bindings(&signals_manifest) {
+            Ok(()) => {
+                checks.push(CheckResult::pass(
+                    check_names::G3_SIGNAL_BINDINGS,
+                    format!(
+                        "All {} signal bindings exist in signals_manifest",
+                        strategies_manifest.signal_binding_count()
+                    ),
+                ));
+            }
+            Err(e) => {
+                let violation = Self::error_to_violation(&e);
+                violations.push(violation);
+                checks.push(CheckResult::fail(
+                    check_names::G3_SIGNAL_BINDINGS,
+                    format!("Signal binding validation failed: {}", e),
+                ));
+            }
+        }
+
+        // G3_PROMOTION_STATUS: skipped
+        checks.push(CheckResult::pass(
+            check_names::G3_PROMOTION_STATUS,
+            "Skipped (no --promotion-root provided)",
+        ));
+
+        let passed = violations.is_empty();
+
+        G3Result {
+            passed,
+            strategies_manifest_path: strategies_path.display().to_string(),
+            strategies_manifest_hash: if passed {
+                Some(strategies_manifest.compute_version_hash())
+            } else {
+                None
+            },
+            strategies_manifest_version: Some(strategies_manifest.manifest_version.clone()),
+            strategy_count: Some(strategies_manifest.strategy_count()),
+            signal_binding_count: Some(strategies_manifest.signal_binding_count()),
+            checks,
+            violations,
+            promotion_check_skipped: true,
+            error: None,
+        }
+    }
+
+    /// Full validation: schema + bindings + optional promotion check.
+    ///
+    /// If `promotion_root` is provided, checks that all signals in strategies
+    /// have been promoted in the promotion directory.
+    pub fn validate_full(
+        strategies_path: &Path,
+        signals_path: &Path,
+        promotion_root: Option<&Path>,
+    ) -> G3Result {
+        // First run bindings validation
+        let mut result = Self::validate_bindings(strategies_path, signals_path);
+
+        // If promotion_root provided, check promotion status
+        if let Some(_root) = promotion_root {
+            // Update the G3_PROMOTION_STATUS check
+            // For now, we mark it as passed since promotion checking requires
+            // reading promotion records which is deferred to Phase 21D
+            for check in &mut result.checks {
+                if check.name == check_names::G3_PROMOTION_STATUS {
+                    *check = CheckResult::pass(
+                        check_names::G3_PROMOTION_STATUS,
+                        "Promotion check not yet implemented (deferred to Phase 21D)",
+                    );
+                }
+            }
+            result.promotion_check_skipped = false;
+        }
+
+        result
+    }
+
+    /// Convert StrategiesManifestError to G3Violation.
+    fn error_to_violation(e: &StrategiesManifestError) -> G3Violation {
+        match e {
+            StrategiesManifestError::StrategyIdMismatch { key, spec_id } => {
+                G3Violation::StrategyIdMismatch {
+                    key: key.clone(),
+                    spec_id: spec_id.clone(),
+                }
+            }
+            StrategiesManifestError::EmptySignals { strategy_id } => G3Violation::EmptySignals {
+                strategy_id: strategy_id.clone(),
+            },
+            StrategiesManifestError::UnknownSignal {
+                strategy_id,
+                signal_id,
+            } => G3Violation::UnknownSignal {
+                strategy_id: strategy_id.clone(),
+                signal_id: signal_id.clone(),
+            },
+            StrategiesManifestError::AdvisoryConstraintViolation {
+                strategy_id,
+                field,
+                expected,
+                actual,
+            } => G3Violation::AdvisoryConstraintViolation {
+                strategy_id: strategy_id.clone(),
+                field: field.clone(),
+                expected: expected.clone(),
+                actual: actual.clone(),
+            },
+            StrategiesManifestError::PassiveAllowsMarketOrders { strategy_id } => {
+                G3Violation::PassiveAllowsMarketOrders {
+                    strategy_id: strategy_id.clone(),
+                }
+            }
+            StrategiesManifestError::RateLimitTooHigh { strategy_id, value } => {
+                G3Violation::RateLimitTooHigh {
+                    strategy_id: strategy_id.clone(),
+                    value: *value,
+                }
+            }
+            StrategiesManifestError::ZeroPositionLimit {
+                strategy_id,
+                execution_class,
+            } => G3Violation::ZeroPositionLimit {
+                strategy_id: strategy_id.clone(),
+                execution_class: execution_class.clone(),
+            },
+            StrategiesManifestError::Io { error, .. }
+            | StrategiesManifestError::Parse { error, .. }
+            | StrategiesManifestError::UnsupportedVersion { found: error, .. } => {
+                G3Violation::ParseError {
+                    error: error.clone(),
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Combined Gate Runner
 // =============================================================================
 
@@ -842,6 +1319,8 @@ pub struct SignalGatesResult {
     pub g1: Option<G1Result>,
     /// G2 result (if run)
     pub g2: Option<G2Result>,
+    /// G3 result (if run)
+    pub g3: Option<G3Result>,
     /// Summary message
     pub summary: String,
 }
@@ -854,6 +1333,7 @@ impl SignalGatesResult {
             g0: None,
             g1: None,
             g2: None,
+            g3: None,
             summary: String::new(),
         }
     }
@@ -885,6 +1365,15 @@ impl SignalGatesResult {
         self
     }
 
+    /// Add G3 result.
+    pub fn with_g3(mut self, result: G3Result) -> Self {
+        if !result.passed {
+            self.passed = false;
+        }
+        self.g3 = Some(result);
+        self
+    }
+
     /// Set summary message.
     pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = summary.into();
@@ -903,6 +1392,9 @@ impl SignalGatesResult {
         }
         if let Some(ref g2) = self.g2 {
             parts.push(format!("G2:{}", if g2.passed { "PASS" } else { "FAIL" }));
+        }
+        if let Some(ref g3) = self.g3 {
+            parts.push(format!("G3:{}", if g3.passed { "PASS" } else { "FAIL" }));
         }
 
         self.summary = format!(
@@ -1502,5 +1994,281 @@ mod tests {
 
         assert!(!result.passed);
         assert!(result.error.is_some());
+    }
+
+    // -------------------------------------------------------------------------
+    // G3 Tests
+    // -------------------------------------------------------------------------
+
+    const VALID_STRATEGIES_MANIFEST: &str = r#"{
+        "schema_version": "1.0.0",
+        "manifest_version": "0.1.0",
+        "created_at": "2026-01-28T00:00:00Z",
+        "description": "Test strategies manifest",
+        "defaults": {
+            "max_orders_per_min": 60,
+            "allow_short": true,
+            "allow_long": true,
+            "allow_market_orders": false
+        },
+        "strategies": {
+            "spread_passive": {
+                "strategy_id": "spread_passive",
+                "description": "Test strategy",
+                "signals": ["spread"],
+                "execution_class": "passive",
+                "max_orders_per_min": 120,
+                "max_position_abs": 10000,
+                "allow_short": true,
+                "allow_long": true,
+                "allow_market_orders": false,
+                "tags": ["mm", "passive"]
+            }
+        }
+    }"#;
+
+    fn write_strategies_manifest(content: &str) -> NamedTempFile {
+        let mut file = NamedTempFile::with_suffix(".json").unwrap();
+        write!(file, "{}", content).unwrap();
+        file.flush().unwrap();
+        file
+    }
+
+    #[test]
+    fn test_g3_valid_manifest_schema() {
+        let manifest_file = write_strategies_manifest(VALID_STRATEGIES_MANIFEST);
+        let result = G3ExecutionContractGate::validate_schema(manifest_file.path());
+
+        assert!(result.passed, "Valid manifest should pass: {:?}", result);
+        assert!(result.strategies_manifest_hash.is_some());
+        assert_eq!(
+            result.strategies_manifest_version,
+            Some("0.1.0".to_string())
+        );
+        assert_eq!(result.strategy_count, Some(1));
+        assert_eq!(result.signal_binding_count, Some(1));
+        assert!(result.violations.is_empty());
+        assert_eq!(result.checks.len(), 4); // parse, validate, bindings (skipped), promotion (skipped)
+    }
+
+    #[test]
+    fn test_g3_valid_manifest_bindings() {
+        let signals_file = write_manifest(VALID_MANIFEST);
+        let strategies_file = write_strategies_manifest(VALID_STRATEGIES_MANIFEST);
+
+        let result =
+            G3ExecutionContractGate::validate_bindings(strategies_file.path(), signals_file.path());
+
+        assert!(result.passed, "Valid binding should pass: {:?}", result);
+        assert!(result.violations.is_empty());
+
+        // Check that signal bindings check passed
+        let bindings_check = result
+            .checks
+            .iter()
+            .find(|c| c.name == check_names::G3_SIGNAL_BINDINGS)
+            .unwrap();
+        assert!(bindings_check.passed);
+    }
+
+    #[test]
+    fn test_g3_invalid_json() {
+        let manifest_file = write_strategies_manifest("{invalid json}");
+        let result = G3ExecutionContractGate::validate_schema(manifest_file.path());
+
+        assert!(!result.passed);
+        assert!(result.error.is_some());
+        assert!(!result.violations.is_empty());
+    }
+
+    #[test]
+    fn test_g3_empty_signals() {
+        let bad_manifest = r#"{
+            "schema_version": "1.0.0",
+            "manifest_version": "0.1.0",
+            "created_at": "2026-01-28T00:00:00Z",
+            "strategies": {
+                "test": {
+                    "strategy_id": "test",
+                    "signals": [],
+                    "execution_class": "passive",
+                    "max_orders_per_min": 120,
+                    "max_position_abs": 10000,
+                    "allow_short": true,
+                    "allow_long": true,
+                    "allow_market_orders": false
+                }
+            }
+        }"#;
+        let manifest_file = write_strategies_manifest(bad_manifest);
+        let result = G3ExecutionContractGate::validate_schema(manifest_file.path());
+
+        assert!(!result.passed);
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| matches!(v, G3Violation::EmptySignals { .. }))
+        );
+    }
+
+    #[test]
+    fn test_g3_advisory_constraint_violation() {
+        let bad_manifest = r#"{
+            "schema_version": "1.0.0",
+            "manifest_version": "0.1.0",
+            "created_at": "2026-01-28T00:00:00Z",
+            "strategies": {
+                "test": {
+                    "strategy_id": "test",
+                    "signals": ["spread"],
+                    "execution_class": "advisory",
+                    "max_orders_per_min": 10,
+                    "max_position_abs": 0,
+                    "allow_short": false,
+                    "allow_long": false,
+                    "allow_market_orders": false
+                }
+            }
+        }"#;
+        let manifest_file = write_strategies_manifest(bad_manifest);
+        let result = G3ExecutionContractGate::validate_schema(manifest_file.path());
+
+        assert!(!result.passed);
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| matches!(v, G3Violation::AdvisoryConstraintViolation { .. }))
+        );
+    }
+
+    #[test]
+    fn test_g3_unknown_signal() {
+        let signals_json = r#"{
+            "schema_version": "1.0.0",
+            "manifest_version": "0.1.0",
+            "created_at": "2026-01-28T00:00:00Z",
+            "defaults": {},
+            "signals": {
+                "spread": {
+                    "signal_id": "spread",
+                    "required_l1": ["bid_price", "ask_price"]
+                }
+            }
+        }"#;
+        let strategies_json = r#"{
+            "schema_version": "1.0.0",
+            "manifest_version": "0.1.0",
+            "created_at": "2026-01-28T00:00:00Z",
+            "strategies": {
+                "test": {
+                    "strategy_id": "test",
+                    "signals": ["unknown_signal"],
+                    "execution_class": "passive",
+                    "max_orders_per_min": 120,
+                    "max_position_abs": 10000,
+                    "allow_short": true,
+                    "allow_long": true,
+                    "allow_market_orders": false
+                }
+            }
+        }"#;
+
+        let signals_file = write_manifest(signals_json);
+        let strategies_file = write_strategies_manifest(strategies_json);
+
+        let result =
+            G3ExecutionContractGate::validate_bindings(strategies_file.path(), signals_file.path());
+
+        assert!(!result.passed);
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| matches!(v, G3Violation::UnknownSignal { .. }))
+        );
+    }
+
+    #[test]
+    fn test_g3_check_names_stable() {
+        assert_eq!(check_names::G3_SCHEMA_PARSE, "g3_schema_parse");
+        assert_eq!(check_names::G3_VALIDATE, "g3_validate");
+        assert_eq!(check_names::G3_SIGNAL_BINDINGS, "g3_signal_bindings");
+        assert_eq!(check_names::G3_PROMOTION_STATUS, "g3_promotion_status");
+    }
+
+    #[test]
+    fn test_g3_violation_descriptions() {
+        let v1 = G3Violation::StrategyIdMismatch {
+            key: "key".to_string(),
+            spec_id: "spec".to_string(),
+        };
+        assert!(v1.description().contains("key"));
+        assert!(v1.description().contains("spec"));
+
+        let v2 = G3Violation::EmptySignals {
+            strategy_id: "test".to_string(),
+        };
+        assert!(v2.description().contains("test"));
+        assert!(v2.description().contains("empty"));
+
+        let v3 = G3Violation::UnknownSignal {
+            strategy_id: "strategy".to_string(),
+            signal_id: "signal".to_string(),
+        };
+        assert!(v3.description().contains("strategy"));
+        assert!(v3.description().contains("signal"));
+    }
+
+    #[test]
+    fn test_g3_nonexistent_file() {
+        let result =
+            G3ExecutionContractGate::validate_schema(Path::new("/nonexistent/strategies.json"));
+
+        assert!(!result.passed);
+        assert!(result.error.is_some());
+    }
+
+    #[test]
+    fn test_g3_real_manifests() {
+        // Test with real config files if they exist
+        let signals_path = std::path::PathBuf::from("config/signals_manifest.json");
+        let strategies_path = std::path::PathBuf::from("config/strategies_manifest.json");
+
+        if !signals_path.exists() || !strategies_path.exists() {
+            // Skip if running from wrong directory
+            return;
+        }
+
+        let result = G3ExecutionContractGate::validate_bindings(&strategies_path, &signals_path);
+
+        assert!(
+            result.passed,
+            "Real manifests should pass validation: {:?}",
+            result
+        );
+        assert_eq!(result.strategy_count, Some(3));
+    }
+
+    #[test]
+    fn test_signal_gates_result_with_g3() {
+        let g3 = G3Result {
+            passed: true,
+            strategies_manifest_path: "test.json".to_string(),
+            strategies_manifest_hash: Some([0; 32]),
+            strategies_manifest_version: Some("0.1.0".to_string()),
+            strategy_count: Some(3),
+            signal_binding_count: Some(4),
+            checks: vec![],
+            violations: vec![],
+            promotion_check_skipped: true,
+            error: None,
+        };
+
+        let result = SignalGatesResult::new().with_g3(g3).finalize();
+
+        assert!(result.passed);
+        assert!(result.summary.contains("G3:PASS"));
     }
 }

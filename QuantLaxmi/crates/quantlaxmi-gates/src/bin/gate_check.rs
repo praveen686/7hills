@@ -44,7 +44,8 @@ use quantlaxmi_gates::promotion_pipeline::{
     promotion_dir, promotion_record_path, session_wal_path, sha256_hex,
 };
 use quantlaxmi_gates::signal_gates::{
-    G0SchemaGate, G1DeterminismGate, G2DataIntegrityGate, SignalGatesResult, check_names,
+    G0SchemaGate, G1DeterminismGate, G2DataIntegrityGate, G3ExecutionContractGate,
+    SignalGatesResult, check_names,
 };
 use quantlaxmi_gates::signals_manifest::SignalsManifest;
 
@@ -105,6 +106,21 @@ enum Commands {
         /// Minimum number of events required
         #[arg(long, short = 'n', default_value = "1")]
         min_events: usize,
+    },
+
+    /// G3: Validate strategies_manifest.json execution contracts
+    G3 {
+        /// Path to strategies_manifest.json
+        #[arg(long, short = 's')]
+        strategies: PathBuf,
+
+        /// Path to signals_manifest.json (optional, enables signal binding validation)
+        #[arg(long, short = 'm')]
+        signals: Option<PathBuf>,
+
+        /// Path to promotion directory (optional, enables promotion status check)
+        #[arg(long)]
+        promotion_root: Option<PathBuf>,
     },
 
     /// Run all gates (without artifact writing)
@@ -197,6 +213,16 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
             threshold,
             min_events,
         } => run_g2(&wal, threshold, min_events, cli.format),
+        Commands::G3 {
+            strategies,
+            signals,
+            promotion_root,
+        } => run_g3(
+            &strategies,
+            signals.as_deref(),
+            promotion_root.as_deref(),
+            cli.format,
+        ),
         Commands::All {
             manifest,
             live,
@@ -325,6 +351,65 @@ fn run_g2(
             }
 
             println!("\nG2 {}", if result.passed { "PASSED" } else { "FAILED" });
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+    }
+
+    Ok(result.passed)
+}
+
+fn run_g3(
+    strategies: &Path,
+    signals: Option<&Path>,
+    promotion_root: Option<&Path>,
+    format: OutputFormat,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let result = match (signals, promotion_root) {
+        (Some(s), Some(p)) => G3ExecutionContractGate::validate_full(strategies, s, Some(p)),
+        (Some(s), None) => G3ExecutionContractGate::validate_bindings(strategies, s),
+        (None, _) => G3ExecutionContractGate::validate_schema(strategies),
+    };
+
+    match format {
+        OutputFormat::Text => {
+            println!("=== G3 Execution Contract Gate ===\n");
+
+            for check in &result.checks {
+                println!(
+                    "[{}] {}",
+                    check.name,
+                    if check.passed { "PASS" } else { "FAIL" }
+                );
+                println!("  {}", check.message);
+            }
+
+            if let Some(ref hash) = result.strategies_manifest_hash {
+                println!("\nStrategies manifest hash: {}", hex::encode(&hash[..8]));
+            }
+            if let Some(count) = result.strategy_count {
+                println!("Strategy count: {}", count);
+            }
+            if let Some(count) = result.signal_binding_count {
+                println!("Signal binding count: {}", count);
+            }
+            if let Some(ref version) = result.strategies_manifest_version {
+                println!("Manifest version: {}", version);
+            }
+
+            if !result.violations.is_empty() {
+                println!("\nViolations ({}):", result.violations.len());
+                for v in &result.violations {
+                    println!("  - {}", v.description());
+                }
+            }
+
+            if let Some(ref err) = result.error {
+                println!("\nError: {}", err);
+            }
+
+            println!("\nG3 {}", if result.passed { "PASSED" } else { "FAILED" });
         }
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&result)?);
