@@ -419,6 +419,28 @@ pub enum Commands {
         /// Write segment_admission_summary.json after backtest completion
         #[arg(long, default_value_t = true)]
         write_admission_summary: bool,
+
+        // Phase 22E: Enforcement configuration
+        /// Path to strategies_manifest.json (required with --require-promotion)
+        #[arg(long)]
+        strategies_manifest: Option<String>,
+
+        /// Path to signals_manifest.json (required with --require-promotion)
+        #[arg(long)]
+        signals_manifest: Option<String>,
+
+        /// Path to promotion directory root (required with --require-promotion)
+        #[arg(long)]
+        promotion_root: Option<String>,
+
+        /// Require signal promotion status check before execution.
+        /// When set, signals must be promoted to execute.
+        #[arg(long, default_value_t = false)]
+        require_promotion: bool,
+
+        /// Override WAL output directory (default: segment_dir/wal)
+        #[arg(long)]
+        wal_dir: Option<String>,
     },
 
     /// Verify replay parity between two decision traces
@@ -601,6 +623,11 @@ async fn async_main() -> anyhow::Result<()> {
             enforce_admission_from_wal,
             admission_mismatch_policy,
             write_admission_summary,
+            strategies_manifest,
+            signals_manifest,
+            promotion_root,
+            require_promotion,
+            wal_dir,
         } => {
             run_backtest(
                 &segment_dir,
@@ -618,6 +645,11 @@ async fn async_main() -> anyhow::Result<()> {
                 enforce_admission_from_wal,
                 &admission_mismatch_policy,
                 write_admission_summary,
+                strategies_manifest.as_deref(),
+                signals_manifest.as_deref(),
+                promotion_root.as_deref(),
+                require_promotion,
+                wal_dir.as_deref(),
             )
             .await
         }
@@ -1936,10 +1968,16 @@ async fn run_backtest(
     enforce_admission_from_wal: bool,
     admission_mismatch_policy: &str,
     write_admission_summary: bool,
+    // Phase 22E: Enforcement configuration
+    strategies_manifest: Option<&str>,
+    signals_manifest: Option<&str>,
+    promotion_root: Option<&str>,
+    require_promotion: bool,
+    wal_dir: Option<&str>,
 ) -> anyhow::Result<()> {
     use backtest::{
-        BacktestConfig, BacktestEngine, BasisCaptureStrategy, ExchangeConfig, FundingBiasStrategy,
-        PaceMode,
+        BacktestConfig, BacktestEngine, BasisCaptureStrategy, EnforcementConfig, ExchangeConfig,
+        FundingBiasStrategy, PaceMode,
     };
     use quantlaxmi_strategy::StrategyRegistry;
     use quantlaxmi_wal::{SegmentAdmissionSummary, WalReader};
@@ -1957,6 +1995,23 @@ async fn run_backtest(
         _ => PaceMode::Fast,
     };
 
+    // Phase 22E: Build enforcement config
+    let enforcement = EnforcementConfig {
+        strategies_manifest_path: strategies_manifest.map(std::path::PathBuf::from),
+        signals_manifest_path: signals_manifest.map(std::path::PathBuf::from),
+        promotion_root: promotion_root.map(std::path::PathBuf::from),
+        require_promotion,
+        wal_dir: wal_dir.map(std::path::PathBuf::from),
+    };
+
+    // Validate enforcement config
+    enforcement
+        .validate_for_production()
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    // Emit dev mode warning if applicable
+    enforcement.emit_dev_mode_warning();
+
     let config = BacktestConfig {
         exchange: ExchangeConfig {
             fee_bps,
@@ -1970,6 +2025,7 @@ async fn run_backtest(
         enforce_admission_from_wal,
         admission_mismatch_policy: admission_mismatch_policy.to_string(),
         strategy_spec: None, // Phase 22C: CLI doesn't set strategy_spec yet
+        enforcement,
     };
 
     let engine = BacktestEngine::new(config);

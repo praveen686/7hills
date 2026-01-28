@@ -768,6 +768,112 @@ impl Default for ExchangeConfig {
 }
 
 // =============================================================================
+// PHASE 22E: Enforcement Configuration
+// =============================================================================
+
+/// Enforcement configuration for production deployment.
+///
+/// Phase 22E: Controls manifest paths, promotion requirements, and WAL output.
+///
+/// ## Dev vs Production
+/// - Dev mode (default): `require_promotion = false`, no manifests required
+/// - Production mode: `require_promotion = true`, manifests + promotion root required
+///
+/// ## Frozen Warning (v1)
+/// When `require_promotion = false`, emits:
+/// ```text
+/// ⚠️  PROMOTION ENFORCEMENT DISABLED - Running in dev mode. Production deployments
+///     MUST set --require-promotion to enforce signal promotion status.
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EnforcementConfig {
+    /// Path to strategies_manifest.json (required for production)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategies_manifest_path: Option<std::path::PathBuf>,
+
+    /// Path to signals_manifest.json (required for production)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signals_manifest_path: Option<std::path::PathBuf>,
+
+    /// Path to promotion directory root (required for production)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub promotion_root: Option<std::path::PathBuf>,
+
+    /// Require promotion status check before executing signals.
+    /// When false: dev mode (no enforcement, warning emitted)
+    /// When true: production mode (signal must be promoted)
+    #[serde(default)]
+    pub require_promotion: bool,
+
+    /// Override WAL output directory (default: segment_dir/wal)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wal_dir: Option<std::path::PathBuf>,
+}
+
+impl EnforcementConfig {
+    /// Create dev-mode config (no enforcement).
+    pub fn dev() -> Self {
+        Self::default()
+    }
+
+    /// Create production config with all paths.
+    pub fn production(
+        strategies_manifest: impl Into<std::path::PathBuf>,
+        signals_manifest: impl Into<std::path::PathBuf>,
+        promotion_root: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            strategies_manifest_path: Some(strategies_manifest.into()),
+            signals_manifest_path: Some(signals_manifest.into()),
+            promotion_root: Some(promotion_root.into()),
+            require_promotion: true,
+            wal_dir: None,
+        }
+    }
+
+    /// Check if running in dev mode (no enforcement).
+    pub fn is_dev_mode(&self) -> bool {
+        !self.require_promotion
+    }
+
+    /// Emit frozen warning if promotion enforcement is disabled.
+    ///
+    /// Returns true if warning was emitted.
+    pub fn emit_dev_mode_warning(&self) -> bool {
+        if self.is_dev_mode() {
+            tracing::warn!(
+                "⚠️  PROMOTION ENFORCEMENT DISABLED - Running in dev mode. Production deployments \
+                 MUST set --require-promotion to enforce signal promotion status."
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Validate config for production mode.
+    ///
+    /// Returns error if require_promotion is true but paths are missing.
+    pub fn validate_for_production(&self) -> Result<(), String> {
+        if !self.require_promotion {
+            return Ok(()); // Dev mode, no validation
+        }
+
+        if self.strategies_manifest_path.is_none() {
+            return Err("--strategies-manifest required when --require-promotion is set".to_string());
+        }
+        if self.signals_manifest_path.is_none() {
+            return Err("--signals-manifest required when --require-promotion is set".to_string());
+        }
+        if self.promotion_root.is_none() {
+            return Err("--promotion-root required when --require-promotion is set".to_string());
+        }
+
+        Ok(())
+    }
+}
+
+// =============================================================================
 // PHASE 19C: Admission Gating Helpers
 // =============================================================================
 
@@ -1298,6 +1404,9 @@ pub struct BacktestConfig {
     /// If provided, all order intents are checked against execution class constraints.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy_spec: Option<StrategySpec>,
+    /// Phase 22E: Enforcement configuration for production deployment.
+    #[serde(default)]
+    pub enforcement: EnforcementConfig,
 }
 
 impl Default for BacktestConfig {
@@ -1311,6 +1420,7 @@ impl Default for BacktestConfig {
             enforce_admission_from_wal: false,
             admission_mismatch_policy: "fail".to_string(),
             strategy_spec: None,
+            enforcement: EnforcementConfig::default(),
         }
     }
 }

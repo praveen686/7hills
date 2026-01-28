@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-28
-**Current Phase:** 21 Complete (Strategy Binding & Execution Contracts)
+**Current Phase:** 23A Complete (G4 Admission Determinism Gate)
 
 ---
 
@@ -38,6 +38,12 @@
 | 21A | StrategiesManifest + Canonical Bytes | ✅ Complete | 2026-01-28 |
 | 21B | StrategyAdmissionDecision (WAL Event) | ✅ Complete | 2026-01-28 |
 | 21C | G3 Execution Contract Gate | ✅ Complete | 2026-01-28 |
+| 22A | PromotionResolver | ✅ Complete | 2026-01-28 |
+| 22B | StrategyAdmissionEngine | ✅ Complete | 2026-01-28 |
+| 22C | OrderPermissionGate (Stateless) | ✅ Complete | 2026-01-28 |
+| 22D | Permission Enforcement Integration | ✅ Complete | 2026-01-28 |
+| 22E | Runner CLI/Config + Operational Docs | ✅ Complete | 2026-01-28 |
+| 23A | G4 Admission Determinism Gate | ✅ Complete | 2026-01-28 |
 
 ---
 
@@ -198,6 +204,188 @@ gate-check g3 --strategies config/strategies_manifest.json \
 - Signal bindings validated against signals_manifest (known signals only)
 - Advisory constraints strictly enforced (no execution at all)
 - Passive constraints: no market orders allowed
+
+---
+
+## Phase 23A: G4 Admission Determinism Gate (Complete)
+
+**Goal:** WAL parity gate for `strategy_admission.jsonl` — compares live vs replay.
+
+### Files Created
+- `crates/quantlaxmi-gates/src/g4_admission_determinism.rs` — G4 gate implementation
+
+### Key Types
+```rust
+pub mod check_names {
+    pub const G4_PARSE_LIVE: &str = "g4_parse_live";
+    pub const G4_PARSE_REPLAY: &str = "g4_parse_replay";
+    pub const G4_DECISION_PARITY: &str = "g4_decision_parity";
+}
+
+/// Key for matching decisions: (correlation_id, strategy_id, signal_id)
+pub type G4DecisionKey = (String, String, String);
+
+#[derive(Serialize, Deserialize)]
+pub enum G4MismatchKind {
+    MissingInReplay,
+    MissingInLive,
+    OutcomeMismatch { live_outcome: String, replay_outcome: String },
+    ReasonsMismatch { live_reasons: Vec<String>, replay_reasons: Vec<String> },
+    DigestMismatch { live_digest: String, replay_digest: String },
+}
+
+pub struct G4Result {
+    pub check_name: String,
+    pub passed: bool,
+    pub message: String,
+    pub live_entry_count: usize,
+    pub replay_entry_count: usize,
+    pub matched_count: usize,
+    pub checks: Vec<CheckResult>,
+    pub mismatches: Vec<G4Mismatch>,
+    // ...
+}
+```
+
+### CLI Usage
+```bash
+# G4: Strategy admission WAL parity check
+gate-check g4 --live /path/to/live/wal/strategy_admission.jsonl \
+              --replay /path/to/replay/wal/strategy_admission.jsonl
+
+# JSON output
+gate-check --format json g4 --live ... --replay ...
+```
+
+### Tests
+9 unit tests covering:
+- `test_identical_wals_pass`
+- `test_missing_in_replay`
+- `test_missing_in_live`
+- `test_outcome_mismatch`
+- `test_reasons_mismatch`
+- `test_digest_mismatch`
+- `test_empty_correlation_id_rejected`
+- `test_check_names`
+- `test_mismatch_descriptions`
+
+---
+
+## Phase 22: Order Permission & Enforcement (Complete)
+
+**Goal:** Stateless order permission gate + runner enforcement + operational productization.
+
+### Phase 22A: PromotionResolver (✅ Complete)
+
+Caches promotion status and provides signal→strategy binding lookup.
+
+### Phase 22B: StrategyAdmissionEngine (✅ Complete)
+
+Evaluates strategy admission against `StrategyAdmissionDecision` WAL.
+
+### Phase 22C: OrderPermissionGate (✅ Complete)
+
+**Files Created:**
+- `crates/quantlaxmi-gates/src/order_permission.rs` — Stateless order permission gate
+
+**Key Types:**
+```rust
+pub enum OrderSide { Buy, Sell }
+pub enum OrderType { Limit, Market }
+
+pub enum OrderRefuseReason {
+    AdvisoryNoOrders,      // Advisory class emits no orders
+    PassiveNoMarketOrders, // Passive class cannot use market orders
+    ShortNotAllowed,       // allow_short=false blocks sells
+    LongNotAllowed,        // allow_long=false blocks buys
+}
+
+pub enum OrderPermission {
+    Permit,
+    Refuse(OrderRefuseReason),
+}
+
+pub struct OrderPermissionGate;
+
+impl OrderPermissionGate {
+    /// Authorize order against strategy spec (stateless).
+    /// Rule order (frozen v1):
+    /// 1. Advisory → refuse all
+    /// 2. Passive + Market → refuse
+    /// 3. allow_short=false + Sell → refuse
+    /// 4. allow_long=false + Buy → refuse
+    /// 5. Else: permit
+    pub fn authorize(spec: &StrategySpec, side: OrderSide, order_type: OrderType) -> OrderPermission;
+}
+```
+
+**Tests:** 23 unit tests covering all rule combinations.
+
+### Phase 22D: Permission Enforcement Integration (✅ Complete)
+
+**Files Modified:**
+- `crates/quantlaxmi-runner-crypto/src/backtest.rs` — Enforces permission gate
+- `crates/quantlaxmi-runner-crypto/src/tournament.rs` — Tournament integration
+
+**Tests:**
+- `test_case_b_passive_refuses_market_order`
+- `test_case_c_passive_permits_limit_order`
+- `test_allow_short_false_refuses_sell`
+- `test_no_spec_allows_all_orders`
+
+### Phase 22E: Runner CLI/Config (✅ Complete)
+
+**Files Modified:**
+- `crates/quantlaxmi-runner-crypto/src/backtest.rs` — `EnforcementConfig` struct
+- `crates/quantlaxmi-runner-crypto/src/lib.rs` — CLI flags
+
+**EnforcementConfig:**
+```rust
+pub struct EnforcementConfig {
+    pub strategies_manifest_path: Option<PathBuf>,
+    pub signals_manifest_path: Option<PathBuf>,
+    pub promotion_root: Option<PathBuf>,
+    pub require_promotion: bool,  // default: false (dev mode)
+    pub wal_dir: Option<PathBuf>,
+}
+
+impl EnforcementConfig {
+    pub fn dev() -> Self;
+    pub fn production(...) -> Self;
+    pub fn is_dev_mode(&self) -> bool;
+    pub fn emit_dev_mode_warning(&self) -> bool;
+    pub fn validate_for_production(&self) -> Result<(), String>;
+}
+```
+
+**CLI Flags (backtest command):**
+```bash
+quantlaxmi-crypto backtest \
+  --segment-dir data/segments/perp_20260128 \
+  --strategy funding_bias \
+  --strategies-manifest config/strategies_manifest.json \
+  --signals-manifest config/signals_manifest.json \
+  --promotion-root data/promotion \
+  --require-promotion \
+  --wal-dir data/custom_wal
+```
+
+**Frozen Warning (v1):**
+When `require_promotion = false`:
+```
+⚠️  PROMOTION ENFORCEMENT DISABLED - Running in dev mode. Production deployments
+    MUST set --require-promotion to enforce signal promotion status.
+```
+
+---
+
+## WAL Table
+
+| WAL File | Phase | Purpose |
+|----------|-------|---------|
+| `wal/signals_admission.jsonl` | 19C | Signal admission decisions (L1 gating) |
+| `wal/strategy_admission.jsonl` | 21B | Strategy admission decisions (L2 gating) |
+| `wal/order_intent.jsonl` | 23B (next) | Order permission audit trail |
 
 ---
 
@@ -810,6 +998,19 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | `G3Violation` variants | Phase 21C |
 | `G3Result` uses `checks: Vec<CheckResult>` | Phase 21C |
 | `gate-check g3` CLI semantics | Phase 21C |
+| `OrderSide` enum variants | Phase 22C |
+| `OrderType` enum variants | Phase 22C |
+| `OrderRefuseReason` variants | Phase 22C |
+| `OrderPermission` enum variants | Phase 22C |
+| `OrderPermissionGate::authorize()` rule order (frozen v1) | Phase 22C |
+| `EnforcementConfig` struct fields | Phase 22E |
+| Dev mode warning text (frozen v1) | Phase 22E |
+| `--require-promotion` semantics | Phase 22E |
+| `G4DecisionKey` = (correlation_id, strategy_id, signal_id) | Phase 23A |
+| `G4MismatchKind` variants (6-way taxonomy) | Phase 23A |
+| `G4_*` check names | Phase 23A |
+| `gate-check g4` CLI semantics | Phase 23A |
+| Empty correlation_id → parse error | Phase 23A |
 
 ---
 

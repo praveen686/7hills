@@ -1586,6 +1586,7 @@ async fn test_replay_enforced_blocks_strategy_on_refuse() {
         enforce_admission_from_wal: true,
         admission_mismatch_policy: "fail".to_string(),
         strategy_spec: None,
+        ..Default::default()
     };
     let runner = BacktestEngine::new(config);
 
@@ -1642,6 +1643,7 @@ async fn test_replay_enforced_calls_strategy_on_admit() {
         enforce_admission_from_wal: true,
         admission_mismatch_policy: "fail".to_string(),
         strategy_spec: None,
+        ..Default::default()
     };
     let runner = BacktestEngine::new(config);
 
@@ -1697,6 +1699,7 @@ async fn test_replay_enforced_missing_wal_entry_policy_fail() {
         enforce_admission_from_wal: true,
         admission_mismatch_policy: "fail".to_string(),
         strategy_spec: None,
+        ..Default::default()
     };
     let runner = BacktestEngine::new(config);
 
@@ -1755,6 +1758,7 @@ async fn test_replay_enforced_missing_wal_entry_policy_warn() {
         enforce_admission_from_wal: true,
         admission_mismatch_policy: "warn".to_string(), // WARN policy
         strategy_spec: None,
+        ..Default::default()
     };
     let runner = BacktestEngine::new(config);
 
