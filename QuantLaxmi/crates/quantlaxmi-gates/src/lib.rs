@@ -38,7 +38,9 @@ pub mod mtm_drawdown;
 pub mod portfolio_selector;
 pub mod position_keeper;
 pub mod promotion;
+pub mod promotion_pipeline;
 pub mod risk_exposure;
+pub mod signal_gates;
 pub mod signals_manifest;
 
 pub use admission::{
@@ -103,11 +105,22 @@ pub use promotion::{
     PROMOTION_DECISION_SCHEMA, PaperEvidence, PromotionCheck, PromotionDecision, PromotionPolicy,
     PromotionRequest, PromotionSource, PromotionValidator,
 };
+pub use promotion_pipeline::{
+    GATES_SUMMARY_SCHEMA, GateOutcome, GatesSummary, PROMOTION_RECORD_SCHEMA, PromotionRecord,
+    PromotionRecordBuilder, TOOL_VERSION, g0_output_path, g1_output_path, g2_output_path,
+    gates_dir, gates_summary_path, get_git_branch, get_git_clean, get_git_commit, get_hostname,
+    promotion_dir, promotion_record_path, segment_summary_path, session_wal_path, sha256_file,
+    sha256_hex,
+};
 pub use risk_exposure::{
     BudgetView, ExposureMetrics, RISK_DECISION_SCHEMA_VERSION, RISK_POLICY_SCHEMA_VERSION,
     RISK_SNAPSHOT_SCHEMA_VERSION, RiskDecision, RiskDecisionId, RiskDecisionScope,
     RiskDecisionStatus, RiskError, RiskEvaluator, RiskPolicy, RiskSnapshot, RiskSnapshotId,
     ViolationType, compute_notional, normalize_notional,
+};
+pub use signal_gates::{
+    DecisionFingerprint, G0Result, G0SchemaGate, G1DecisionKey, G1DeterminismGate, G1MismatchKind,
+    G1Result, G1Source, G2DataIntegrityGate, G2Result, SignalGatesResult, check_names,
 };
 
 use chrono::{DateTime, Utc};

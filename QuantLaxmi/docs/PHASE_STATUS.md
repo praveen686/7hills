@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-28
-**Current Phase:** 20B In Progress (Signals Manifest)
+**Current Phase:** 20D Complete (Promotion Pipeline + CI Enforcement)
 
 ---
 
@@ -33,6 +33,197 @@
 | 19D | WAL Enforcement & Replay | ✅ Complete | 2026-01-28 |
 | 20A | SignalFrame Spine | ✅ Complete | 2026-01-28 |
 | 20B | Signals Manifest (PR-1 Manifest + PR-2 WAL Provenance) | ✅ Complete | 2026-01-28 |
+| 20C | Promotion Gates G0-G2 + gate-check CLI | ✅ Complete | 2026-01-28 |
+| 20D | Promotion Pipeline + CI Enforcement | ✅ Complete | 2026-01-28 |
+
+---
+
+## Phase 20D: Promotion Pipeline + CI Enforcement (Complete)
+
+**Goal:** Standardized artifact writing, `promote` subcommand, and CI wiring.
+
+### PR: promotion_pipeline.rs (✅ Complete)
+
+**Files Created/Modified:**
+- `crates/quantlaxmi-gates/src/promotion_pipeline.rs` — Types and helpers
+- `crates/quantlaxmi-gates/src/bin/gate_check.rs` — Added `promote` subcommand
+- `.github/workflows/gates.yml` — CI workflow
+
+**Key Types:**
+```rust
+// Schema versions frozen
+pub const GATES_SUMMARY_SCHEMA: &str = "1.0.0";
+pub const PROMOTION_RECORD_SCHEMA: &str = "1.0.0";
+
+// Gate outcome (per gate)
+pub struct GateOutcome {
+    pub gate: String,
+    pub passed: bool,
+    pub output_file: String,
+    pub output_digest: String,
+}
+
+// Combined gates result
+pub struct GatesSummary {
+    pub schema_version: String,
+    pub timestamp: String,
+    pub passed: bool,
+    pub exit_code: u8,
+    pub g0: Option<GateOutcome>,
+    pub g1: Option<GateOutcome>,
+    pub g2: Option<GateOutcome>,
+}
+
+// Audit-grade promotion receipt
+pub struct PromotionRecord {
+    pub schema_version: String,
+    pub promotion_id: String,
+    pub timestamp: String,
+    pub git_commit: Option<String>,
+    pub git_branch: Option<String>,
+    pub git_clean: Option<bool>,
+    pub manifest_path: String,
+    pub manifest_hash: [u8; 32],
+    pub manifest_version: String,
+    pub segment_dir: String,
+    pub session_dir: Option<String>,
+    pub replay_dir: Option<String>,
+    pub min_coverage: f64,
+    pub min_events: usize,
+    pub gates_passed: bool,
+    pub gates_summary_digest: String,
+    pub gate_digests: BTreeMap<String, String>,
+    pub hostname: Option<String>,
+    pub digest: String,  // SHA-256 of canonical JSON
+}
+```
+
+**Canonical Path Helpers:**
+```rust
+pub fn gates_dir(segment_dir: &Path) -> PathBuf;         // {segment}/gates/
+pub fn g0_output_path(segment_dir: &Path) -> PathBuf;    // {segment}/gates/g0_manifest.json
+pub fn g1_output_path(segment_dir: &Path) -> PathBuf;    // {segment}/gates/g1_determinism.json
+pub fn g2_output_path(segment_dir: &Path) -> PathBuf;    // {segment}/gates/g2_integrity.json
+pub fn gates_summary_path(segment_dir: &Path) -> PathBuf;// {segment}/gates/gates_summary.json
+pub fn promotion_dir(segment_dir: &Path) -> PathBuf;     // {segment}/promotion/
+pub fn promotion_record_path(segment_dir: &Path) -> PathBuf; // {segment}/promotion/promotion_record.json
+pub fn session_wal_path(session_dir: &Path) -> PathBuf;  // {session}/wal/signals_admission.jsonl
+```
+
+**CLI: promote subcommand:**
+```bash
+# Full promotion with artifact writing
+gate-check promote --segment-dir ./segment \
+                   --manifest config/signals_manifest.json \
+                   --session-dir ./session \
+                   --replay-dir ./replay \
+                   --min-coverage 0.9
+
+# G0 only (no session data)
+gate-check promote --segment-dir ./segment \
+                   --manifest config/signals_manifest.json
+
+# Dry run (validate without writing)
+gate-check promote --segment-dir ./segment \
+                   --manifest config/signals_manifest.json \
+                   --dry-run
+```
+
+**CI Workflow (gates.yml):**
+- Triggers on push/PR to main affecting gates/models/manifest
+- Jobs: g0-schema, unit-tests, clippy
+- G1/G2 are promotion-time only (need actual session data)
+
+**Tests:** 9 tests covering:
+- Canonical paths
+- GatesSummary building and JSON roundtrip
+- PromotionRecord digest determinism
+- Gate digests sorted (BTreeMap)
+- SHA-256 helpers
+
+**Design Decisions:**
+- BTreeMap for gate_digests (deterministic iteration order)
+- Canonical JSON bytes for digest computation
+- Promotion ID is UUID (human-readable, unique)
+- Digest changes with any input change
+- No artifact writing in dry-run mode
+- G0 always required; G1/G2 optional (skip if no session data)
+
+---
+
+## Phase 20C: Promotion Gates G0-G2 (Complete)
+
+**Goal:** Implement signal promotion gates for CI-grade validation.
+
+### PR-1: signal_gates.rs (✅ Complete)
+
+**Files Created:**
+- `crates/quantlaxmi-gates/src/signal_gates.rs` — G0/G1/G2 gate implementations
+
+**Key Types:**
+```rust
+// G0 Schema Gate
+pub struct G0SchemaGate;
+pub struct G0Result { check_name, passed, manifest_hash, ... }
+
+// G1 Determinism Gate
+pub struct G1DeterminismGate;
+pub struct G1DecisionKey { correlation_id, signal_id }
+pub enum G1MismatchKind {
+    MissingReplayEntry, MissingLiveEntry, DigestDiff,
+    OutcomeDiff, ManifestHashDiff, DuplicateKey, ParseError,
+}
+pub enum G1Source { Live, Replay }
+pub struct G1Result { check_name, passed, mismatches, ... }
+
+// G2 Data Integrity Gate
+pub struct G2DataIntegrityGate;
+pub struct G2Result { check_name, passed, coverage_ratio, ... }
+
+// Combined Result
+pub struct SignalGatesResult { passed, g0, g1, g2, summary }
+```
+
+**Tests:** 24 unit tests covering:
+- G0: Valid manifest, invalid JSON, wrong schema, unknown L1 field, nonexistent file
+- G1: Identical WALs, missing entries, outcome diff, manifest hash diff, duplicates, parse errors
+- G2: 100% coverage, mixed outcomes, empty WAL, below min events, nonzero check
+
+**Design Decisions:**
+- G1 keys by `(correlation_id, signal_id)` not line index
+- Stream JSONL with `BufRead::lines()` for memory safety
+- Line numbers are 1-based for human readability
+- Empty lines skipped (not parse errors)
+- Stable check names frozen for CI parsing
+
+### PR-2: gate-check CLI (✅ Complete)
+
+**Files Created:**
+- `crates/quantlaxmi-gates/src/bin/gate_check.rs` — clap CLI
+
+**CLI Commands:**
+```bash
+# G0: Validate manifest schema
+gate-check g0 --manifest config/signals_manifest.json
+
+# G1: WAL parity check
+gate-check g1 --live wal/live.jsonl --replay wal/replay.jsonl
+
+# G2: Coverage check
+gate-check g2 --wal wal/signals_admission.jsonl --threshold 0.9
+
+# All gates
+gate-check all --manifest config/signals_manifest.json \
+               --live wal/live.jsonl --replay wal/replay.jsonl
+
+# JSON output
+gate-check --format json g0 --manifest config/signals_manifest.json
+```
+
+**Exit Codes:**
+- 0: All gates passed
+- 1: One or more gates failed
+- 2: Error (missing files, invalid arguments)
 
 ---
 
@@ -191,12 +382,12 @@ pub struct PromotionDecision {
 |-------|-------|--------|
 | quantlaxmi-events | 184 | ✅ All passing |
 | quantlaxmi-models | 106 | ✅ All passing |
-| quantlaxmi-gates | 198 | ✅ All passing |
+| quantlaxmi-gates | 231 | ✅ All passing |
 | quantlaxmi-runner-crypto | 70 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
 | quantlaxmi-wal | 26 | ✅ All passing |
 | Other crates | 166 | ✅ All passing |
-| **Workspace Total** | 789 | ✅ All passing |
+| **Workspace Total** | 822 | ✅ All passing |
 
 ---
 
@@ -424,6 +615,20 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | `AdmissionMode` EvaluateLive vs EnforceFromWal | Phase 19D |
 | WAL-authoritative replay semantics | Phase 19D |
 | Missing WAL entry → refuse behavior | Phase 19D |
+| `G0Result` digest computation | Phase 20C |
+| `G1Result` digest computation | Phase 20C |
+| `G2Result` digest computation | Phase 20C |
+| `G1DecisionKey` semantics (correlation_id, signal_id) | Phase 20C |
+| `G1MismatchKind` variants | Phase 20C |
+| Check names frozen (g0_schema_valid, g1_decision_parity, etc.) | Phase 20C |
+| `GATES_SUMMARY_SCHEMA` version 1.0.0 | Phase 20D |
+| `PROMOTION_RECORD_SCHEMA` version 1.0.0 | Phase 20D |
+| `GatesSummary` JSON structure | Phase 20D |
+| `PromotionRecord` digest computation | Phase 20D |
+| `PromotionRecord` JSON structure | Phase 20D |
+| Canonical path helpers (gates_dir, g0_output_path, etc.) | Phase 20D |
+| `gate-check promote` CLI semantics | Phase 20D |
+| Exit codes (0=pass, 1=fail, 2=error) | Phase 20D |
 
 ---
 

@@ -13,10 +13,15 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+clap = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 hex = { workspace = true }
+
+[[bin]]
+name = "gate-check"
+path = "src/bin/gate_check.rs"
 
 [dev-dependencies]
 tempfile = { workspace = true }
