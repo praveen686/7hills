@@ -364,7 +364,7 @@ fn test_router_manifest_binding_determinism() {
     let router = Router::new(config.clone());
 
     // Create deterministic inputs
-    let inputs_list = vec![
+    let inputs_list = [
         RegimeInputs {
             ts_ns: 1_000_000_000,
             symbol: "BTCUSDT".to_string(),

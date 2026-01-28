@@ -73,12 +73,14 @@ pub enum AdmissionMismatchPolicy {
     Warn,
 }
 
-impl AdmissionMismatchPolicy {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
+impl std::str::FromStr for AdmissionMismatchPolicy {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
             "warn" => Self::Warn,
             _ => Self::Fail,
-        }
+        })
     }
 }
 
@@ -934,10 +936,11 @@ fn extract_bid_ask_mantissa(
             let bid_m = payload.get("bid_price_mantissa").and_then(|v| v.as_i64());
             let ask_m = payload.get("ask_price_mantissa").and_then(|v| v.as_i64());
 
-            if let (Some(bid_m), Some(ask_m)) = (bid_m, ask_m) {
-                if bid_m > 0 && ask_m > 0 {
-                    return Some((bid_m, ask_m, price_exp));
-                }
+            if let (Some(bid_m), Some(ask_m)) = (bid_m, ask_m)
+                && bid_m > 0
+                && ask_m > 0
+            {
+                return Some((bid_m, ask_m, price_exp));
             }
 
             // Legacy fallback: float bid/ask → quantize to mantissa
@@ -945,13 +948,14 @@ fn extract_bid_ask_mantissa(
             let bid_f = payload.get("bid").and_then(|v| v.as_f64());
             let ask_f = payload.get("ask").and_then(|v| v.as_f64());
 
-            if let (Some(bid_f), Some(ask_f)) = (bid_f, ask_f) {
-                if bid_f > 0.0 && ask_f > 0.0 {
-                    let scale = 10f64.powi(-(price_exp as i32));
-                    let bid_m = (bid_f * scale).round() as i64;
-                    let ask_m = (ask_f * scale).round() as i64;
-                    return Some((bid_m, ask_m, price_exp));
-                }
+            if let (Some(bid_f), Some(ask_f)) = (bid_f, ask_f)
+                && bid_f > 0.0
+                && ask_f > 0.0
+            {
+                let scale = 10f64.powi(-(price_exp as i32));
+                let bid_m = (bid_f * scale).round() as i64;
+                let ask_m = (ask_f * scale).round() as i64;
+                return Some((bid_m, ask_m, price_exp));
             }
 
             None
@@ -1741,7 +1745,11 @@ impl BacktestEngine {
             // Load admission index from existing WAL
             let index = AdmissionIndex::from_wal(segment_dir)
                 .context("Failed to load admission WAL for enforcement")?;
-            let policy = AdmissionMismatchPolicy::from_str(&self.config.admission_mismatch_policy);
+            let policy = self
+                .config
+                .admission_mismatch_policy
+                .parse::<AdmissionMismatchPolicy>()
+                .unwrap();
             tracing::info!(
                 wal_decisions = index.total_decisions,
                 policy = ?policy,
