@@ -26,41 +26,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::info;
 
 /// G4 Deployability configuration.
+///
+/// All fields are required in config files (no defaults during deserialization).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct G4Config {
     /// Require Prometheus metrics endpoint
-    #[serde(default = "default_true")]
     pub require_metrics: bool,
 
     /// Require structured logging/tracing
-    #[serde(default = "default_true")]
     pub require_tracing: bool,
 
     /// Require config snapshot for audit trail
-    #[serde(default = "default_true")]
     pub require_config_snapshot: bool,
 
     /// Require graceful shutdown capability
-    #[serde(default = "default_true")]
     pub require_graceful_shutdown: bool,
 
     /// Expected metrics port
-    #[serde(default = "default_metrics_port")]
     pub metrics_port: u16,
 
     /// Config snapshot directory
-    #[serde(default = "default_config_dir")]
     pub config_dir: String,
-}
-
-fn default_true() -> bool {
-    true
-}
-fn default_metrics_port() -> u16 {
-    9000
-}
-fn default_config_dir() -> String {
-    "configs".to_string()
 }
 
 impl Default for G4Config {
@@ -70,8 +56,8 @@ impl Default for G4Config {
             require_tracing: true,
             require_config_snapshot: true,
             require_graceful_shutdown: true,
-            metrics_port: default_metrics_port(),
-            config_dir: default_config_dir(),
+            metrics_port: 9000,
+            config_dir: "configs".to_string(),
         }
     }
 }

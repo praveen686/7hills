@@ -104,9 +104,10 @@ pub enum ExchangeProfile {
     Default,
 }
 
-/// Strategy configuration for the HYDRA meta-logic
+/// Strategy configuration for the HYDRA meta-logic.
+///
+/// All fields are required in config files (no defaults during deserialization).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct HydraConfig {
     pub venue: ExchangeProfile,
     /// Multi-expert learning rate (0.01 - 0.2)

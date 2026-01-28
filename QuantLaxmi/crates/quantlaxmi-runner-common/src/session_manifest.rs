@@ -91,7 +91,6 @@ pub struct IntegritySummary {
     /// Subscribe mode used ("manifest_tokens" or "api_lookup")
     pub subscribe_mode: String,
     /// Optional notes (e.g., warnings, anomalies)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
 }
 

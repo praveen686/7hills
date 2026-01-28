@@ -146,12 +146,10 @@ struct KiteQuote {
     last_price: f64,
     /// Last traded quantity.
     last_quantity: Option<u64>,
-    /// Total buy quantity in market.
-    #[serde(default)]
-    buy_quantity: u64,
-    /// Total sell quantity in market.
-    #[serde(default)]
-    sell_quantity: u64,
+    /// Total buy quantity in market (None = vendor omitted, not "zero depth").
+    buy_quantity: Option<u64>,
+    /// Total sell quantity in market (None = vendor omitted, not "zero depth").
+    sell_quantity: Option<u64>,
 }
 
 /// Configuration for WebSocket reconnection behavior.
@@ -1801,7 +1799,6 @@ pub struct UniverseManifest {
     /// Resolved instruments with tokens
     pub instruments: Vec<UniverseInstrument>,
     /// Missing instruments per expiry: (strike, "CE"/"PE")
-    #[serde(default)]
     pub missing: MissingInstrumentsMap,
 }
 

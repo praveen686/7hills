@@ -21,21 +21,15 @@ use serde::{Deserialize, Serialize};
 /// Integrity tier for depth data certification.
 ///
 /// - `Certified`: SBE-based capture with proper bootstrap (production-grade)
-/// - `NonCertified`: JSON-based capture (deprecated, debugging only)
-///
-/// ## Backward Compatibility
-/// Default is `NonCertified` for safety - old logs without this field
-/// are treated as non-certified until provenance can be verified.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// - `NonCertified`: JSON-based capture (debugging only, not for production)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum IntegrityTier {
     /// SBE-based depth capture with proper bootstrap protocol.
     /// Suitable for production backtesting and certification.
     Certified,
-    /// JSON-based depth capture (deprecated).
-    /// NOT suitable for certified replay - debugging only.
-    /// This is the DEFAULT for backward compatibility with old logs.
-    #[default]
+    /// JSON-based depth capture (debugging only).
+    /// NOT suitable for certified replay.
     NonCertified,
 }
 
@@ -117,12 +111,10 @@ pub struct DepthEvent {
     pub asks: Vec<DepthLevel>,
     /// True if this is a full snapshot (bootstrap), false if it's a diff update.
     /// Snapshots replace the entire book; diffs are applied incrementally.
-    #[serde(default)]
     pub is_snapshot: bool,
     /// Integrity tier indicating data source quality.
     /// - `Certified`: SBE capture (production-grade)
-    /// - `NonCertified`: JSON capture (deprecated)
-    #[serde(default)]
+    /// - `NonCertified`: JSON capture (debugging only)
     pub integrity_tier: IntegrityTier,
     /// Optional source identifier for debugging.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,9 +277,9 @@ mod tests {
     }
 
     #[test]
-    fn test_backward_compat_missing_integrity_tier() {
-        // Old log format without integrity_tier field should default to NonCertified
-        let old_format_json = r#"{
+    fn test_missing_required_fields_fails() {
+        // Missing integrity_tier field must fail deserialization (no backward compat)
+        let json_without_tier = r#"{
             "ts": "2025-01-01T00:00:00Z",
             "tradingsymbol": "BTCUSDT",
             "first_update_id": 100,
@@ -299,12 +291,30 @@ mod tests {
             "is_snapshot": false
         }"#;
 
-        let event: DepthEvent = serde_json::from_str(old_format_json).unwrap();
+        let result = serde_json::from_str::<DepthEvent>(json_without_tier);
+        assert!(
+            result.is_err(),
+            "Missing integrity_tier must fail deserialization"
+        );
 
-        // Old logs default to NonCertified for safety
-        assert_eq!(event.integrity_tier, IntegrityTier::NonCertified);
-        assert!(!event.integrity_tier.is_certified());
-        assert!(event.source.is_none());
+        // Missing is_snapshot field must also fail
+        let json_without_snapshot = r#"{
+            "ts": "2025-01-01T00:00:00Z",
+            "tradingsymbol": "BTCUSDT",
+            "first_update_id": 100,
+            "last_update_id": 100,
+            "price_exponent": -2,
+            "qty_exponent": -8,
+            "bids": [],
+            "asks": [],
+            "integrity_tier": "CERTIFIED"
+        }"#;
+
+        let result = serde_json::from_str::<DepthEvent>(json_without_snapshot);
+        assert!(
+            result.is_err(),
+            "Missing is_snapshot must fail deserialization"
+        );
     }
 
     #[test]

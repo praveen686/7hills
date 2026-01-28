@@ -311,11 +311,8 @@ pub struct SessionTransitionEvent {
     pub reason: SessionTransitionReason,
 
     /// Snapshot digests at transition time (for replay verification).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_snapshot_digest: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtm_snapshot_digest: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drawdown_snapshot_digest: Option<String>,
 
     /// Deterministic digest.
@@ -869,7 +866,6 @@ pub struct ManualOverrideEvent {
     pub reason: String,
 
     /// Scope of override (for scoped overrides).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<KillSwitchScope>,
 
     /// Prior session state (for audit).

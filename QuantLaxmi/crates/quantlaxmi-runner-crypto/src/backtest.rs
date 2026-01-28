@@ -604,16 +604,23 @@ fn order_intent_to_decision(
         qty_exponent: QTY_EXPONENT,
         reference_price_mantissa,
         price_exponent: PRICE_EXPONENT,
-        market_snapshot: MarketSnapshot {
+        // V2 snapshot: prices present, quantities absent (not tracked in backtest)
+        market_snapshot: MarketSnapshot::v2_with_states(
             bid_price_mantissa,
             ask_price_mantissa,
-            bid_qty_mantissa: 0, // Not tracked in current backtest
-            ask_qty_mantissa: 0,
-            price_exponent: PRICE_EXPONENT,
-            qty_exponent: QTY_EXPONENT,
+            0, // bid_qty_mantissa: not tracked
+            0, // ask_qty_mantissa: not tracked
+            PRICE_EXPONENT,
+            QTY_EXPONENT,
             spread_bps_mantissa,
             book_ts_ns,
-        },
+            quantlaxmi_models::build_l1_state_bits(
+                quantlaxmi_models::FieldState::Value,  // bid_price: present
+                quantlaxmi_models::FieldState::Value,  // ask_price: present
+                quantlaxmi_models::FieldState::Absent, // bid_qty: not tracked
+                quantlaxmi_models::FieldState::Absent, // ask_qty: not tracked
+            ),
+        ),
         // Full confidence for backtest decisions (10000 = 1.0 with exponent -4)
         confidence_mantissa: DecisionEvent::confidence_from_f64(1.0),
         metadata: order
@@ -1326,16 +1333,23 @@ impl BacktestEngine {
         let mut last_event_ts: Option<DateTime<Utc>> = None;
 
         // Fixed-point market state for Phase 2 strategy context
-        let mut market_snapshot = MarketSnapshot {
-            bid_price_mantissa: 0,
-            ask_price_mantissa: 0,
-            bid_qty_mantissa: 0,
-            ask_qty_mantissa: 0,
-            price_exponent: -2,
-            qty_exponent: -8,
-            spread_bps_mantissa: 0,
-            book_ts_ns: 0,
-        };
+        // Initialize with placeholder values (will be updated on first quote)
+        let mut market_snapshot = MarketSnapshot::v2_with_states(
+            0,
+            0,
+            0,
+            0,
+            -2,
+            -8,
+            0,
+            0,
+            quantlaxmi_models::build_l1_state_bits(
+                quantlaxmi_models::FieldState::Absent,
+                quantlaxmi_models::FieldState::Absent,
+                quantlaxmi_models::FieldState::Absent,
+                quantlaxmi_models::FieldState::Absent,
+            ),
+        );
 
         // Equity curve tracking
         let mut equity_curve: Vec<EquityPoint> = Vec::new();
@@ -1381,19 +1395,34 @@ impl BacktestEngine {
                 const PRICE_EXPONENT: i8 = -2;
                 const QTY_EXPONENT: i8 = -8;
                 let price_scale = 10f64.powi(-PRICE_EXPONENT as i32);
-                market_snapshot.bid_price_mantissa = (bid * price_scale).round() as i64;
-                market_snapshot.ask_price_mantissa = (ask * price_scale).round() as i64;
-                market_snapshot.price_exponent = PRICE_EXPONENT;
-                market_snapshot.qty_exponent = QTY_EXPONENT;
-                market_snapshot.book_ts_ns = book_ts_ns;
+                let bid_price_mantissa = (bid * price_scale).round() as i64;
+                let ask_price_mantissa = (ask * price_scale).round() as i64;
 
                 // Compute spread in basis points
                 let mid_price = (bid + ask) / 2.0;
-                market_snapshot.spread_bps_mantissa = if mid_price > 0.0 {
+                let spread_bps_mantissa = if mid_price > 0.0 {
                     MarketSnapshot::spread_bps_from_f64(((ask - bid) / mid_price) * 10_000.0)
                 } else {
                     0
                 };
+
+                // Create new V2 snapshot (prices present, quantities absent)
+                market_snapshot = MarketSnapshot::v2_with_states(
+                    bid_price_mantissa,
+                    ask_price_mantissa,
+                    0, // bid_qty: not tracked in backtest
+                    0, // ask_qty: not tracked in backtest
+                    PRICE_EXPONENT,
+                    QTY_EXPONENT,
+                    spread_bps_mantissa,
+                    book_ts_ns,
+                    quantlaxmi_models::build_l1_state_bits(
+                        quantlaxmi_models::FieldState::Value,  // bid_price: present
+                        quantlaxmi_models::FieldState::Value,  // ask_price: present
+                        quantlaxmi_models::FieldState::Absent, // bid_qty: not tracked
+                        quantlaxmi_models::FieldState::Absent, // ask_qty: not tracked
+                    ),
+                );
             }
 
             // Convert to Phase 2 ReplayEvent
@@ -1458,17 +1487,17 @@ impl BacktestEngine {
                                 Side::Sell => quantlaxmi_strategy::Side::Sell,
                             },
                             qty_mantissa: (fill.qty
-                                * 10f64.powi(-market_snapshot.qty_exponent as i32))
+                                * 10f64.powi(-market_snapshot.qty_exponent() as i32))
                             .round() as i64,
-                            qty_exponent: market_snapshot.qty_exponent,
+                            qty_exponent: market_snapshot.qty_exponent(),
                             price_mantissa: (fill.price
-                                * 10f64.powi(-market_snapshot.price_exponent as i32))
+                                * 10f64.powi(-market_snapshot.price_exponent() as i32))
                             .round() as i64,
-                            price_exponent: market_snapshot.price_exponent,
+                            price_exponent: market_snapshot.price_exponent(),
                             fee_mantissa: (fill.fee
-                                * 10f64.powi(-market_snapshot.qty_exponent as i32))
+                                * 10f64.powi(-market_snapshot.qty_exponent() as i32))
                             .round() as i64,
-                            fee_exponent: market_snapshot.qty_exponent,
+                            fee_exponent: market_snapshot.qty_exponent(),
                             tag: fill.tag.clone(),
                         };
                         strategy.on_fill(&notification, &ctx);

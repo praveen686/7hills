@@ -36,8 +36,25 @@ pub use depth::{DepthEvent, DepthLevel, IntegrityTier};
 // Canonical events with fixed-point representation and correlation IDs
 pub mod events;
 pub use events::{
-    CONFIDENCE_EXPONENT, CorrelationContext, DecisionEvent, MarketSnapshot, ParseMantissaError,
-    QuoteEvent as CanonicalQuoteEvent, SPREAD_BPS_EXPONENT, parse_to_mantissa_pure,
+    // Core event types
+    CONFIDENCE_EXPONENT,
+    CorrelationContext,
+    DecisionEvent,
+    // Field state for presence tracking (No Silent Poisoning doctrine)
+    FieldState,
+    L1_ALL_VALUE,
+    // MarketSnapshot versioned enum and variants
+    MarketSnapshot,
+    MarketSnapshotV1,
+    MarketSnapshotV2,
+    ParseMantissaError,
+    QuoteEvent as CanonicalQuoteEvent,
+    SPREAD_BPS_EXPONENT,
+    build_l1_state_bits,
+    get_field_state,
+    l1_slots,
+    parse_to_mantissa_pure,
+    set_field_state,
 };
 
 // Option Greeks and pricing primitives (moved here to break dependency cycles)
@@ -68,6 +85,13 @@ pub use position_events::{
     POSITION_EVENTS_SCHEMA_VERSION, PositionClosedEvent, PositionEventKind, PositionFlipEvent,
     PositionId, PositionIncreaseEvent, PositionKey, PositionOpenEvent, PositionReduceEvent,
     PositionSide, PositionVenue, SnapshotId as PositionSnapshotId,
+};
+
+// Signal Admission Control types (Phase 18)
+pub mod admission;
+pub use admission::{
+    ADMISSION_SCHEMA_VERSION, AdmissionCanonicalBytes, AdmissionDecision, AdmissionOutcome,
+    InternalField, SignalRequirements, VendorField, compute_digest,
 };
 
 /// Market data event from exchange or data feed.
@@ -185,24 +209,18 @@ pub struct SignalEvent {
     /// Unique identifier for the intent that generated this signal.
     pub intent_id: Option<Uuid>,
 
-    // ========== HFT Decision Context (V2) ==========
+    // ========== HFT Decision Context ==========
     /// Best bid price at decision time
-    #[serde(default)]
     pub decision_bid: f64,
     /// Best ask price at decision time
-    #[serde(default)]
     pub decision_ask: f64,
     /// Mid price at decision time ((bid + ask) / 2)
-    #[serde(default)]
     pub decision_mid: f64,
     /// Spread in basis points at decision time
-    #[serde(default)]
     pub spread_bps: f64,
     /// Book timestamp (exchange time) in nanoseconds - for causality checks
-    #[serde(default)]
     pub book_ts_ns: i64,
     /// Expected edge in basis points (from strategy signal)
-    #[serde(default)]
     pub expected_edge_bps: f64,
 }
 
@@ -227,9 +245,8 @@ pub struct SignalEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderEvent {
     pub order_id: Uuid,
-    /// Parent decision that originated this order (Phase 3 correlation).
+    /// Parent decision that originated this order.
     /// Required for audit-grade traceability and PnL attribution.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_decision_id: Option<Uuid>,
     pub intent_id: Option<Uuid>,
     pub timestamp: DateTime<Utc>,
@@ -436,9 +453,8 @@ pub struct FillEvent {
     pub timestamp: DateTime<Utc>,
     /// Original order ID.
     pub order_id: Uuid,
-    /// Parent decision that originated this fill (Phase 3 correlation).
+    /// Parent decision that originated this fill.
     /// Required for audit-grade traceability and PnL attribution.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_decision_id: Option<Uuid>,
     /// Link to the original strategy intent.
     pub intent_id: Option<Uuid>,
@@ -1292,7 +1308,6 @@ pub struct RegimeInputs {
     /// Timestamp of the regime evaluation (nanoseconds)
     pub ts_ns: i64,
     /// Symbol being evaluated
-    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub symbol: String,
 
     // === Spread Tier (fixed-point) ===
@@ -1419,7 +1434,6 @@ pub struct RouterDecisionEvent {
     /// Selected strategy ID (format: "name:version:config_hash")
     pub selected_strategy_id: String,
     /// Alternative strategy IDs that were considered
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub alternatives: Vec<String>,
     /// Reason for selection (for debugging/audit)
     pub selection_reason: String,

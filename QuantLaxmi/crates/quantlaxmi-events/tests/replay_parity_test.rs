@@ -34,17 +34,17 @@ fn make_decision(seq: u8, direction: i8, tag: &str) -> DecisionEvent {
         qty_exponent: -8,
         reference_price_mantissa: 8_871_660, // $88,716.60
         price_exponent: -2,
-        market_snapshot: MarketSnapshot {
-            bid_price_mantissa: 8_871_650,
-            ask_price_mantissa: 8_871_670,
-            bid_qty_mantissa: 10_000_000,
-            ask_qty_mantissa: 10_000_000,
-            price_exponent: -2,
-            qty_exponent: -8,
-            // Fixed-point: 23 with exponent -2 = 0.23 bps
-            spread_bps_mantissa: 23,
-            book_ts_ns: 1737799200000000000 + (seq as i64 * 1_000_000_000),
-        },
+        // V2 snapshot with all fields present
+        market_snapshot: MarketSnapshot::v2_all_present(
+            8_871_650,                                          // bid_price_mantissa
+            8_871_670,                                          // ask_price_mantissa
+            10_000_000,                                         // bid_qty_mantissa
+            10_000_000,                                         // ask_qty_mantissa
+            -2,                                                 // price_exponent
+            -8,                                                 // qty_exponent
+            23,                                                 // spread_bps_mantissa (0.23 bps)
+            1737799200000000000 + (seq as i64 * 1_000_000_000), // book_ts_ns
+        ),
         // Fixed-point: 10000 with exponent -4 = 1.0
         confidence_mantissa: 10_000,
         metadata: serde_json::json!({"tag": tag}),

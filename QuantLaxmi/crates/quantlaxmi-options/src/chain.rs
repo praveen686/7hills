@@ -25,18 +25,21 @@ pub struct ZerodhaInstrument {
     pub exchange: String,
 }
 
-/// Quote data from Kite API
+/// Quote data from Kite API.
+///
+/// Quantity/volume fields are Option to distinguish "vendor omitted" from "zero".
+/// Zero is a real market state; None is uncertainty.
 #[derive(Debug, Clone, Deserialize)]
 pub struct KiteQuote {
     pub last_price: f64,
-    #[serde(default)]
-    pub last_quantity: u64,
-    #[serde(default)]
-    pub volume: u64,
-    #[serde(default)]
-    pub buy_quantity: u64,
-    #[serde(default)]
-    pub sell_quantity: u64,
+    /// Last traded quantity (None = vendor omitted, not "zero volume").
+    pub last_quantity: Option<u64>,
+    /// Total volume (None = vendor omitted).
+    pub volume: Option<u64>,
+    /// Total buy quantity in market (None = vendor omitted, not "zero depth").
+    pub buy_quantity: Option<u64>,
+    /// Total sell quantity in market (None = vendor omitted, not "zero depth").
+    pub sell_quantity: Option<u64>,
     pub ohlc: Option<OHLC>,
 }
 

@@ -62,14 +62,12 @@ pub struct FundingEvent {
     /// Estimated settle price mantissa
     pub estimated_settle_price_mantissa: i64,
     /// Price exponent (e.g., -2 means price = mantissa / 100)
-    #[serde(default = "default_price_exponent")]
     pub price_exponent: i8,
 
     // --- Funding rate (mantissa form) ---
     /// Funding rate mantissa (e.g., 10000 with exponent -8 = 0.0001 = 0.01%)
     pub funding_rate_mantissa: i64,
     /// Rate exponent (e.g., -8 for 8 decimal places)
-    #[serde(default = "default_rate_exponent")]
     pub rate_exponent: i8,
 
     // --- Timing ---
@@ -79,14 +77,6 @@ pub struct FundingEvent {
     /// Source identifier
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-}
-
-fn default_price_exponent() -> i8 {
-    FUNDING_PRICE_EXPONENT
-}
-
-fn default_rate_exponent() -> i8 {
-    FUNDING_RATE_EXPONENT
 }
 
 impl FundingEvent {

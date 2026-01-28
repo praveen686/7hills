@@ -12,6 +12,7 @@
 //! This crate has NO dependency on Binance or any crypto-related code.
 //! It is exclusively for Indian equity derivatives markets.
 
+pub mod vendor_fields;
 mod zerodha;
 
 pub use zerodha::*;

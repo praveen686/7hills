@@ -44,7 +44,6 @@ pub struct RunManifest {
     pub outputs: Vec<OutputBinding>,
 
     /// WAL file bindings (path + sha256 for each WAL file)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wal_files: Vec<WalBinding>,
 }
 

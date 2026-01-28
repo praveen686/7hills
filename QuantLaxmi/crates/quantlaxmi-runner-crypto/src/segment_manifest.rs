@@ -67,12 +67,7 @@ pub struct EventCounts {
     pub spot_quotes: usize,
     pub perp_quotes: usize,
     pub funding: usize,
-    #[serde(default, skip_serializing_if = "is_zero")]
     pub depth: usize,
-}
-
-fn is_zero(n: &usize) -> bool {
-    *n == 0
 }
 
 impl EventCounts {
@@ -190,10 +185,8 @@ pub struct StrategyBinding {
     /// Short ID for display (first 8 chars of config_hash)
     pub short_id: String,
     /// Original config file path (if loaded from file)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_path: Option<String>,
     /// JSON snapshot for human inspection ONLY (not used in hashing)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_snapshot: Option<serde_json::Value>,
 }
 
@@ -388,25 +381,18 @@ pub struct SegmentManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_secs: Option<f64>,
     /// Decision trace binding (populated after backtest/replay)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_binding: Option<TraceBinding>,
     /// Strategy identity binding (populated after backtest with strategy SDK)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy_binding: Option<StrategyBinding>,
     /// Attribution artifact binding (populated after backtest with attribution)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution_binding: Option<AttributionBinding>,
     /// Attribution summary binding (populated after strategy evaluation, Phase 4)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution_summary_binding: Option<AttributionSummaryBinding>,
     /// Router binding (populated after routing decisions, Phase 5)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub router_binding: Option<RouterBinding>,
     /// G2 robustness report binding (populated after anti-overfit validation, Phase 6)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub g2_binding: Option<G2Binding>,
     /// G3 walk-forward report binding (populated after stability validation, Phase 6)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub g3_binding: Option<G3Binding>,
 }
 
@@ -959,7 +945,6 @@ pub struct SessionInventory {
     /// Ordered list of segments
     pub segments: Vec<InventorySegment>,
     /// Gaps between segments
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gaps: Vec<InventoryGap>,
     /// Notes
     #[serde(skip_serializing_if = "Option::is_none")]

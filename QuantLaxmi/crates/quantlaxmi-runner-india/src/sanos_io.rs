@@ -336,7 +336,8 @@ mod tests {
                 {"tradingsymbol": "NIFTY26JAN24500PE", "instrument_token": 1002, "underlying": "NIFTY", "expiry": "2026-01-30", "strike": 24500.0, "instrument_type": "PE", "lot_size": 50},
                 {"tradingsymbol": "NIFTY26JAN25000CE", "instrument_token": 1003, "underlying": "NIFTY", "expiry": "2026-01-30", "strike": 25000.0, "instrument_type": "CE", "lot_size": 50},
                 {"tradingsymbol": "NIFTY26FEB24500PE", "instrument_token": 1004, "underlying": "NIFTY", "expiry": "2026-02-26", "strike": 24500.0, "instrument_type": "PE", "lot_size": 50}
-            ]
+            ],
+            "missing": {}
         });
         let universe_path = tmp.join("nifty/universe_manifest.json");
         fs::write(
@@ -463,7 +464,8 @@ mod tests {
                 {"tradingsymbol": "NIFTY26MAR25000CE", "instrument_token": 3001, "underlying": "NIFTY", "expiry": "2026-03-26", "strike": 25000.0, "instrument_type": "CE", "lot_size": 50},
                 {"tradingsymbol": "NIFTY26JAN25000CE", "instrument_token": 1001, "underlying": "NIFTY", "expiry": "2026-01-30", "strike": 25000.0, "instrument_type": "CE", "lot_size": 50},
                 {"tradingsymbol": "NIFTY26FEB25000CE", "instrument_token": 2001, "underlying": "NIFTY", "expiry": "2026-02-26", "strike": 25000.0, "instrument_type": "CE", "lot_size": 50}
-            ]
+            ],
+            "missing": {}
         });
         let universe_path = tmp.join("nifty/universe_manifest.json");
         fs::write(
@@ -575,7 +577,8 @@ mod tests {
                     "instrument_type": "PE",
                     "lot_size": 50
                 }
-            ]
+            ],
+            "missing": {}
         });
         let universe_path = tmp.join("nifty/universe_manifest.json");
         fs::write(

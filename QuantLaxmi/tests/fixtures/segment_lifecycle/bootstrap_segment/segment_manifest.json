@@ -21,5 +21,12 @@
     "include_depth": false,
     "price_exponent": -2,
     "qty_exponent": -8
-  }
+  },
+  "trace_binding": null,
+  "strategy_binding": null,
+  "attribution_binding": null,
+  "attribution_summary_binding": null,
+  "router_binding": null,
+  "g2_binding": null,
+  "g3_binding": null
 }

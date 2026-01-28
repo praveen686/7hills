@@ -34,7 +34,7 @@ use tracing::{debug, info};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "payload")]
 pub enum WebMessage {
-    /// Basic status update (legacy)
+    /// Basic status update (simple equity/pnl broadcast)
     Status { equity: f64, realized_pnl: f64 },
 
     /// Per-symbol price and position update
@@ -191,15 +191,12 @@ pub struct StatusResponse {
     pub ts_ns: i64,
 
     /// Trading metrics snapshot (from quantlaxmi_core).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<quantlaxmi_core::MetricsSnapshot>,
 
     /// Circuit breaker status.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circuit_breakers: Option<CircuitBreakerStatus>,
 
     /// Execution control view (Phase 16 control plane).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<ExecutionControlView>,
 }
 

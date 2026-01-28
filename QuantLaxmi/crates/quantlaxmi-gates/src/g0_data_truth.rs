@@ -27,50 +27,34 @@ use std::path::Path;
 use tracing::{debug, info};
 
 /// G0 DataTruth configuration.
+///
+/// All fields are required in config files (no defaults during deserialization).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct G0Config {
     /// Maximum acceptable quote age in milliseconds
-    #[serde(default = "default_max_quote_age_ms")]
     pub max_quote_age_ms: i64,
 
     /// Maximum acceptable timestamp gap between consecutive events
-    #[serde(default = "default_max_timestamp_gap_ms")]
     pub max_timestamp_gap_ms: i64,
 
     /// Require all events to have certified integrity tier
-    #[serde(default)]
     pub require_certified: bool,
 
     /// Minimum number of events expected per symbol
-    #[serde(default = "default_min_events_per_symbol")]
     pub min_events_per_symbol: usize,
 
     /// Maximum allowed clock drift from now (for live validation)
-    #[serde(default = "default_max_clock_drift_ms")]
     pub max_clock_drift_ms: i64,
-}
-
-fn default_max_quote_age_ms() -> i64 {
-    5000
-}
-fn default_max_timestamp_gap_ms() -> i64 {
-    1000
-}
-fn default_min_events_per_symbol() -> usize {
-    10
-}
-fn default_max_clock_drift_ms() -> i64 {
-    60000
 }
 
 impl Default for G0Config {
     fn default() -> Self {
         Self {
-            max_quote_age_ms: default_max_quote_age_ms(),
-            max_timestamp_gap_ms: default_max_timestamp_gap_ms(),
+            max_quote_age_ms: 5000,
+            max_timestamp_gap_ms: 1000,
             require_certified: false,
-            min_events_per_symbol: default_min_events_per_symbol(),
-            max_clock_drift_ms: default_max_clock_drift_ms(),
+            min_events_per_symbol: 10,
+            max_clock_drift_ms: 60000,
         }
     }
 }

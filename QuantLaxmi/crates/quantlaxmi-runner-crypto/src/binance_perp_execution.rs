@@ -644,7 +644,7 @@ impl<B: BudgetInterface, W: WalInterface, R: RiskInterface> LiveExecutionEngine<
                 }
             }
         }
-        // If no snapshot is set, skip risk check (allows legacy code paths)
+        // If no risk snapshot is set, risk check is skipped (risk layer not configured)
 
         // Step 1: Budget check
         self.budget.check_order(

@@ -119,12 +119,6 @@ struct SignalEvent {
     reason_codes: Vec<String>,
 }
 
-/// Default integrity tier for backwards compatibility with old captures.
-/// Old captures without integrity_tier field are assumed L2Present.
-fn default_integrity_tier() -> String {
-    "L2Present".to_string()
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct TickEvent {
     ts: DateTime<Utc>,
@@ -135,7 +129,6 @@ struct TickEvent {
     price_exponent: i32,
     /// Integrity tier: "L2Present" (real depth) or "L1Only" (synthetic spread).
     /// Synthetic quotes are rejected when --require-l2 is enabled (default).
-    #[serde(default = "default_integrity_tier")]
     integrity_tier: String,
 }
 
@@ -1237,16 +1230,6 @@ mod tests {
             matches!(result, QuoteLookup::Stale { .. }),
             "Should report Stale for L2Present beyond window, got {:?}",
             result
-        );
-    }
-
-    /// P2 CI Test: Default integrity tier is L2Present for backward compatibility
-    #[test]
-    fn test_default_integrity_tier_is_l2present() {
-        let tier = default_integrity_tier();
-        assert_eq!(
-            tier, "L2Present",
-            "Default integrity tier must be L2Present for backward compatibility"
         );
     }
 

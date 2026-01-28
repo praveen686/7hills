@@ -55,7 +55,6 @@ pub struct ExecutionControlView {
     pub recent_overrides: Vec<ManualOverrideEvent>,
 
     /// Last emergency flatten result (if any).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_flatten: Option<EmergencyFlattenResult>,
 
     /// Snapshot timestamp (nanoseconds).
@@ -284,7 +283,6 @@ impl OperatorOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorResponse {
     /// Correlation ID (echoed from request if provided).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
 
     /// Outcome of the operation.

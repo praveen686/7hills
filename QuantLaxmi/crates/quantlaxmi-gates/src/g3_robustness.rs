@@ -27,37 +27,36 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 /// G3 Robustness configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+///
+/// All fields are required in config files (no defaults during deserialization).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct G3Config {
     /// Maximum acceptable reconnection time in milliseconds
-    #[serde(default = "default_max_reconnect_ms")]
     pub max_reconnect_ms: u64,
 
     /// Maximum data gap duration before circuit breaker
-    #[serde(default = "default_max_data_gap_ms")]
     pub max_data_gap_ms: u64,
 
     /// Enable extreme price scenario testing
-    #[serde(default)]
     pub test_extreme_prices: bool,
 
     /// Enable high latency scenario testing
-    #[serde(default)]
     pub test_high_latency: bool,
 
     /// Simulated latency for high latency tests (ms)
-    #[serde(default = "default_simulated_latency_ms")]
     pub simulated_latency_ms: u64,
 }
 
-fn default_max_reconnect_ms() -> u64 {
-    5000
-}
-fn default_max_data_gap_ms() -> u64 {
-    10000
-}
-fn default_simulated_latency_ms() -> u64 {
-    500
+impl Default for G3Config {
+    fn default() -> Self {
+        Self {
+            max_reconnect_ms: 5000,
+            max_data_gap_ms: 10000,
+            test_extreme_prices: false,
+            test_high_latency: false,
+            simulated_latency_ms: 500,
+        }
+    }
 }
 
 /// G3 Robustness gate validator (scaffold).

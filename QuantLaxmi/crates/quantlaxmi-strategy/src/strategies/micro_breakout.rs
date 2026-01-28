@@ -164,7 +164,7 @@ impl MicroBreakoutStrategy {
     /// Check if spread is acceptable.
     fn spread_ok(&self, ctx: &StrategyContext) -> bool {
         // spread_bps_mantissa from market uses same exponent convention
-        ctx.market.spread_bps_mantissa <= self.config.max_spread_bps_mantissa
+        ctx.market.spread_bps_mantissa() <= self.config.max_spread_bps_mantissa
     }
 
     /// Check time stop condition.
@@ -214,7 +214,7 @@ impl MicroBreakoutStrategy {
         tag: &str,
     ) -> DecisionEvent {
         let decision_id = Uuid::new_v4();
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
         let confidence_mantissa = 10i64.pow((-CONFIDENCE_EXPONENT) as u32);
 
         DecisionEvent {
@@ -252,7 +252,7 @@ impl MicroBreakoutStrategy {
         side: Side,
         tag: &str,
     ) -> OrderIntent {
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
 
         OrderIntent {
             parent_decision_id,
@@ -286,7 +286,7 @@ impl Strategy for MicroBreakoutStrategy {
             return vec![];
         }
 
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
         let current_ts_ns = ctx.ts.timestamp_nanos_opt().unwrap_or(0);
 
         // Update rolling window
@@ -351,7 +351,7 @@ impl Strategy for MicroBreakoutStrategy {
     }
 
     fn on_fill(&mut self, fill: &FillNotification, ctx: &StrategyContext) {
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
         let ts_ns = fill.ts.timestamp_nanos_opt().unwrap_or(0);
 
         match fill.side {
@@ -397,16 +397,29 @@ mod tests {
     use chrono::Utc;
 
     fn make_test_market(bid: i64, ask: i64) -> MarketSnapshot {
-        MarketSnapshot {
-            bid_price_mantissa: bid,
-            ask_price_mantissa: ask,
-            bid_qty_mantissa: 1_000_000,
-            ask_qty_mantissa: 1_000_000,
-            price_exponent: -2,
-            qty_exponent: -8,
-            spread_bps_mantissa: 10,
-            book_ts_ns: 1234567890000000000,
-        }
+        MarketSnapshot::v2_all_present(
+            bid,
+            ask,
+            1_000_000,
+            1_000_000,
+            -2,
+            -8,
+            10,
+            1234567890000000000,
+        )
+    }
+
+    fn make_test_market_with_spread(bid: i64, ask: i64, spread_bps: i64) -> MarketSnapshot {
+        MarketSnapshot::v2_all_present(
+            bid,
+            ask,
+            1_000_000,
+            1_000_000,
+            -2,
+            -8,
+            spread_bps,
+            1234567890000000000,
+        )
     }
 
     #[test]
@@ -464,10 +477,7 @@ mod tests {
         let strategy = MicroBreakoutStrategy::new(config);
 
         // Tight spread - OK
-        let market_tight = MarketSnapshot {
-            spread_bps_mantissa: 10,
-            ..make_test_market(10_000_000, 10_000_100)
-        };
+        let market_tight = make_test_market_with_spread(10_000_000, 10_000_100, 10);
         let ctx_tight = StrategyContext {
             ts: Utc::now(),
             run_id: "test",
@@ -477,10 +487,7 @@ mod tests {
         assert!(strategy.spread_ok(&ctx_tight));
 
         // Wide spread - NOT OK
-        let market_wide = MarketSnapshot {
-            spread_bps_mantissa: 50,
-            ..make_test_market(10_000_000, 10_000_100)
-        };
+        let market_wide = make_test_market_with_spread(10_000_000, 10_000_100, 50);
         let ctx_wide = StrategyContext {
             ts: Utc::now(),
             run_id: "test",

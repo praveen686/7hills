@@ -130,7 +130,6 @@ mod tests {
         underlying: String,
         strike_band: u32,
         instruments: Vec<String>,
-        #[serde(default)]
         metadata: BTreeMap<String, String>,
     }
 

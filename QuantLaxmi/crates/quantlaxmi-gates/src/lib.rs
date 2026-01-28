@@ -22,6 +22,7 @@
 //! let result = g4.validate(&deployment_config)?;
 //! ```
 
+pub mod admission;
 pub mod capital_allocation;
 pub mod capital_buckets;
 pub mod capital_eligibility;
@@ -39,6 +40,9 @@ pub mod position_keeper;
 pub mod promotion;
 pub mod risk_exposure;
 
+pub use admission::{
+    AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
+};
 pub use capital_allocation::{
     ALLOCATION_PLAN_SCHEMA, AllocationCheck, AllocationDecision, AllocationError, AllocationMode,
     AllocationPlan, AllocationPolicy, Allocator, PlanId, RebalancePolicy, SkipReason,
@@ -179,7 +183,6 @@ pub struct CheckResult {
     /// Details/reason
     pub message: String,
     /// Optional metrics
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<serde_json::Value>,
 }
 

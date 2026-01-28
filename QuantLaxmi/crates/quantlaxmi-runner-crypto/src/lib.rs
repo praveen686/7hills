@@ -291,7 +291,7 @@ pub enum Commands {
     /// this command computes digests from the raw data files and updates
     /// the segment manifest to FINALIZED_RETRO state.
     ///
-    /// For legacy segments without any manifest, use --create-bootstrap first
+    /// For segments without any manifest, use --create-bootstrap first
     /// to create a minimal manifest with default configuration.
     FinalizeSegment {
         /// Path to segment directory (e.g., data/perp_sessions/perp_20260125_120000)
@@ -306,7 +306,7 @@ pub enum Commands {
         #[arg(long)]
         stop_reason: Option<String>,
 
-        /// Create bootstrap manifest for legacy/orphaned segments that have no manifest
+        /// Create bootstrap manifest for orphaned segments that have no manifest
         #[arg(long, default_value_t = false)]
         create_bootstrap: bool,
     },
@@ -369,7 +369,7 @@ pub enum Commands {
         #[arg(long)]
         strategy_config: Option<String>,
 
-        /// Use Phase 2 Strategy SDK instead of legacy strategies.
+        /// Use Phase 2 Strategy SDK (recommended).
         /// When enabled, the strategy is loaded from the StrategyRegistry.
         #[arg(long, default_value_t = false)]
         use_sdk: bool,
@@ -382,11 +382,11 @@ pub enum Commands {
         #[arg(long, default_value_t = 10.0)]
         fee_bps: f64,
 
-        /// Position size for strategy (legacy strategies only)
+        /// Position size for strategy (non-SDK strategies only)
         #[arg(long, default_value_t = 0.1)]
         position_size: f64,
 
-        /// Basis threshold in bps (for basis_capture strategy, legacy only)
+        /// Basis threshold in bps (for basis_capture strategy, non-SDK only)
         #[arg(long, default_value_t = 5.0)]
         threshold_bps: f64,
 

@@ -26,41 +26,37 @@ use std::path::Path;
 use tracing::info;
 
 /// G2 BacktestCorrectness configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+///
+/// All fields are required in config files (no defaults during deserialization).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct G2Config {
     /// Require explicit transaction cost modeling
-    #[serde(default = "default_true")]
     pub require_transaction_costs: bool,
 
     /// Minimum slippage in basis points
-    #[serde(default = "default_min_slippage_bps")]
     pub min_slippage_bps: f64,
 
     /// Maximum fill rate as fraction of volume
-    #[serde(default = "default_max_fill_rate")]
     pub max_fill_rate: f64,
 
     /// Require market impact modeling for large orders
-    #[serde(default)]
     pub require_market_impact: bool,
 
     /// Large order threshold as fraction of ADV
-    #[serde(default = "default_large_order_threshold")]
     pub large_order_threshold: f64,
 }
 
-fn default_true() -> bool {
-    true
+impl Default for G2Config {
+    fn default() -> Self {
+        Self {
+            require_transaction_costs: true,
+            min_slippage_bps: 1.0, // 0.01%
+            max_fill_rate: 0.10,   // 10% of volume
+            require_market_impact: false,
+            large_order_threshold: 0.01, // 1% of ADV
+        }
+    }
 }
-fn default_min_slippage_bps() -> f64 {
-    1.0
-} // 0.01%
-fn default_max_fill_rate() -> f64 {
-    0.10
-} // 10% of volume
-fn default_large_order_threshold() -> f64 {
-    0.01
-} // 1% of ADV
 
 /// G2 BacktestCorrectness gate validator (scaffold).
 pub struct G2BacktestCorrectness {

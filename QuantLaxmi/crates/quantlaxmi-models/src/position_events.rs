@@ -689,7 +689,7 @@ mod tests {
         );
         let event = PositionOpenEvent {
             schema_version: POSITION_EVENTS_SCHEMA_VERSION.to_string(),
-            ts_ns: 1234567890_000_000_000,
+            ts_ns: 1_234_567_890_000_000_000,
             position_id: key.position_id(),
             key: key.clone(),
             side: PositionSide::Long,
@@ -697,7 +697,7 @@ mod tests {
             quantity_exponent: -8,
             entry_price_mantissa: 50000_00000000,
             price_exponent: -8,
-            cost_basis_mantissa: 5000_000_000_000_000,
+            cost_basis_mantissa: 5_000_000_000_000_000,
             commission_mantissa: 25_000_000,
             commission_exponent: -8,
             fill_id: FillId("fill_001".to_string()),

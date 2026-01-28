@@ -34,13 +34,7 @@ pub struct QuoteEvent {
     pub bid_qty: u32,
     pub ask_qty: u32,
     /// Price exponent: actual_price = mantissa * 10^price_exponent
-    /// Default -2 for backward compat (crypto/forex standard)
-    #[serde(default = "default_price_exponent")]
     pub price_exponent: i8,
-}
-
-fn default_price_exponent() -> i8 {
-    -2
 }
 
 impl QuoteEvent {

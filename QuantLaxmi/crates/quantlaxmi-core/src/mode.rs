@@ -47,7 +47,6 @@ pub struct ModeConfig {
     pub venue: String,
     pub symbol: String,
     /// Path to the historical data file when in `Backtest` mode.
-    #[serde(default)]
     pub wal_path: Option<String>,
 }
 

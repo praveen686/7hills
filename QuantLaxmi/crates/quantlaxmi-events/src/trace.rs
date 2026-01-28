@@ -57,7 +57,13 @@ use uuid::Uuid;
 /// ## Version History
 /// - v1 (0x01): Initial encoding with f64 confidence and spread_bps
 /// - v2 (0x02): Fixed-point confidence_mantissa and spread_bps_mantissa (no floats)
-pub const ENCODING_VERSION: u8 = 0x02;
+/// - v3 (0x03): MarketSnapshot versioned enum with explicit presence tracking (V1/V2).
+///   MarketSnapshot now has internal schema discriminant (0x01 for V1, 0x02 for V2).
+///
+/// ## Replay Parity Note
+/// Replay parity MUST be evaluated within the same encoding version.
+/// Cross-version parity comparison is a category error, not a failure.
+pub const ENCODING_VERSION: u8 = 0x03;
 
 /// Decision trace containing a sequence of decisions and their hash.
 ///
@@ -71,17 +77,12 @@ pub const ENCODING_VERSION: u8 = 0x02;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionTrace {
     /// Encoding version used to generate this trace.
-    #[serde(default = "default_encoding_version")]
     pub encoding_version: u8,
     /// The sequence of decisions in order of occurrence.
     pub decisions: Vec<DecisionEvent>,
     /// SHA-256 hash of the canonical binary encoding of all decisions (hex).
     #[serde(with = "hex_hash")]
     pub trace_hash: [u8; 32],
-}
-
-fn default_encoding_version() -> u8 {
-    ENCODING_VERSION
 }
 
 /// Serde helper for hex encoding/decoding of hash bytes.
@@ -374,13 +375,32 @@ fn find_divergence_reason(original: &DecisionEvent, replay: &DecisionEvent) -> S
     // Compare market snapshots
     let orig_snap = &original.market_snapshot;
     let replay_snap = &replay.market_snapshot;
-    if orig_snap.bid_price_mantissa != replay_snap.bid_price_mantissa
-        || orig_snap.ask_price_mantissa != replay_snap.ask_price_mantissa
-        || orig_snap.bid_qty_mantissa != replay_snap.bid_qty_mantissa
-        || orig_snap.ask_qty_mantissa != replay_snap.ask_qty_mantissa
-        || orig_snap.book_ts_ns != replay_snap.book_ts_ns
+
+    // Check schema version mismatch (V1 vs V2)
+    if orig_snap.schema_version_byte() != replay_snap.schema_version_byte() {
+        return format!(
+            "market_snapshot schema differs: original=V{}, replay=V{}",
+            orig_snap.schema_version_byte(),
+            replay_snap.schema_version_byte()
+        );
+    }
+
+    if orig_snap.bid_price_mantissa() != replay_snap.bid_price_mantissa()
+        || orig_snap.ask_price_mantissa() != replay_snap.ask_price_mantissa()
+        || orig_snap.bid_qty_mantissa() != replay_snap.bid_qty_mantissa()
+        || orig_snap.ask_qty_mantissa() != replay_snap.ask_qty_mantissa()
+        || orig_snap.book_ts_ns() != replay_snap.book_ts_ns()
     {
         return "market_snapshot differs".to_string();
+    }
+
+    // For V2: also check l1_state_bits
+    if orig_snap.l1_state_bits() != replay_snap.l1_state_bits() {
+        return format!(
+            "market_snapshot l1_state_bits differs: original={:#06x}, replay={:#06x}",
+            orig_snap.l1_state_bits(),
+            replay_snap.l1_state_bits()
+        );
     }
 
     // Compare metadata
@@ -519,17 +539,50 @@ fn encode_i64(buf: &mut Vec<u8>, val: i64) {
     buf.extend_from_slice(&val.to_le_bytes());
 }
 
-/// Encode MarketSnapshot.
+/// Encode u16 in little-endian.
+fn encode_u16(buf: &mut Vec<u8>, val: u16) {
+    buf.extend_from_slice(&val.to_le_bytes());
+}
+
+/// Encode MarketSnapshot (versioned enum).
+///
+/// ## Encoding Format
+/// - First byte: Schema version discriminant (0x01 for V1, 0x02 for V2)
+/// - Followed by V1 common fields (same layout for both versions)
+/// - V2 appends l1_state_bits (u16 LE) at the end
+///
+/// ## Byte Layout
+/// | Field | V1 Offset | V1 Size | V2 Offset | V2 Size |
+/// |-------|-----------|---------|-----------|---------|
+/// | schema discriminant | 0 | 1 | 0 | 1 |
+/// | bid_price_mantissa | 1 | 8 | 1 | 8 |
+/// | ask_price_mantissa | 9 | 8 | 9 | 8 |
+/// | bid_qty_mantissa | 17 | 8 | 17 | 8 |
+/// | ask_qty_mantissa | 25 | 8 | 25 | 8 |
+/// | price_exponent | 33 | 1 | 33 | 1 |
+/// | qty_exponent | 34 | 1 | 34 | 1 |
+/// | spread_bps_mantissa | 35 | 8 | 35 | 8 |
+/// | book_ts_ns | 43 | 8 | 43 | 8 |
+/// | l1_state_bits | - | - | 51 | 2 |
+/// | **Total** | | **51** | | **53** |
 fn encode_market_snapshot(buf: &mut Vec<u8>, snap: &MarketSnapshot) {
-    encode_i64(buf, snap.bid_price_mantissa);
-    encode_i64(buf, snap.ask_price_mantissa);
-    encode_i64(buf, snap.bid_qty_mantissa);
-    encode_i64(buf, snap.ask_qty_mantissa);
-    encode_i8(buf, snap.price_exponent);
-    encode_i8(buf, snap.qty_exponent);
-    // spread_bps_mantissa: i64 (fixed exponent = -2, not encoded)
-    encode_i64(buf, snap.spread_bps_mantissa);
-    encode_i64(buf, snap.book_ts_ns);
+    // Schema version discriminant (uniform encoding)
+    buf.push(snap.schema_version_byte());
+
+    // Common V1 fields (same layout for both versions)
+    encode_i64(buf, snap.bid_price_mantissa());
+    encode_i64(buf, snap.ask_price_mantissa());
+    encode_i64(buf, snap.bid_qty_mantissa());
+    encode_i64(buf, snap.ask_qty_mantissa());
+    encode_i8(buf, snap.price_exponent());
+    encode_i8(buf, snap.qty_exponent());
+    encode_i64(buf, snap.spread_bps_mantissa());
+    encode_i64(buf, snap.book_ts_ns());
+
+    // V2-specific: l1_state_bits
+    if let MarketSnapshot::V2(v2) = snap {
+        encode_u16(buf, v2.l1_state_bits);
+    }
 }
 
 /// Encode serde_json::Value with presence marker.
@@ -594,7 +647,7 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    /// Create a deterministic test decision for testing.
+    /// Create a deterministic test decision for testing (using V2 MarketSnapshot).
     fn make_test_decision(id: u8, direction: i8) -> DecisionEvent {
         // Use a fixed timestamp for determinism
         let ts = Utc.with_ymd_and_hms(2026, 1, 25, 12, 0, 0).unwrap();
@@ -614,17 +667,17 @@ mod tests {
             qty_exponent: -8,
             reference_price_mantissa: 8871660, // 88716.60 with exponent -2
             price_exponent: -2,
-            market_snapshot: MarketSnapshot {
-                bid_price_mantissa: 8871650,
-                ask_price_mantissa: 8871670,
-                bid_qty_mantissa: 10000000,
-                ask_qty_mantissa: 10000000,
-                price_exponent: -2,
-                qty_exponent: -8,
-                // Fixed-point: 23 with exponent -2 = 0.23 bps
-                spread_bps_mantissa: 23,
-                book_ts_ns: 1737799200000000000,
-            },
+            // V2 snapshot with all fields present
+            market_snapshot: MarketSnapshot::v2_all_present(
+                8871650,             // bid_price_mantissa
+                8871670,             // ask_price_mantissa
+                10000000,            // bid_qty_mantissa
+                10000000,            // ask_qty_mantissa
+                -2,                  // price_exponent
+                -8,                  // qty_exponent
+                23,                  // spread_bps_mantissa (0.23 bps)
+                1737799200000000000, // book_ts_ns
+            ),
             // Fixed-point: 8500 with exponent -4 = 0.85
             confidence_mantissa: 8500,
             metadata: serde_json::Value::Null,
@@ -920,12 +973,9 @@ mod tests {
     #[test]
     fn test_spread_bps_mantissa_deterministic() {
         // Test that spread_bps_mantissa is encoded deterministically
-        let mut d1 = make_test_decision(1, 1);
-        let mut d2 = make_test_decision(1, 1);
-
-        // Same spread as fixed-point
-        d1.market_snapshot.spread_bps_mantissa = 523; // 5.23 bps
-        d2.market_snapshot.spread_bps_mantissa = 523; // 5.23 bps
+        // Create decisions with specific spread values
+        let d1 = make_test_decision_with_spread(1, 1, 523); // 5.23 bps
+        let d2 = make_test_decision_with_spread(1, 1, 523); // 5.23 bps
 
         let bytes1 = canonical_bytes(&d1);
         let bytes2 = canonical_bytes(&d2);
@@ -936,19 +986,60 @@ mod tests {
         );
 
         // Different spread should produce different bytes
-        d2.market_snapshot.spread_bps_mantissa = 600; // 6.00 bps
+        let d3 = make_test_decision_with_spread(1, 1, 600); // 6.00 bps
 
-        let bytes3 = canonical_bytes(&d2);
+        let bytes3 = canonical_bytes(&d3);
         assert_ne!(
             bytes1, bytes3,
             "Different spread_bps_mantissa should produce different bytes"
         );
     }
 
+    /// Helper to create test decision with specific spread_bps_mantissa.
+    fn make_test_decision_with_spread(id: u8, direction: i8, spread_bps: i64) -> DecisionEvent {
+        let ts = Utc.with_ymd_and_hms(2026, 1, 25, 12, 0, 0).unwrap();
+        let decision_id =
+            Uuid::parse_str(&format!("00000000-0000-0000-0000-00000000000{:x}", id)).unwrap();
+
+        DecisionEvent {
+            ts,
+            decision_id,
+            strategy_id: "basis_capture".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            decision_type: "entry".to_string(),
+            direction,
+            target_qty_mantissa: 1000000,
+            qty_exponent: -8,
+            reference_price_mantissa: 8871660,
+            price_exponent: -2,
+            market_snapshot: MarketSnapshot::v2_all_present(
+                8871650,
+                8871670,
+                10000000,
+                10000000,
+                -2,
+                -8,
+                spread_bps,
+                1737799200000000000,
+            ),
+            confidence_mantissa: 8500,
+            metadata: serde_json::Value::Null,
+            ctx: CorrelationContext {
+                session_id: Some("session-001".to_string()),
+                run_id: Some("run-001".to_string()),
+                symbol: Some("BTCUSDT".to_string()),
+                venue: Some("binance".to_string()),
+                strategy_id: Some("basis_capture".to_string()),
+                decision_id: Some(decision_id),
+                order_id: None,
+            },
+        }
+    }
+
     #[test]
-    fn test_encoding_version_v2() {
-        // Verify we're using encoding version 2 (fixed-point, no floats)
-        assert_eq!(ENCODING_VERSION, 0x02, "Should be encoding version 2");
+    fn test_encoding_version_v3() {
+        // Verify we're using encoding version 3 (MarketSnapshot V1/V2 enum)
+        assert_eq!(ENCODING_VERSION, 0x03, "Should be encoding version 3");
 
         let decision = make_test_decision(1, 1);
         let bytes = canonical_bytes(&decision);
@@ -972,16 +1063,17 @@ mod tests {
 
         // Simulate loading a trace with different version
         let mut old_trace = trace.clone();
-        old_trace.encoding_version = 0x01; // Simulate v1 trace
+        old_trace.encoding_version = 0x02; // Simulate v2 trace
 
         // Version mismatch should be detectable
         assert_ne!(
             old_trace.encoding_version, ENCODING_VERSION,
-            "Should detect version mismatch between v1 and v2"
+            "Should detect version mismatch between v2 and v3"
         );
 
         // In a real system, we would reject traces with mismatched versions
         // or have migration logic. For now, we just detect the mismatch.
+        // Replay parity MUST be evaluated within the same encoding version.
     }
 
     #[test]
@@ -1026,7 +1118,7 @@ mod tests {
         assert_eq!(bytes2, bytes3);
 
         // Verify version byte
-        assert_eq!(bytes1[0], 0x02, "Version should be 0x02");
+        assert_eq!(bytes1[0], 0x03, "Version should be 0x03");
 
         // Build trace and verify hash stability
         let mut b1 = DecisionTraceBuilder::new();
@@ -1041,5 +1133,304 @@ mod tests {
             t1.trace_hash, t2.trace_hash,
             "Hashes must be identical without floats"
         );
+    }
+
+    // =========================================================================
+    // CANONICAL BYTES LAYOUT TESTS (Doctrine: No Silent Poisoning)
+    // =========================================================================
+
+    /// Helper to encode a MarketSnapshot in isolation for layout testing.
+    fn encode_snapshot_bytes(snap: &MarketSnapshot) -> Vec<u8> {
+        let mut buf = Vec::new();
+        // Schema version discriminant
+        buf.push(snap.schema_version_byte());
+        // Common fields
+        buf.extend_from_slice(&snap.bid_price_mantissa().to_le_bytes());
+        buf.extend_from_slice(&snap.ask_price_mantissa().to_le_bytes());
+        buf.extend_from_slice(&snap.bid_qty_mantissa().to_le_bytes());
+        buf.extend_from_slice(&snap.ask_qty_mantissa().to_le_bytes());
+        buf.push(snap.price_exponent() as u8);
+        buf.push(snap.qty_exponent() as u8);
+        buf.extend_from_slice(&snap.spread_bps_mantissa().to_le_bytes());
+        buf.extend_from_slice(&snap.book_ts_ns().to_le_bytes());
+        // V2-specific
+        if let MarketSnapshot::V2(v2) = snap {
+            buf.extend_from_slice(&v2.l1_state_bits.to_le_bytes());
+        }
+        buf
+    }
+
+    #[test]
+    fn test_snapshot_v1_uniform_prefix() {
+        // V1 canonical bytes MUST start with 0x01 discriminant
+        use quantlaxmi_models::MarketSnapshotV1;
+
+        let v1 = MarketSnapshot::V1(MarketSnapshotV1 {
+            bid_price_mantissa: 1000,
+            ask_price_mantissa: 1001,
+            bid_qty_mantissa: 500,
+            ask_qty_mantissa: 600,
+            price_exponent: -2,
+            qty_exponent: -8,
+            spread_bps_mantissa: 10,
+            book_ts_ns: 1234567890,
+        });
+
+        let bytes = encode_snapshot_bytes(&v1);
+
+        // First byte is version discriminant
+        assert_eq!(bytes[0], 0x01, "V1 must start with 0x01 discriminant");
+
+        // Total size: 1 (discriminant) + 50 (fields) = 51 bytes
+        assert_eq!(bytes.len(), 51, "V1 should be exactly 51 bytes");
+    }
+
+    #[test]
+    fn test_snapshot_v2_uniform_prefix() {
+        // V2 canonical bytes MUST start with 0x02 discriminant
+        use quantlaxmi_models::L1_ALL_VALUE;
+
+        let v2 = MarketSnapshot::v2_all_present(1000, 1001, 500, 600, -2, -8, 10, 1234567890);
+
+        let bytes = encode_snapshot_bytes(&v2);
+
+        // First byte is version discriminant
+        assert_eq!(bytes[0], 0x02, "V2 must start with 0x02 discriminant");
+
+        // Total size: 1 (discriminant) + 50 (fields) + 2 (l1_state_bits) = 53 bytes
+        assert_eq!(bytes.len(), 53, "V2 should be exactly 53 bytes");
+
+        // Last 2 bytes are l1_state_bits (little-endian)
+        let state_bits = u16::from_le_bytes([bytes[51], bytes[52]]);
+        assert_eq!(
+            state_bits, L1_ALL_VALUE,
+            "l1_state_bits should be L1_ALL_VALUE"
+        );
+    }
+
+    #[test]
+    fn test_snapshot_byte_layout_offsets() {
+        // Verify byte layout matches the spec table:
+        // | Field               | V1/V2 Offset | Size |
+        // | schema discriminant | 0            | 1    |
+        // | bid_price_mantissa  | 1            | 8    |
+        // | ask_price_mantissa  | 9            | 8    |
+        // | bid_qty_mantissa    | 17           | 8    |
+        // | ask_qty_mantissa    | 25           | 8    |
+        // | price_exponent      | 33           | 1    |
+        // | qty_exponent        | 34           | 1    |
+        // | spread_bps_mantissa | 35           | 8    |
+        // | book_ts_ns          | 43           | 8    |
+        // | l1_state_bits (V2)  | 51           | 2    |
+
+        let v2 = MarketSnapshot::v2_with_states(
+            0x0102030405060708_i64, // bid_price (recognizable pattern)
+            0x1112131415161718_i64, // ask_price
+            0x2122232425262728_i64, // bid_qty
+            0x3132333435363738_i64, // ask_qty
+            -2,                     // price_exp
+            -8,                     // qty_exp
+            0x4142434445464748_i64, // spread_bps
+            0x5152535455565758_i64, // book_ts_ns
+            0xABCD,                 // l1_state_bits
+        );
+
+        let bytes = encode_snapshot_bytes(&v2);
+
+        // Offset 0: schema discriminant
+        assert_eq!(bytes[0], 0x02);
+
+        // Offset 1-8: bid_price_mantissa (little-endian)
+        assert_eq!(&bytes[1..9], &0x0102030405060708_i64.to_le_bytes());
+
+        // Offset 9-16: ask_price_mantissa
+        assert_eq!(&bytes[9..17], &0x1112131415161718_i64.to_le_bytes());
+
+        // Offset 17-24: bid_qty_mantissa
+        assert_eq!(&bytes[17..25], &0x2122232425262728_i64.to_le_bytes());
+
+        // Offset 25-32: ask_qty_mantissa
+        assert_eq!(&bytes[25..33], &0x3132333435363738_i64.to_le_bytes());
+
+        // Offset 33: price_exponent (i8 as u8 = 0xFE for -2)
+        assert_eq!(bytes[33], (-2_i8) as u8);
+
+        // Offset 34: qty_exponent (i8 as u8 = 0xF8 for -8)
+        assert_eq!(bytes[34], (-8_i8) as u8);
+
+        // Offset 35-42: spread_bps_mantissa
+        assert_eq!(&bytes[35..43], &0x4142434445464748_i64.to_le_bytes());
+
+        // Offset 43-50: book_ts_ns
+        assert_eq!(&bytes[43..51], &0x5152535455565758_i64.to_le_bytes());
+
+        // Offset 51-52: l1_state_bits (V2 only)
+        assert_eq!(&bytes[51..53], &0xABCD_u16.to_le_bytes());
+    }
+
+    #[test]
+    fn test_v1_v2_digests_differ() {
+        // Same field values but V1 vs V2 MUST produce different digests
+        // because the schema discriminant differs (0x01 vs 0x02)
+        use quantlaxmi_models::MarketSnapshotV1;
+
+        let v1 = MarketSnapshot::V1(MarketSnapshotV1 {
+            bid_price_mantissa: 1000,
+            ask_price_mantissa: 1001,
+            bid_qty_mantissa: 500,
+            ask_qty_mantissa: 600,
+            price_exponent: -2,
+            qty_exponent: -8,
+            spread_bps_mantissa: 10,
+            book_ts_ns: 1234567890,
+        });
+
+        let v2 = MarketSnapshot::v2_all_present(1000, 1001, 500, 600, -2, -8, 10, 1234567890);
+
+        let v1_bytes = encode_snapshot_bytes(&v1);
+        let v2_bytes = encode_snapshot_bytes(&v2);
+
+        // Schemas must differ
+        assert_eq!(v1_bytes[0], 0x01);
+        assert_eq!(v2_bytes[0], 0x02);
+
+        // Common fields (offset 1-50) should be identical
+        assert_eq!(
+            &v1_bytes[1..51],
+            &v2_bytes[1..51],
+            "Common V1 fields should be byte-identical"
+        );
+
+        // But V2 has extra bytes for l1_state_bits
+        assert_eq!(v1_bytes.len(), 51);
+        assert_eq!(v2_bytes.len(), 53);
+
+        // Full byte sequences must differ
+        assert_ne!(v1_bytes, v2_bytes, "V1 and V2 canonical bytes must differ");
+    }
+
+    #[test]
+    fn test_presence_bits_affect_digest() {
+        // Same mantissa values but different presence states MUST produce
+        // different digests. This is the "No Silent Poisoning" doctrine test.
+        use quantlaxmi_models::{FieldState, build_l1_state_bits};
+
+        // Scenario: bid_qty=0 with state Value vs bid_qty=0 with state Absent
+        let bits_value = build_l1_state_bits(
+            FieldState::Value,
+            FieldState::Value,
+            FieldState::Value, // qty=0 but vendor sent it
+            FieldState::Value,
+        );
+
+        let bits_absent = build_l1_state_bits(
+            FieldState::Value,
+            FieldState::Value,
+            FieldState::Absent, // qty not sent (default 0)
+            FieldState::Value,
+        );
+
+        let snap_value =
+            MarketSnapshot::v2_with_states(1000, 1001, 0, 600, -2, -8, 10, 1234567890, bits_value);
+
+        let snap_absent =
+            MarketSnapshot::v2_with_states(1000, 1001, 0, 600, -2, -8, 10, 1234567890, bits_absent);
+
+        let bytes_value = encode_snapshot_bytes(&snap_value);
+        let bytes_absent = encode_snapshot_bytes(&snap_absent);
+
+        // l1_state_bits (last 2 bytes) must differ
+        let state_value = u16::from_le_bytes([bytes_value[51], bytes_value[52]]);
+        let state_absent = u16::from_le_bytes([bytes_absent[51], bytes_absent[52]]);
+
+        assert_ne!(
+            state_value, state_absent,
+            "Different presence states must produce different l1_state_bits"
+        );
+
+        // Full bytes must differ
+        assert_ne!(
+            bytes_value, bytes_absent,
+            "Different presence states must produce different canonical bytes"
+        );
+    }
+
+    #[test]
+    fn test_market_snapshot_v1_v2_divergence_detected() {
+        // If original uses V1 and replay uses V2, parity should detect schema divergence
+        use quantlaxmi_models::MarketSnapshotV1;
+
+        let ts = Utc.with_ymd_and_hms(2026, 1, 25, 12, 0, 0).unwrap();
+        let decision_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+
+        // Original with V1 snapshot
+        let original = DecisionEvent {
+            ts,
+            decision_id,
+            strategy_id: "test".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            decision_type: "entry".to_string(),
+            direction: 1,
+            target_qty_mantissa: 1000,
+            qty_exponent: -8,
+            reference_price_mantissa: 88716,
+            price_exponent: -2,
+            market_snapshot: MarketSnapshot::V1(MarketSnapshotV1 {
+                bid_price_mantissa: 88715,
+                ask_price_mantissa: 88717,
+                bid_qty_mantissa: 10000,
+                ask_qty_mantissa: 10000,
+                price_exponent: -2,
+                qty_exponent: -8,
+                spread_bps_mantissa: 23,
+                book_ts_ns: 1737799200000000000,
+            }),
+            confidence_mantissa: 8500,
+            metadata: serde_json::Value::Null,
+            ctx: CorrelationContext::default(),
+        };
+
+        // Replay with V2 snapshot (same field values)
+        let replay = DecisionEvent {
+            market_snapshot: MarketSnapshot::v2_all_present(
+                88715,
+                88717,
+                10000,
+                10000,
+                -2,
+                -8,
+                23,
+                1737799200000000000,
+            ),
+            ..original.clone()
+        };
+
+        let mut builder_orig = DecisionTraceBuilder::new();
+        let mut builder_replay = DecisionTraceBuilder::new();
+
+        builder_orig.record(&original);
+        builder_replay.record(&replay);
+
+        let trace_orig = builder_orig.finalize();
+        let trace_replay = builder_replay.finalize();
+
+        // Hashes must differ
+        assert_ne!(
+            trace_orig.trace_hash, trace_replay.trace_hash,
+            "V1 vs V2 snapshots must produce different hashes"
+        );
+
+        // Divergence should be detected with schema mismatch
+        let result = verify_replay_parity(&trace_orig, &trace_replay);
+        match result {
+            ReplayParityResult::Divergence { reason, .. } => {
+                assert!(
+                    reason.contains("schema"),
+                    "Should detect schema version mismatch, got: {}",
+                    reason
+                );
+            }
+            _ => panic!("Expected Divergence, got {:?}", result),
+        }
     }
 }

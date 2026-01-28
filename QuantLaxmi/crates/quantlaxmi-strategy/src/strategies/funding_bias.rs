@@ -144,7 +144,7 @@ impl FundingBiasStrategy {
         let decision_id = Uuid::new_v4();
 
         // Reference price: use mid price from market snapshot
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
 
         // Confidence: 1.0 for simple rule-based strategy
         let confidence_mantissa = 10i64.pow((-CONFIDENCE_EXPONENT) as u32); // 10000 = 1.0
@@ -192,7 +192,7 @@ impl FundingBiasStrategy {
         tag: &str,
     ) -> OrderIntent {
         // Use mid price as reference for market order
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
 
         OrderIntent {
             parent_decision_id,
@@ -286,16 +286,16 @@ mod tests {
     use chrono::Utc;
 
     fn make_test_market() -> MarketSnapshot {
-        MarketSnapshot {
-            bid_price_mantissa: 10_000_000, // $100,000
-            ask_price_mantissa: 10_000_100, // $100,001
-            bid_qty_mantissa: 1_000_000,
-            ask_qty_mantissa: 1_000_000,
-            price_exponent: -2,
-            qty_exponent: -8,
-            spread_bps_mantissa: 10, // 0.10 bps
-            book_ts_ns: 1234567890000000000,
-        }
+        MarketSnapshot::v2_all_present(
+            10_000_000,          // bid_price_mantissa: $100,000
+            10_000_100,          // ask_price_mantissa: $100,001
+            1_000_000,           // bid_qty_mantissa
+            1_000_000,           // ask_qty_mantissa
+            -2,                  // price_exponent
+            -8,                  // qty_exponent
+            10,                  // spread_bps_mantissa: 0.10 bps
+            1234567890000000000, // book_ts_ns
+        )
     }
 
     #[test]

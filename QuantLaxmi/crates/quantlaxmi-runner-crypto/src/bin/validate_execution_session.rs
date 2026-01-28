@@ -790,7 +790,7 @@ fn validate_risk_invariants(state: &ValidationState) -> Vec<String> {
     }
 
     // INV-R2: Every order intent should have a corresponding risk decision
-    // (only check if risk decisions exist - legacy sessions may not have them)
+    // (only validate if risk layer is configured - checked by presence of risk decisions)
     if state.risk_decision_count > 0 {
         for intent_id in state.intents.keys() {
             if !state.risk_decisions_by_intent.contains_key(intent_id) {

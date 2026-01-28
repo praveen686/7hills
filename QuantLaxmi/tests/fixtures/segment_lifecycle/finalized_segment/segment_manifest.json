@@ -13,7 +13,8 @@
   "events": {
     "spot_quotes": 2,
     "perp_quotes": 3,
-    "funding": 0
+    "funding": 0,
+    "depth": 0
   },
   "binary_hash": "test_binary_hash_0123456789abcdef",
   "config": {
@@ -40,5 +41,12 @@
       "last_event_ts": "2026-01-25T10:00:02.000Z"
     }
   },
-  "duration_secs": 2.0
+  "duration_secs": 2.0,
+  "trace_binding": null,
+  "strategy_binding": null,
+  "attribution_binding": null,
+  "attribution_summary_binding": null,
+  "router_binding": null,
+  "g2_binding": null,
+  "g3_binding": null
 }

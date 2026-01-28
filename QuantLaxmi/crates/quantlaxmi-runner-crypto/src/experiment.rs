@@ -158,7 +158,6 @@ pub struct RunManifest {
     /// Feature extraction configuration
     pub feature_config: FeatureConfig,
     /// Output artifacts
-    #[serde(default)]
     pub outputs: Vec<OutputArtifact>,
     /// Combined input digest (for quick comparison)
     pub input_digest: String,

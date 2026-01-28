@@ -356,16 +356,17 @@ fn make_test_decision_for_binding(seq: u8, direction: i8) -> DecisionEvent {
         qty_exponent: -8,
         reference_price_mantissa: 10_000_000, // $100,000
         price_exponent: -2,
-        market_snapshot: MarketSnapshot {
-            bid_price_mantissa: 9_999_900,
-            ask_price_mantissa: 10_000_100,
-            bid_qty_mantissa: 10_000_000,
-            ask_qty_mantissa: 10_000_000,
-            price_exponent: -2,
-            qty_exponent: -8,
-            spread_bps_mantissa: 20, // 0.20 bps
-            book_ts_ns: 1737799200000000000 + (seq as i64 * 1_000_000_000),
-        },
+        // V2 snapshot with all fields present
+        market_snapshot: MarketSnapshot::v2_all_present(
+            9_999_900,                                          // bid_price_mantissa
+            10_000_100,                                         // ask_price_mantissa
+            10_000_000,                                         // bid_qty_mantissa
+            10_000_000,                                         // ask_qty_mantissa
+            -2,                                                 // price_exponent
+            -8,                                                 // qty_exponent
+            20,                                                 // spread_bps_mantissa: 0.20 bps
+            1737799200000000000 + (seq as i64 * 1_000_000_000), // book_ts_ns
+        ),
         confidence_mantissa: 10_000, // 1.0
         metadata: serde_json::Value::Null,
         ctx: CorrelationContext {

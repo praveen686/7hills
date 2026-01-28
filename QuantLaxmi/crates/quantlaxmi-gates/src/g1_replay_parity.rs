@@ -30,33 +30,32 @@ use std::path::Path;
 use uuid::Uuid;
 
 /// G1 ReplayParity configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+///
+/// All fields are required in config files (no defaults during deserialization).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct G1Config {
     /// Maximum allowed price deviation in basis points
-    #[serde(default = "default_price_tolerance_bps")]
     pub price_tolerance_bps: f64,
 
     /// Maximum allowed quantity deviation as fraction
-    #[serde(default = "default_qty_tolerance")]
     pub qty_tolerance: f64,
 
     /// Require exact decision sequence match
-    #[serde(default)]
     pub require_exact_decisions: bool,
 
     /// Allow timing slack in milliseconds
-    #[serde(default = "default_timing_slack_ms")]
     pub timing_slack_ms: i64,
 }
 
-fn default_price_tolerance_bps() -> f64 {
-    10.0
-} // 0.1%
-fn default_qty_tolerance() -> f64 {
-    0.001
-} // 0.1%
-fn default_timing_slack_ms() -> i64 {
-    100
+impl Default for G1Config {
+    fn default() -> Self {
+        Self {
+            price_tolerance_bps: 10.0, // 0.1%
+            qty_tolerance: 0.001,      // 0.1%
+            require_exact_decisions: false,
+            timing_slack_ms: 100,
+        }
+    }
 }
 
 /// G1 ReplayParity gate validator.
@@ -334,15 +333,17 @@ pub fn compute_decision_trace_hash_v2(decisions: &[DecisionEvent]) -> String {
         // (4) MarketSnapshot (EXCLUDING spread_bps)
         //
         // Keep explicit field order. Do not serde.
-        hasher.update(d.market_snapshot.bid_price_mantissa.to_le_bytes());
-        hasher.update(d.market_snapshot.ask_price_mantissa.to_le_bytes());
-        hasher.update(d.market_snapshot.bid_qty_mantissa.to_le_bytes());
-        hasher.update(d.market_snapshot.ask_qty_mantissa.to_le_bytes());
-        hasher.update([d.market_snapshot.price_exponent as u8]);
-        hasher.update([d.market_snapshot.qty_exponent as u8]);
+        // Use accessor methods for versioned enum compatibility.
+        let snap = &d.market_snapshot;
+        hasher.update(snap.bid_price_mantissa().to_le_bytes());
+        hasher.update(snap.ask_price_mantissa().to_le_bytes());
+        hasher.update(snap.bid_qty_mantissa().to_le_bytes());
+        hasher.update(snap.ask_qty_mantissa().to_le_bytes());
+        hasher.update([snap.price_exponent() as u8]);
+        hasher.update([snap.qty_exponent() as u8]);
 
         // book_ts_ns: i64
-        hasher.update(d.market_snapshot.book_ts_ns.to_le_bytes());
+        hasher.update(snap.book_ts_ns().to_le_bytes());
 
         // (5) CorrelationContext (locked helper)
         hash_correlation_context(&mut hasher, &d.ctx);
@@ -454,17 +455,17 @@ mod tests {
             qty_exponent: -4,
             reference_price_mantissa: 5000000,
             price_exponent: -2,
-            market_snapshot: MarketSnapshot {
-                bid_price_mantissa: 4999900,
-                ask_price_mantissa: 5000100,
-                bid_qty_mantissa: 1000,
-                ask_qty_mantissa: 1000,
-                price_exponent: -2,
-                qty_exponent: -2,
-                // Fixed-point: 400 with exponent -2 = 4.0 bps
-                spread_bps_mantissa: 400,
-                book_ts_ns: 1_700_000_000_000_000_000,
-            },
+            // V2 snapshot with all fields present
+            market_snapshot: MarketSnapshot::v2_all_present(
+                4999900,                   // bid_price_mantissa
+                5000100,                   // ask_price_mantissa
+                1000,                      // bid_qty_mantissa
+                1000,                      // ask_qty_mantissa
+                -2,                        // price_exponent
+                -2,                        // qty_exponent
+                400,                       // spread_bps_mantissa (4.0 bps)
+                1_700_000_000_000_000_000, // book_ts_ns
+            ),
             // Fixed-point: 9500 with exponent -4 = 0.95
             confidence_mantissa: 9500,
             metadata: serde_json::Value::Null, // EXCLUDED from hash
@@ -665,12 +666,11 @@ mod tests {
         };
 
         let d1 = make_test_decision(ctx.clone());
-        let mut d2 = make_test_decision(ctx);
 
-        // Change excluded fields (now fixed-point mantissas)
+        // Create d2 with different excluded fields
+        let mut d2 = make_test_decision_with_spread(ctx, 99900); // different spread_bps (999.00)
         d2.confidence_mantissa = 5000; // different confidence (0.50)
         d2.metadata = serde_json::json!({"key": "value"}); // different metadata
-        d2.market_snapshot.spread_bps_mantissa = 99900; // different spread_bps (999.00)
 
         let hash1 = compute_decision_trace_hash_v2(&[d1]);
         let hash2 = compute_decision_trace_hash_v2(&[d2]);
@@ -679,6 +679,35 @@ mod tests {
             hash1, hash2,
             "Excluded fields (confidence_mantissa, metadata, spread_bps_mantissa) must NOT affect hash"
         );
+    }
+
+    /// Create a test decision with a specific spread_bps_mantissa value.
+    fn make_test_decision_with_spread(ctx: CorrelationContext, spread_bps: i64) -> DecisionEvent {
+        DecisionEvent {
+            ts: chrono::DateTime::from_timestamp(1700000000, 0).unwrap(),
+            decision_id: Uuid::nil(),
+            strategy_id: "test_strategy".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            decision_type: "ENTRY".to_string(),
+            direction: 1,
+            target_qty_mantissa: 100_000,
+            qty_exponent: -4,
+            reference_price_mantissa: 5000000,
+            price_exponent: -2,
+            market_snapshot: MarketSnapshot::v2_all_present(
+                4999900,
+                5000100,
+                1000,
+                1000,
+                -2,
+                -2,
+                spread_bps,
+                1_700_000_000_000_000_000,
+            ),
+            confidence_mantissa: 9500,
+            metadata: serde_json::Value::Null,
+            ctx,
+        }
     }
 
     #[test]
@@ -793,6 +822,7 @@ mod tests {
                 order_events: 0,
                 fill_events: 0,
                 risk_events: 0,
+                admission_events: 0,
             },
             files,
         };

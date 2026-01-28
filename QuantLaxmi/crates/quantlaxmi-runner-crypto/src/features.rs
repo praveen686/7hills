@@ -64,28 +64,19 @@ pub struct FeatureRow {
     pub seq: u64,
 }
 
-/// Feature extraction configuration
+/// Feature extraction configuration.
+///
+/// All fields are required in config files (no defaults during deserialization).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureConfig {
     /// Trailing window for update rate calculation (milliseconds)
-    #[serde(default = "default_update_window_ms")]
     pub update_rate_window_ms: u64,
     /// EWMA decay factor for volatility proxy (0-1, higher = more weight on recent)
-    #[serde(default = "default_vol_decay")]
     pub vol_ewma_decay: f64,
     /// Minimum spread to include (filter outliers), 0 = no filter
-    #[serde(default)]
     pub min_spread: i64,
     /// Maximum spread to include (filter outliers), 0 = no filter
-    #[serde(default)]
     pub max_spread: i64,
-}
-
-fn default_update_window_ms() -> u64 {
-    1000
-}
-fn default_vol_decay() -> f64 {
-    0.1
 }
 
 impl Default for FeatureConfig {

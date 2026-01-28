@@ -274,9 +274,7 @@ pub const PERP_SESSION_MANIFEST_SCHEMA_VERSION: u32 = 3;
 pub struct PerpSessionManifest {
     pub schema_version: u32,
     /// Quote schema identifier. Must be "canonical_v1" for valid captures.
-    /// Legacy captures (pre-2026-01-24) used different field names and are invalid.
-    #[serde(default)]
-    pub quote_schema: Option<String>,
+    pub quote_schema: String,
     pub created_at_utc: String,
     pub session_id: String,
     pub capture_mode: String,
@@ -526,7 +524,7 @@ async fn capture_to_segment_inner(
     // Write session manifest
     let manifest = PerpSessionManifest {
         schema_version: 3, // Bump for canonical quote schema
-        quote_schema: Some(CANONICAL_QUOTE_SCHEMA.to_string()),
+        quote_schema: CANONICAL_QUOTE_SCHEMA.to_string(),
         created_at_utc: start_time.to_rfc3339(),
         session_id: session_id.clone(),
         capture_mode: "perp_session".to_string(),
@@ -747,28 +745,15 @@ pub fn load_perp_session_manifest(session_dir: &Path) -> Result<PerpSessionManif
         );
     }
 
-    // HARD FAIL: Reject legacy captures that don't have canonical quote schema
-    match &manifest.quote_schema {
-        Some(schema) if schema == CANONICAL_QUOTE_SCHEMA => {
-            // Valid canonical capture
-        }
-        Some(schema) => {
-            anyhow::bail!(
-                "FATAL: Invalid quote schema '{}' in {:?}. \
-                 Expected '{}'. This capture uses an incompatible schema and must be recaptured.",
-                schema,
-                manifest_path,
-                CANONICAL_QUOTE_SCHEMA
-            );
-        }
-        None => {
-            anyhow::bail!(
-                "FATAL: Legacy capture detected — missing 'quote_schema' field in {:?}. \
-                 This capture predates the canonical schema (2026-01-24) and is incompatible. \
-                 Move to data/legacy_pre_canonical_2026_01_24/ and recapture with current tooling.",
-                manifest_path
-            );
-        }
+    // HARD FAIL: Reject captures that don't have canonical quote schema
+    if manifest.quote_schema != CANONICAL_QUOTE_SCHEMA {
+        anyhow::bail!(
+            "FATAL: Invalid quote schema '{}' in {:?}. \
+             Expected '{}'. This capture uses an incompatible schema and must be recaptured.",
+            manifest.quote_schema,
+            manifest_path,
+            CANONICAL_QUOTE_SCHEMA
+        );
     }
 
     Ok(manifest)

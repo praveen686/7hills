@@ -33,7 +33,6 @@ struct IndiaSessionManifest {
     session_id: String,
     instruments: Vec<String>,
     captures: Vec<IndiaCaptureInfo>,
-    #[serde(default)]
     duration_secs: f64,
 }
 
@@ -41,11 +40,9 @@ struct IndiaSessionManifest {
 #[allow(dead_code)] // Fields used for deserialization
 struct IndiaCaptureInfo {
     tradingsymbol: String,
-    #[serde(default)]
     instrument_token: u32,
     ticks_file: String,
     ticks_written: usize,
-    #[serde(default)]
     has_depth: bool,
 }
 
@@ -55,25 +52,16 @@ struct IndiaCaptureInfo {
 struct TickEvent {
     ts: DateTime<Utc>,
     tradingsymbol: String,
-    #[serde(default)]
     instrument_token: u32,
     bid_price: i64,
     ask_price: i64,
     bid_qty: u32,
     ask_qty: u32,
     ltp: i64,
-    #[serde(default)]
     ltq: u32,
-    #[serde(default)]
     volume: u64,
-    #[serde(default = "default_price_exponent")]
     price_exponent: i8,
-    #[serde(default)]
     integrity_tier: String,
-}
-
-fn default_price_exponent() -> i8 {
-    -2
 }
 
 /// Wrapper for sorting events by timestamp (min-heap)

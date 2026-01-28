@@ -25,36 +25,129 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// =============================================================================
+// FIELD STATE FOR PRESENCE TRACKING (Doctrine: No Silent Poisoning)
+// =============================================================================
+
+/// Field state for L1 market data fields.
+///
+/// Distinguishes between "vendor didn't send" (Absent), "vendor sent null" (Null),
+/// "vendor sent a valid value" (Value), and "vendor sent malformed data" (Malformed).
+///
+/// This is critical for the "No Silent Poisoning" doctrine: a quantity of 0 with
+/// state `Value` is a real zero from the vendor, while 0 with state `Absent` means
+/// the field was never received.
+///
+/// ## Encoding
+/// 2 bits per field: 00=Absent, 01=Null, 10=Value, 11=Malformed
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldState {
+    /// Vendor did not send this field (missing from payload)
+    #[default]
+    Absent = 0,
+    /// Vendor explicitly sent null/None
+    Null = 1,
+    /// Vendor sent a valid value (mantissa is meaningful)
+    Value = 2,
+    /// Vendor sent malformed data (could not parse)
+    Malformed = 3,
+}
+
+/// Slot indices for L1 field state bits.
+///
+/// Each field uses 2 bits in the packed `l1_state_bits` field.
+pub mod l1_slots {
+    pub const BID_PRICE: u8 = 0;
+    pub const ASK_PRICE: u8 = 1;
+    pub const BID_QTY: u8 = 2;
+    pub const ASK_QTY: u8 = 3;
+    // Slots 4-7 reserved for future L1 fields (16 bits = 8 slots)
+}
+
+/// Set a field state in packed bits.
+///
+/// # Arguments
+/// * `bits` - Mutable reference to the packed state bits
+/// * `slot` - Field slot index (0-7 for u16)
+/// * `state` - The field state to set
+#[inline]
+pub fn set_field_state(bits: &mut u16, slot: u8, state: FieldState) {
+    debug_assert!(slot < 8, "slot must be < 8 for u16");
+    let shift = (slot as u16) * 2;
+    *bits &= !(0b11 << shift); // Clear existing bits
+    *bits |= ((state as u16) & 0b11) << shift; // Set new bits
+}
+
+/// Get a field state from packed bits.
+///
+/// # Arguments
+/// * `bits` - The packed state bits
+/// * `slot` - Field slot index (0-7 for u16)
+///
+/// # Returns
+/// The field state for the given slot
+#[inline]
+pub fn get_field_state(bits: u16, slot: u8) -> FieldState {
+    debug_assert!(slot < 8, "slot must be < 8 for u16");
+    let shift = (slot as u16) * 2;
+    match ((bits >> shift) & 0b11) as u8 {
+        0 => FieldState::Absent,
+        1 => FieldState::Null,
+        2 => FieldState::Value,
+        _ => FieldState::Malformed,
+    }
+}
+
+/// Build l1_state_bits from individual field states.
+///
+/// # Arguments
+/// * `bid_price` - State of bid_price_mantissa field
+/// * `ask_price` - State of ask_price_mantissa field
+/// * `bid_qty` - State of bid_qty_mantissa field
+/// * `ask_qty` - State of ask_qty_mantissa field
+#[inline]
+pub fn build_l1_state_bits(
+    bid_price: FieldState,
+    ask_price: FieldState,
+    bid_qty: FieldState,
+    ask_qty: FieldState,
+) -> u16 {
+    let mut bits: u16 = 0;
+    set_field_state(&mut bits, l1_slots::BID_PRICE, bid_price);
+    set_field_state(&mut bits, l1_slots::ASK_PRICE, ask_price);
+    set_field_state(&mut bits, l1_slots::BID_QTY, bid_qty);
+    set_field_state(&mut bits, l1_slots::ASK_QTY, ask_qty);
+    bits
+}
+
+/// All L1 fields present (common case for valid snapshots).
+pub const L1_ALL_VALUE: u16 = 0b10_10_10_10; // Value for all 4 fields
+
 /// Correlation context for distributed tracing.
 /// All events carry this context to enable full causality reconstruction.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CorrelationContext {
     /// Capture/trading session identifier
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 
     /// Analysis/backtest run identifier
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
 
     /// Trading symbol (e.g., "BTCUSDT", "NIFTY26JAN24000CE")
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
 
     /// Exchange/venue identifier (e.g., "binance", "zerodha")
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub venue: Option<String>,
 
     /// Strategy that generated/processed the event
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy_id: Option<String>,
 
     /// Decision identifier (links to orders)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision_id: Option<Uuid>,
 
     /// Order identifier (links to fills)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order_id: Option<Uuid>,
 }
 
@@ -147,11 +240,9 @@ pub struct QuoteEvent {
     pub qty_exponent: i8,
 
     /// Venue/exchange identifier
-    #[serde(default)]
     pub venue: String,
 
     /// Correlation context for tracing
-    #[serde(default, flatten)]
     pub ctx: CorrelationContext,
 }
 
@@ -257,15 +348,12 @@ pub struct DecisionEvent {
 
     /// Confidence score as fixed-point mantissa (exponent = CONFIDENCE_EXPONENT = -4)
     /// Value 10000 = 1.0, 8500 = 0.85, 0 = 0.0
-    #[serde(default)]
     pub confidence_mantissa: i64,
 
     /// Strategy-specific metadata
-    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub metadata: serde_json::Value,
 
     /// Correlation context
-    #[serde(default, flatten)]
     pub ctx: CorrelationContext,
 }
 
@@ -306,12 +394,41 @@ impl DecisionEvent {
     }
 }
 
+// =============================================================================
+// MARKET SNAPSHOT (Versioned Enum for Schema Evolution)
+// =============================================================================
+
 /// Market state snapshot at decision time for replay validation.
+///
+/// ## Schema Versioning
+/// - **V1**: Original schema (no presence tracking, legacy WAL compatible)
+/// - **V2**: Adds `l1_state_bits` for explicit field presence tracking
+///
+/// ## Canonical Bytes
+/// Each variant has a version discriminant byte (0x01 for V1, 0x02 for V2)
+/// prepended to its canonical encoding. This ensures:
+/// - V1 digests are distinct from V2 digests
+/// - Replay parity is version-scoped (cross-version comparison is invalid)
 ///
 /// ## Fixed-Point Policy
 /// - `spread_bps_mantissa`: Fixed exponent -2 (523 = 5.23 bps)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarketSnapshot {
+#[serde(tag = "schema", rename_all = "snake_case")]
+pub enum MarketSnapshot {
+    /// Original schema (no presence tracking).
+    /// Used for reading legacy WAL entries.
+    V1(MarketSnapshotV1),
+    /// Schema with explicit L1 field presence tracking.
+    /// All new captures MUST use V2.
+    V2(MarketSnapshotV2),
+}
+
+/// MarketSnapshot V1: Original schema without presence tracking.
+///
+/// **Warning**: V1 cannot distinguish "vendor sent 0" from "vendor didn't send".
+/// Use only for legacy WAL compatibility. New code should use V2.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketSnapshotV1 {
     /// Best bid price (mantissa)
     pub bid_price_mantissa: i64,
     /// Best ask price (mantissa)
@@ -325,20 +442,228 @@ pub struct MarketSnapshot {
     /// Quantity exponent
     pub qty_exponent: i8,
     /// Spread in basis points as fixed-point mantissa (exponent = SPREAD_BPS_EXPONENT = -2)
-    /// Value 523 = 5.23 bps, 100 = 1.00 bps
     pub spread_bps_mantissa: i64,
     /// Book timestamp (nanoseconds since epoch for causality)
     pub book_ts_ns: i64,
 }
 
+/// MarketSnapshot V2: Schema with explicit L1 field presence tracking.
+///
+/// ## Doctrine: No Silent Poisoning
+/// The `l1_state_bits` field tracks whether each L1 field was:
+/// - `Value`: Vendor sent a valid value (mantissa is meaningful)
+/// - `Absent`: Vendor did not send this field
+/// - `Null`: Vendor explicitly sent null
+/// - `Malformed`: Vendor sent unparseable data
+///
+/// This allows `bid_qty_mantissa = 0` with state `Value` to be distinguished
+/// from `bid_qty_mantissa = 0` with state `Absent`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketSnapshotV2 {
+    /// Best bid price (mantissa)
+    pub bid_price_mantissa: i64,
+    /// Best ask price (mantissa)
+    pub ask_price_mantissa: i64,
+    /// Best bid quantity (mantissa)
+    pub bid_qty_mantissa: i64,
+    /// Best ask quantity (mantissa)
+    pub ask_qty_mantissa: i64,
+    /// Price exponent
+    pub price_exponent: i8,
+    /// Quantity exponent
+    pub qty_exponent: i8,
+    /// Spread in basis points as fixed-point mantissa (exponent = SPREAD_BPS_EXPONENT = -2)
+    pub spread_bps_mantissa: i64,
+    /// Book timestamp (nanoseconds since epoch for causality)
+    pub book_ts_ns: i64,
+    /// Packed 2-bit field states for L1 fields (prices + qty).
+    /// Bits 0-1: bid_price, 2-3: ask_price, 4-5: bid_qty, 6-7: ask_qty.
+    /// Use `get_field_state` and `set_field_state` to access.
+    pub l1_state_bits: u16,
+}
+
 impl MarketSnapshot {
+    /// Create a V2 snapshot with all fields present (common case).
+    #[allow(clippy::too_many_arguments)]
+    pub fn v2_all_present(
+        bid_price_mantissa: i64,
+        ask_price_mantissa: i64,
+        bid_qty_mantissa: i64,
+        ask_qty_mantissa: i64,
+        price_exponent: i8,
+        qty_exponent: i8,
+        spread_bps_mantissa: i64,
+        book_ts_ns: i64,
+    ) -> Self {
+        Self::V2(MarketSnapshotV2 {
+            bid_price_mantissa,
+            ask_price_mantissa,
+            bid_qty_mantissa,
+            ask_qty_mantissa,
+            price_exponent,
+            qty_exponent,
+            spread_bps_mantissa,
+            book_ts_ns,
+            l1_state_bits: L1_ALL_VALUE,
+        })
+    }
+
+    /// Create a V2 snapshot with explicit field states.
+    #[allow(clippy::too_many_arguments)]
+    pub fn v2_with_states(
+        bid_price_mantissa: i64,
+        ask_price_mantissa: i64,
+        bid_qty_mantissa: i64,
+        ask_qty_mantissa: i64,
+        price_exponent: i8,
+        qty_exponent: i8,
+        spread_bps_mantissa: i64,
+        book_ts_ns: i64,
+        l1_state_bits: u16,
+    ) -> Self {
+        Self::V2(MarketSnapshotV2 {
+            bid_price_mantissa,
+            ask_price_mantissa,
+            bid_qty_mantissa,
+            ask_qty_mantissa,
+            price_exponent,
+            qty_exponent,
+            spread_bps_mantissa,
+            book_ts_ns,
+            l1_state_bits,
+        })
+    }
+
+    /// Access bid_price_mantissa (common accessor for both versions).
+    #[inline]
+    pub fn bid_price_mantissa(&self) -> i64 {
+        match self {
+            Self::V1(v1) => v1.bid_price_mantissa,
+            Self::V2(v2) => v2.bid_price_mantissa,
+        }
+    }
+
+    /// Access ask_price_mantissa (common accessor for both versions).
+    #[inline]
+    pub fn ask_price_mantissa(&self) -> i64 {
+        match self {
+            Self::V1(v1) => v1.ask_price_mantissa,
+            Self::V2(v2) => v2.ask_price_mantissa,
+        }
+    }
+
+    /// Access bid_qty_mantissa (common accessor for both versions).
+    #[inline]
+    pub fn bid_qty_mantissa(&self) -> i64 {
+        match self {
+            Self::V1(v1) => v1.bid_qty_mantissa,
+            Self::V2(v2) => v2.bid_qty_mantissa,
+        }
+    }
+
+    /// Access ask_qty_mantissa (common accessor for both versions).
+    #[inline]
+    pub fn ask_qty_mantissa(&self) -> i64 {
+        match self {
+            Self::V1(v1) => v1.ask_qty_mantissa,
+            Self::V2(v2) => v2.ask_qty_mantissa,
+        }
+    }
+
+    /// Access price_exponent (common accessor for both versions).
+    #[inline]
+    pub fn price_exponent(&self) -> i8 {
+        match self {
+            Self::V1(v1) => v1.price_exponent,
+            Self::V2(v2) => v2.price_exponent,
+        }
+    }
+
+    /// Access qty_exponent (common accessor for both versions).
+    #[inline]
+    pub fn qty_exponent(&self) -> i8 {
+        match self {
+            Self::V1(v1) => v1.qty_exponent,
+            Self::V2(v2) => v2.qty_exponent,
+        }
+    }
+
+    /// Access spread_bps_mantissa (common accessor for both versions).
+    #[inline]
+    pub fn spread_bps_mantissa(&self) -> i64 {
+        match self {
+            Self::V1(v1) => v1.spread_bps_mantissa,
+            Self::V2(v2) => v2.spread_bps_mantissa,
+        }
+    }
+
+    /// Access book_ts_ns (common accessor for both versions).
+    #[inline]
+    pub fn book_ts_ns(&self) -> i64 {
+        match self {
+            Self::V1(v1) => v1.book_ts_ns,
+            Self::V2(v2) => v2.book_ts_ns,
+        }
+    }
+
+    /// Get l1_state_bits (V2 only, returns 0 for V1).
+    ///
+    /// **Warning**: V1 returns 0 which means "presence unknown" (all Absent).
+    /// This is a compatibility fallback, not a valid presence encoding.
+    #[inline]
+    pub fn l1_state_bits(&self) -> u16 {
+        match self {
+            Self::V1(_) => 0, // Legacy: presence unknown
+            Self::V2(v2) => v2.l1_state_bits,
+        }
+    }
+
+    /// Check if this is a V2 snapshot (has presence tracking).
+    #[inline]
+    pub fn is_v2(&self) -> bool {
+        matches!(self, Self::V2(_))
+    }
+
+    /// Get the schema version discriminant byte for canonical encoding.
+    #[inline]
+    pub fn schema_version_byte(&self) -> u8 {
+        match self {
+            Self::V1(_) => 0x01,
+            Self::V2(_) => 0x02,
+        }
+    }
+
+    /// Get field state for bid_price (V2 only, returns Absent for V1).
+    #[inline]
+    pub fn bid_price_state(&self) -> FieldState {
+        get_field_state(self.l1_state_bits(), l1_slots::BID_PRICE)
+    }
+
+    /// Get field state for ask_price (V2 only, returns Absent for V1).
+    #[inline]
+    pub fn ask_price_state(&self) -> FieldState {
+        get_field_state(self.l1_state_bits(), l1_slots::ASK_PRICE)
+    }
+
+    /// Get field state for bid_qty (V2 only, returns Absent for V1).
+    #[inline]
+    pub fn bid_qty_state(&self) -> FieldState {
+        get_field_state(self.l1_state_bits(), l1_slots::BID_QTY)
+    }
+
+    /// Get field state for ask_qty (V2 only, returns Absent for V1).
+    #[inline]
+    pub fn ask_qty_state(&self) -> FieldState {
+        get_field_state(self.l1_state_bits(), l1_slots::ASK_QTY)
+    }
+
     /// Convert spread_bps_mantissa to f64 (for display only).
     ///
     /// # Warning
     /// Only use for display/logging. Do NOT use for computations that feed
     /// back into decisions or hashing.
     pub fn spread_bps_f64(&self) -> f64 {
-        self.spread_bps_mantissa as f64 * 10f64.powi(SPREAD_BPS_EXPONENT as i32)
+        self.spread_bps_mantissa() as f64 * 10f64.powi(SPREAD_BPS_EXPONENT as i32)
     }
 
     /// Create spread_bps_mantissa from f64 value.
@@ -346,21 +671,24 @@ impl MarketSnapshot {
     /// # Migration Bridge
     /// This helper exists only for ingesting external float inputs.
     /// **Internal spread computations MUST use integer arithmetic.**
-    ///
-    /// # Deterministic Spread Calculation
-    /// ```ignore
-    /// // GOOD: Compute spread in fixed-point directly
-    /// // spread_bps = (ask - bid) / mid * 10000
-    /// // With price_exponent = -2, we can compute:
-    /// let mid_mantissa = (bid_price_mantissa + ask_price_mantissa) / 2;
-    /// let spread_bps_mantissa = if mid_mantissa > 0 {
-    ///     ((ask_price_mantissa - bid_price_mantissa) * 1_000_000) / mid_mantissa
-    /// } else {
-    ///     0
-    /// };
-    /// ```
     pub fn spread_bps_from_f64(value: f64) -> i64 {
         (value * 10f64.powi(-SPREAD_BPS_EXPONENT as i32)).round() as i64
+    }
+}
+
+impl MarketSnapshotV2 {
+    /// Get the V1 fields as a reference (for canonical encoding shared logic).
+    pub fn as_v1_fields(&self) -> MarketSnapshotV1 {
+        MarketSnapshotV1 {
+            bid_price_mantissa: self.bid_price_mantissa,
+            ask_price_mantissa: self.ask_price_mantissa,
+            bid_qty_mantissa: self.bid_qty_mantissa,
+            ask_qty_mantissa: self.ask_qty_mantissa,
+            price_exponent: self.price_exponent,
+            qty_exponent: self.qty_exponent,
+            spread_bps_mantissa: self.spread_bps_mantissa,
+            book_ts_ns: self.book_ts_ns,
+        }
     }
 }
 
@@ -505,5 +833,206 @@ mod tests {
         assert_eq!(ctx.symbol, Some("BTCUSDT".to_string()));
         assert_eq!(ctx.venue, Some("binance".to_string()));
         assert_eq!(ctx.strategy_id, Some("hydra-v1".to_string()));
+    }
+
+    // =========================================================================
+    // FIELD STATE TESTS
+    // =========================================================================
+
+    #[test]
+    fn test_field_state_packing() {
+        let mut bits: u16 = 0;
+        set_field_state(&mut bits, l1_slots::BID_PRICE, FieldState::Value);
+        set_field_state(&mut bits, l1_slots::ASK_PRICE, FieldState::Value);
+        set_field_state(&mut bits, l1_slots::BID_QTY, FieldState::Absent);
+        set_field_state(&mut bits, l1_slots::ASK_QTY, FieldState::Null);
+
+        assert_eq!(
+            get_field_state(bits, l1_slots::BID_PRICE),
+            FieldState::Value
+        );
+        assert_eq!(
+            get_field_state(bits, l1_slots::ASK_PRICE),
+            FieldState::Value
+        );
+        assert_eq!(get_field_state(bits, l1_slots::BID_QTY), FieldState::Absent);
+        assert_eq!(get_field_state(bits, l1_slots::ASK_QTY), FieldState::Null);
+    }
+
+    #[test]
+    fn test_build_l1_state_bits_helper() {
+        let bits = build_l1_state_bits(
+            FieldState::Value,
+            FieldState::Value,
+            FieldState::Absent,
+            FieldState::Malformed,
+        );
+        assert_eq!(
+            get_field_state(bits, l1_slots::BID_PRICE),
+            FieldState::Value
+        );
+        assert_eq!(
+            get_field_state(bits, l1_slots::ASK_PRICE),
+            FieldState::Value
+        );
+        assert_eq!(get_field_state(bits, l1_slots::BID_QTY), FieldState::Absent);
+        assert_eq!(
+            get_field_state(bits, l1_slots::ASK_QTY),
+            FieldState::Malformed
+        );
+    }
+
+    #[test]
+    fn test_l1_all_value_constant() {
+        // L1_ALL_VALUE should have all 4 fields set to Value (0b10)
+        assert_eq!(
+            get_field_state(L1_ALL_VALUE, l1_slots::BID_PRICE),
+            FieldState::Value
+        );
+        assert_eq!(
+            get_field_state(L1_ALL_VALUE, l1_slots::ASK_PRICE),
+            FieldState::Value
+        );
+        assert_eq!(
+            get_field_state(L1_ALL_VALUE, l1_slots::BID_QTY),
+            FieldState::Value
+        );
+        assert_eq!(
+            get_field_state(L1_ALL_VALUE, l1_slots::ASK_QTY),
+            FieldState::Value
+        );
+    }
+
+    // =========================================================================
+    // MARKET SNAPSHOT V1/V2 TESTS
+    // =========================================================================
+
+    #[test]
+    fn test_market_snapshot_v2_serde_roundtrip() {
+        let snap = MarketSnapshot::v2_all_present(1000, 1001, 500, 600, -2, -8, 10, 1234567890);
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let parsed: MarketSnapshot = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.is_v2());
+        assert_eq!(parsed.bid_price_mantissa(), 1000);
+        assert_eq!(parsed.ask_price_mantissa(), 1001);
+        assert_eq!(parsed.bid_qty_mantissa(), 500);
+        assert_eq!(parsed.ask_qty_mantissa(), 600);
+        assert_eq!(parsed.l1_state_bits(), L1_ALL_VALUE);
+    }
+
+    #[test]
+    fn test_market_snapshot_v1_serde_roundtrip() {
+        let v1 = MarketSnapshotV1 {
+            bid_price_mantissa: 2000,
+            ask_price_mantissa: 2001,
+            bid_qty_mantissa: 700,
+            ask_qty_mantissa: 800,
+            price_exponent: -2,
+            qty_exponent: -8,
+            spread_bps_mantissa: 5,
+            book_ts_ns: 9876543210,
+        };
+        let snap = MarketSnapshot::V1(v1);
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let parsed: MarketSnapshot = serde_json::from_str(&json).unwrap();
+
+        assert!(!parsed.is_v2());
+        assert_eq!(parsed.bid_price_mantissa(), 2000);
+        assert_eq!(parsed.ask_price_mantissa(), 2001);
+        // V1 returns 0 for l1_state_bits (presence unknown)
+        assert_eq!(parsed.l1_state_bits(), 0);
+    }
+
+    #[test]
+    fn test_market_snapshot_v2_with_custom_states() {
+        // Create V2 with prices present, quantities absent (backtest scenario)
+        let bits = build_l1_state_bits(
+            FieldState::Value,  // bid_price
+            FieldState::Value,  // ask_price
+            FieldState::Absent, // bid_qty
+            FieldState::Absent, // ask_qty
+        );
+        let snap = MarketSnapshot::v2_with_states(1000, 1001, 0, 0, -2, -8, 10, 1234567890, bits);
+
+        assert!(snap.is_v2());
+        assert_eq!(snap.bid_price_state(), FieldState::Value);
+        assert_eq!(snap.ask_price_state(), FieldState::Value);
+        assert_eq!(snap.bid_qty_state(), FieldState::Absent);
+        assert_eq!(snap.ask_qty_state(), FieldState::Absent);
+    }
+
+    #[test]
+    fn test_presence_correctness_zero_value_vs_absent() {
+        // Doctrine test: qty=0 with state Value is different from qty=0 with state Absent
+
+        // Case 1: qty=0 and state=Value (vendor sent 0)
+        let snap_value = MarketSnapshot::v2_with_states(
+            1000,
+            1001,
+            0,
+            0, // zero quantities
+            -2,
+            -8,
+            10,
+            1234567890,
+            build_l1_state_bits(
+                FieldState::Value,
+                FieldState::Value,
+                FieldState::Value, // qty=0 but vendor sent it
+                FieldState::Value,
+            ),
+        );
+
+        // Case 2: qty=0 and state=Absent (vendor didn't send)
+        let snap_absent = MarketSnapshot::v2_with_states(
+            1000,
+            1001,
+            0,
+            0, // zero quantities
+            -2,
+            -8,
+            10,
+            1234567890,
+            build_l1_state_bits(
+                FieldState::Value,
+                FieldState::Value,
+                FieldState::Absent, // qty not sent
+                FieldState::Absent,
+            ),
+        );
+
+        // Both have bid_qty_mantissa=0 but different states
+        assert_eq!(
+            snap_value.bid_qty_mantissa(),
+            snap_absent.bid_qty_mantissa()
+        );
+        assert_ne!(snap_value.bid_qty_state(), snap_absent.bid_qty_state());
+
+        // This is the doctrine: we can distinguish "sent 0" from "not sent"
+        assert_eq!(snap_value.bid_qty_state(), FieldState::Value);
+        assert_eq!(snap_absent.bid_qty_state(), FieldState::Absent);
+    }
+
+    #[test]
+    fn test_market_snapshot_schema_version_bytes() {
+        let v1 = MarketSnapshot::V1(MarketSnapshotV1 {
+            bid_price_mantissa: 1000,
+            ask_price_mantissa: 1001,
+            bid_qty_mantissa: 500,
+            ask_qty_mantissa: 600,
+            price_exponent: -2,
+            qty_exponent: -8,
+            spread_bps_mantissa: 10,
+            book_ts_ns: 1234567890,
+        });
+
+        let v2 = MarketSnapshot::v2_all_present(1000, 1001, 500, 600, -2, -8, 10, 1234567890);
+
+        // Schema version bytes are different
+        assert_eq!(v1.schema_version_byte(), 0x01);
+        assert_eq!(v2.schema_version_byte(), 0x02);
     }
 }

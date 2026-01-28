@@ -44,6 +44,9 @@ pub use quantlaxmi_models::events::{
 };
 pub use quantlaxmi_models::{FillEvent, OrderEvent, RiskEvent};
 
+// Re-export admission types (Phase 18)
+pub use quantlaxmi_models::{AdmissionDecision, AdmissionOutcome};
+
 /// WAL record types for polymorphic storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -70,7 +73,6 @@ pub struct WalMarketRecord {
     /// Event payload (quote, depth, trade)
     pub payload: MarketPayload,
     /// Correlation context
-    #[serde(default, flatten)]
     pub ctx: CorrelationContext,
 }
 
@@ -123,6 +125,7 @@ pub struct WalWriter {
     order_file: Option<tokio::fs::File>,
     fill_file: Option<tokio::fs::File>,
     risk_file: Option<tokio::fs::File>,
+    admission_file: Option<tokio::fs::File>,
     counts: WalCounts,
 }
 
@@ -134,6 +137,7 @@ pub struct WalCounts {
     pub order_events: u64,
     pub fill_events: u64,
     pub risk_events: u64,
+    pub admission_events: u64,
 }
 
 impl WalWriter {
@@ -151,6 +155,7 @@ impl WalWriter {
             order_file: None,
             fill_file: None,
             risk_file: None,
+            admission_file: None,
             counts: WalCounts::default(),
         })
     }
@@ -280,6 +285,35 @@ impl WalWriter {
         Ok(())
     }
 
+    /// Write a signal admission decision (Phase 18).
+    ///
+    /// Written for BOTH Admit and Refuse outcomes - every admission attempt
+    /// produces an auditable artifact.
+    pub async fn write_admission(&mut self, decision: AdmissionDecision) -> Result<()> {
+        let file = if let Some(ref mut f) = self.admission_file {
+            f
+        } else {
+            let path = self.session_dir.join("wal/signals_admission.jsonl");
+            self.admission_file = Some(
+                tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .await
+                    .context("open signals_admission WAL")?,
+            );
+            self.admission_file.as_mut().unwrap()
+        };
+
+        let mut line = serde_json::to_vec(&decision).context("serialize admission decision")?;
+        line.push(b'\n');
+        file.write_all(&line)
+            .await
+            .context("write admission decision")?;
+        self.counts.admission_events += 1;
+        Ok(())
+    }
+
     /// Flush all WAL files.
     pub async fn flush(&mut self) -> Result<()> {
         if let Some(ref mut f) = self.market_file {
@@ -295,6 +329,9 @@ impl WalWriter {
             f.flush().await?;
         }
         if let Some(ref mut f) = self.risk_file {
+            f.flush().await?;
+        }
+        if let Some(ref mut f) = self.admission_file {
             f.flush().await?;
         }
         Ok(())
@@ -319,6 +356,7 @@ impl WalWriter {
             ("orders.jsonl", self.counts.order_events),
             ("fills.jsonl", self.counts.fill_events),
             ("risk.jsonl", self.counts.risk_events),
+            ("signals_admission.jsonl", self.counts.admission_events),
         ] {
             let path = wal_dir.join(name);
             if path.exists() {
@@ -756,5 +794,207 @@ mod tests {
         let memory_hash = sha256_hex(content);
 
         assert_eq!(streaming_hash, memory_hash);
+    }
+
+    // =========================================================================
+    // PHASE 18: Signal Admission WAL Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_admission_wal_roundtrip_jsonl() {
+        use quantlaxmi_models::{
+            ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome, VendorField,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("admission_test");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write Admit decision
+        let admit = AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1706400000000000000,
+            session_id: "sess_001".to_string(),
+            signal_id: "book_imbalance".to_string(),
+            outcome: AdmissionOutcome::Admit,
+            missing_vendor_fields: vec![],
+            missing_internal_fields: vec![],
+            correlation_id: Some("corr_001".to_string()),
+            digest: "abc123".to_string(),
+        };
+        writer.write_admission(admit.clone()).await.unwrap();
+
+        // Write Refuse decision
+        let refuse = AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1706400000000001000,
+            session_id: "sess_001".to_string(),
+            signal_id: "book_imbalance".to_string(),
+            outcome: AdmissionOutcome::Refuse,
+            missing_vendor_fields: vec![VendorField::BuyQuantity],
+            missing_internal_fields: vec![],
+            correlation_id: None,
+            digest: "def456".to_string(),
+        };
+        writer.write_admission(refuse.clone()).await.unwrap();
+
+        writer.flush().await.unwrap();
+
+        // Read back lines
+        let wal_path = session_dir.join("wal/signals_admission.jsonl");
+        assert!(wal_path.exists(), "signals_admission.jsonl should exist");
+
+        let content = std::fs::read_to_string(&wal_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "Should have 2 lines");
+
+        // Deserialize and verify
+        let read_admit: AdmissionDecision = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(read_admit.outcome, AdmissionOutcome::Admit);
+        assert_eq!(read_admit.signal_id, "book_imbalance");
+        assert!(read_admit.missing_vendor_fields.is_empty());
+
+        let read_refuse: AdmissionDecision = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(read_refuse.outcome, AdmissionOutcome::Refuse);
+        assert_eq!(
+            read_refuse.missing_vendor_fields,
+            vec![VendorField::BuyQuantity]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_admission_wal_path_is_correct() {
+        use quantlaxmi_models::{ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome};
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("path_test_session");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        let decision = AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1706400000000000000,
+            session_id: "sess_001".to_string(),
+            signal_id: "test_signal".to_string(),
+            outcome: AdmissionOutcome::Admit,
+            missing_vendor_fields: vec![],
+            missing_internal_fields: vec![],
+            correlation_id: None,
+            digest: "test".to_string(),
+        };
+        writer.write_admission(decision).await.unwrap();
+        writer.flush().await.unwrap();
+
+        // Verify exact path
+        let expected_path = session_dir.join("wal/signals_admission.jsonl");
+        assert!(
+            expected_path.exists(),
+            "File should exist at exactly: {}",
+            expected_path.display()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_admission_wal_write_is_append_only() {
+        use quantlaxmi_models::{ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome};
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("append_test");
+
+        // First write
+        {
+            let mut writer = WalWriter::new(&session_dir).await.unwrap();
+            let decision = AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 1,
+                session_id: "sess".to_string(),
+                signal_id: "sig".to_string(),
+                outcome: AdmissionOutcome::Admit,
+                missing_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: None,
+                digest: "d1".to_string(),
+            };
+            writer.write_admission(decision).await.unwrap();
+            writer.flush().await.unwrap();
+            // Writer dropped here
+        }
+
+        // Second write (reopen)
+        {
+            let mut writer = WalWriter::new(&session_dir).await.unwrap();
+            let decision = AdmissionDecision {
+                schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+                ts_ns: 2,
+                session_id: "sess".to_string(),
+                signal_id: "sig".to_string(),
+                outcome: AdmissionOutcome::Refuse,
+                missing_vendor_fields: vec![],
+                missing_internal_fields: vec![],
+                correlation_id: None,
+                digest: "d2".to_string(),
+            };
+            writer.write_admission(decision).await.unwrap();
+            writer.flush().await.unwrap();
+        }
+
+        // Verify both lines exist
+        let wal_path = session_dir.join("wal/signals_admission.jsonl");
+        let content = std::fs::read_to_string(&wal_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            lines.len(),
+            2,
+            "File should have 2 lines after reopen + write"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_refuse_still_writes_to_wal() {
+        use quantlaxmi_models::{
+            ADMISSION_SCHEMA_VERSION, AdmissionDecision, AdmissionOutcome, VendorField,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let session_dir = dir.path().join("refuse_test");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write ONLY a Refuse decision (simulating missing vendor field)
+        let refuse = AdmissionDecision {
+            schema_version: ADMISSION_SCHEMA_VERSION.to_string(),
+            ts_ns: 1706400000000000000,
+            session_id: "sess_001".to_string(),
+            signal_id: "book_imbalance".to_string(),
+            outcome: AdmissionOutcome::Refuse,
+            missing_vendor_fields: vec![VendorField::SellQuantity],
+            missing_internal_fields: vec![],
+            correlation_id: None,
+            digest: "refuse_digest".to_string(),
+        };
+        writer.write_admission(refuse).await.unwrap();
+
+        let manifest = writer.finalize().await.unwrap();
+
+        // Verify count
+        assert_eq!(
+            manifest.counts.admission_events, 1,
+            "Refuse must still be counted"
+        );
+
+        // Verify file exists and contains the refuse decision
+        let wal_path = session_dir.join("wal/signals_admission.jsonl");
+        let content = std::fs::read_to_string(&wal_path).unwrap();
+        assert!(
+            content.contains("Refuse"),
+            "WAL should contain Refuse outcome"
+        );
+        // VendorField::SellQuantity serializes as "SellQuantity" by default
+        assert!(
+            content.contains("SellQuantity"),
+            "WAL should contain missing field: {}",
+            content
+        );
     }
 }

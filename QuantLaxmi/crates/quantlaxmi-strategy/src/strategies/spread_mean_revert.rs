@@ -185,7 +185,7 @@ impl SpreadMeanRevertStrategy {
 
     /// Check if spread is acceptable.
     fn spread_ok(&self, ctx: &StrategyContext) -> bool {
-        ctx.market.spread_bps_mantissa <= self.config.max_spread_bps_mantissa
+        ctx.market.spread_bps_mantissa() <= self.config.max_spread_bps_mantissa
     }
 
     /// Check if EMA has warmed up.
@@ -201,7 +201,7 @@ impl SpreadMeanRevertStrategy {
         tag: &str,
     ) -> DecisionEvent {
         let decision_id = Uuid::new_v4();
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
         let confidence_mantissa = 10i64.pow((-CONFIDENCE_EXPONENT) as u32);
 
         DecisionEvent {
@@ -239,7 +239,7 @@ impl SpreadMeanRevertStrategy {
         side: Side,
         tag: &str,
     ) -> OrderIntent {
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
 
         OrderIntent {
             parent_decision_id,
@@ -273,7 +273,7 @@ impl Strategy for SpreadMeanRevertStrategy {
             return vec![];
         }
 
-        let mid_mantissa = (ctx.market.bid_price_mantissa + ctx.market.ask_price_mantissa) / 2;
+        let mid_mantissa = (ctx.market.bid_price_mantissa() + ctx.market.ask_price_mantissa()) / 2;
 
         // Update EMA first
         self.update_ema(mid_mantissa);
@@ -348,16 +348,16 @@ mod tests {
     use chrono::Utc;
 
     fn make_test_market(bid: i64, ask: i64, spread_bps: i64) -> MarketSnapshot {
-        MarketSnapshot {
-            bid_price_mantissa: bid,
-            ask_price_mantissa: ask,
-            bid_qty_mantissa: 1_000_000,
-            ask_qty_mantissa: 1_000_000,
-            price_exponent: -2,
-            qty_exponent: -8,
-            spread_bps_mantissa: spread_bps,
-            book_ts_ns: 1234567890000000000,
-        }
+        MarketSnapshot::v2_all_present(
+            bid,
+            ask,
+            1_000_000,
+            1_000_000,
+            -2,
+            -8,
+            spread_bps,
+            1234567890000000000,
+        )
     }
 
     #[test]
