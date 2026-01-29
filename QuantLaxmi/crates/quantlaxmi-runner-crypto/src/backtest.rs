@@ -2863,9 +2863,6 @@ impl BacktestEngine {
 
                 let pu_record = pu_builder.build();
                 wal_writer.write_position_update(pu_record).await?;
-
-                current_intent_seq = None;
-                current_intent_digest = None;
             }
         }
 

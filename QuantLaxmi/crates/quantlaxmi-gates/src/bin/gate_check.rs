@@ -525,7 +525,7 @@ fn run_g4(
     format: OutputFormat,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let result = G4AdmissionDeterminismGate::compare(live, replay)
-        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+        .map_err(Box::<dyn std::error::Error>::from)?;
 
     match format {
         OutputFormat::Text => {
@@ -573,7 +573,7 @@ fn run_g5(
     format: OutputFormat,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let result = G5OrderIntentDeterminismGate::compare(live, replay)
-        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+        .map_err(Box::<dyn std::error::Error>::from)?;
 
     match format {
         OutputFormat::Text => {
@@ -614,7 +614,7 @@ fn run_g6(
     format: OutputFormat,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let result = G6ExecutionFillDeterminismGate::compare(live, replay)
-        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+        .map_err(Box::<dyn std::error::Error>::from)?;
 
     match format {
         OutputFormat::Text => {
@@ -655,7 +655,7 @@ fn run_g7(
     format: OutputFormat,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let result = G7PositionDeterminismGate::compare(live, replay)
-        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+        .map_err(Box::<dyn std::error::Error>::from)?;
 
     match format {
         OutputFormat::Text => {
@@ -746,7 +746,7 @@ fn run_all(
     let g4 = match (g4_live, g4_replay) {
         (Some(l), Some(r)) => Some(
             G4AdmissionDeterminismGate::compare(l, r)
-                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+                .map_err(Box::<dyn std::error::Error>::from)?,
         ),
         (Some(_), None) => {
             return Err("G4 requires both --g4-live and --g4-replay".into());
@@ -761,7 +761,7 @@ fn run_all(
     let g5 = match (g5_live, g5_replay) {
         (Some(l), Some(r)) => Some(
             G5OrderIntentDeterminismGate::compare(l, r)
-                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+                .map_err(Box::<dyn std::error::Error>::from)?,
         ),
         (Some(_), None) => {
             return Err("G5 requires both --g5-live and --g5-replay".into());
@@ -776,7 +776,7 @@ fn run_all(
     let g6 = match (g6_live, g6_replay) {
         (Some(l), Some(r)) => Some(
             G6ExecutionFillDeterminismGate::compare(l, r)
-                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+                .map_err(Box::<dyn std::error::Error>::from)?,
         ),
         (Some(_), None) => {
             return Err("G6 requires both --g6-live and --g6-replay".into());
@@ -791,7 +791,7 @@ fn run_all(
     let g7 = match (g7_live, g7_replay) {
         (Some(l), Some(r)) => Some(
             G7PositionDeterminismGate::compare(l, r)
-                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+                .map_err(Box::<dyn std::error::Error>::from)?,
         ),
         (Some(_), None) => {
             return Err("G7 requires both --g7-live and --g7-replay".into());

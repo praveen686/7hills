@@ -44,6 +44,17 @@ use quantlaxmi_models::{
 use crate::CheckResult;
 
 // =============================================================================
+// Type Aliases
+// =============================================================================
+
+/// Result of parsing a WAL file: (decision_map, total_count, parse_errors)
+type G4ParseResult = (
+    HashMap<G4DecisionKey, StrategyAdmissionDecision>,
+    usize,
+    Vec<String>,
+);
+
+// =============================================================================
 // Check Names (Frozen)
 // =============================================================================
 
@@ -360,16 +371,7 @@ impl G4AdmissionDeterminismGate {
     /// Parse a WAL file into a map keyed by (correlation_id, strategy_id, signal_id).
     ///
     /// Returns (map, total_count, parse_errors).
-    fn parse_wal(
-        path: &Path,
-    ) -> Result<
-        (
-            HashMap<G4DecisionKey, StrategyAdmissionDecision>,
-            usize,
-            Vec<String>,
-        ),
-        String,
-    > {
+    fn parse_wal(path: &Path) -> Result<G4ParseResult, String> {
         let file =
             File::open(path).map_err(|e| format!("Cannot open {}: {}", path.display(), e))?;
         let reader = BufReader::new(file);

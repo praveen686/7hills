@@ -58,6 +58,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)] // CLI enum parsed once, size difference acceptable
 pub enum Commands {
     /// Capture Binance Spot bookTicker stream into QuoteEvent JSONL
     CaptureBinance {
