@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-29
-**Current Phase:** 25B Complete (Latency Buckets)
+**Current Phase:** 26.2 Complete (Strategy Truth Report)
 
 ---
 
@@ -46,6 +46,8 @@
 | 23A | G4 Admission Determinism Gate | ✅ Complete | 2026-01-28 |
 | 25A | Deterministic Cost Model | ✅ Complete | 2026-01-29 |
 | 25B | Latency Buckets | ✅ Complete | 2026-01-29 |
+| 26.1 | Strategy Aggregator | ✅ Complete | 2026-01-29 |
+| 26.2 | Truth Report Builder | ✅ Complete | 2026-01-29 |
 
 ---
 
@@ -187,6 +189,144 @@ let mut last_drain_ts: DateTime<Utc> = DateTime::UNIX_EPOCH;
 4. End-of-run drain uses `last_drain_ts` (not `Utc::now()`)
 5. All math deterministic — same inputs produce same outputs
 6. Strategy still receives `on_fill()` notifications for delayed fills
+
+---
+
+## Phase 26: Strategy Truth Report (Complete)
+
+**Goal:** Provide deterministic, audit-grade strategy performance evaluation from WAL-derived state.
+
+### Phase 26.1: Strategy Aggregator (✅ Complete)
+
+**New Crate:** `crates/quantlaxmi-eval`
+
+**Files Created:**
+- `crates/quantlaxmi-eval/Cargo.toml` — New evaluation crate
+- `crates/quantlaxmi-eval/src/lib.rs` — Module exports
+- `crates/quantlaxmi-eval/src/strategy_aggregator.rs` — Per-strategy metric accumulators
+
+**Key Types:**
+```rust
+pub struct StrategyAccumulator {
+    pub strategy_id: String,
+    pub first_ts_ns: Option<i64>,
+    pub last_ts_ns: Option<i64>,
+    pub trade_count: u64,
+    pub winning_trades: u64,
+    pub losing_trades: u64,
+    pub last_position_qty_mantissa: i64,
+    pub gross_realized_pnl_mantissa: i128,
+    pub fees_mantissa: i128,
+    pub equity_mantissa: i128,
+    pub peak_equity_mantissa: i128,
+    pub max_drawdown_mantissa: i128,
+    pub exposure_updates: u64,
+}
+
+pub struct StrategyAggregatorRegistry {
+    accumulators: BTreeMap<String, StrategyAccumulator>,
+    unified_exponent: Option<i8>,
+}
+```
+
+**Feed Methods:**
+- `feed_fill(fill: &ExecutionFillRecord)` — Trade-level accounting
+- `feed_position(pos: &PositionUpdateRecord)` — Position exposure tracking
+
+**Accounting Invariants:**
+1. `equity_mantissa` = cumulative cash delta (net of fees)
+2. `gross_realized_pnl_mantissa` = sum of `realized_pnl_delta`
+3. Trade close detected via sign flip (position 0 or side reversal)
+4. Winning trade: `realized_pnl_delta > 0`
+5. Drawdown = `peak_equity - current_equity` (updated on each fill)
+6. Unified exponent enforcement (all records must use same exponent)
+
+**Tests:** 12 unit tests
+
+### Phase 26.2: Truth Report Builder (✅ Complete)
+
+**Files Created:**
+- `crates/quantlaxmi-eval/src/truth_report.rs` — Report builder (JSON + text summary)
+
+**Key Types:**
+```rust
+pub const TRUTH_REPORT_SCHEMA_VERSION: &str = "1";
+
+pub struct SessionMetadata {
+    pub session_id: String,
+    pub instrument: String,
+    pub start_ts_ns: i64,
+    pub end_ts_ns: i64,
+    pub latency_ticks: u32,
+    pub cost_model_digest: Option<String>,
+    pub unified_exponent: i8,
+}
+
+pub struct StrategyTruthReport {
+    pub schema_version: String,
+    pub session_id: String,
+    pub instrument: String,
+    pub latency_ticks: u32,
+    pub cost_model_digest: Option<String>,
+    pub unified_exponent: i8,
+    pub period: ReportPeriod,
+    pub strategies: BTreeMap<String, StrategyMetrics>,
+    pub digest: String,
+}
+
+pub struct StrategyMetrics {
+    pub trades: u64,
+    pub winning_trades: u64,
+    pub losing_trades: u64,
+    pub win_rate: String,              // "0.53" format
+    pub gross_pnl_mantissa: String,    // i128 as decimal string
+    pub net_pnl_mantissa: String,      // i128 as decimal string
+    pub fees_mantissa: String,         // i128 as decimal string
+    pub max_drawdown_mantissa: String, // i128 as decimal string
+    pub avg_trade_pnl_mantissa: String,// i128 as decimal string
+    pub exposure_updates: u64,
+    pub first_trade_ts_ns: Option<i64>,
+    pub last_trade_ts_ns: Option<i64>,
+}
+```
+
+**Report Generation:**
+- `StrategyTruthReport::build(metadata, registry)` — Creates report from aggregator
+- `to_json()` — Canonical JSON output (BTreeMap for determinism)
+- `to_text_summary()` — Human-readable text summary
+- `compute_digest_hex()` — SHA-256 of canonical JSON with `digest=""`
+
+**JSON Canonicalization Rules (Frozen v1):**
+1. All i128 values serialized as decimal strings
+2. BTreeMap for strategies (sorted order)
+3. win_rate as "0.XX" format (2 decimal places)
+4. Digest computed with `digest: ""` then backfilled
+
+**Text Summary Format:**
+- Raw `ts_ns` values (no datetime formatting in v1)
+- All metrics displayed with explicit labels
+
+**Tests:** 9 unit tests
+
+### Dependencies
+```toml
+[dependencies]
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+hex = "0.4"
+```
+
+### Core Design Principles
+1. **Pure Computation:** No I/O, no side effects, deterministic
+2. **WAL-Derived:** All metrics from ExecutionFillRecord + PositionUpdateRecord
+3. **No Slippage/Spread Decomposition:** Embedded in cash_delta (not separately WAL'd)
+4. **net_pnl = equity_mantissa:** Cash evolution metric
+5. **Canonical JSON:** BTreeMap ordering, string-encoded i128s
+6. **Stable Digest:** Same inputs → same SHA-256
 
 ---
 
@@ -880,8 +1020,9 @@ pub struct PromotionDecision {
 | quantlaxmi-runner-crypto | 98 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
 | quantlaxmi-wal | 26 | ✅ All passing |
+| quantlaxmi-eval | 21 | ✅ All passing |
 | Other crates | 293 | ✅ All passing |
-| **Workspace Total** | 989 | ✅ All passing |
+| **Workspace Total** | 1010 | ✅ All passing |
 
 ---
 
@@ -1168,6 +1309,20 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | FIFO ordering preservation | Phase 25B |
 | End-of-run drain uses `last_drain_ts` (not wall-clock) | Phase 25B |
 | `sim_tick` increment at end of event loop | Phase 25B |
+| `StrategyAccumulator` field semantics | Phase 26.1 |
+| `StrategyAggregatorRegistry` BTreeMap ordering | Phase 26.1 |
+| Unified exponent enforcement | Phase 26.1 |
+| Trade close detection (sign flip) | Phase 26.1 |
+| Drawdown = peak - current | Phase 26.1 |
+| `TRUTH_REPORT_SCHEMA_VERSION: "1"` | Phase 26.2 |
+| `StrategyTruthReport` canonical JSON structure | Phase 26.2 |
+| `StrategyMetrics` field semantics | Phase 26.2 |
+| i128 as decimal strings in JSON | Phase 26.2 |
+| win_rate as "0.XX" format | Phase 26.2 |
+| Digest = SHA-256 of canonical JSON with digest="" | Phase 26.2 |
+| net_pnl = equity_mantissa (cash evolution) | Phase 26.2 |
+| gross_pnl = realized_pnl_delta sum | Phase 26.2 |
+| Text summary uses raw ts_ns | Phase 26.2 |
 
 ---
 
