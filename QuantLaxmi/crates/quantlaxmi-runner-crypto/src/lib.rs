@@ -2026,6 +2026,8 @@ async fn run_backtest(
         admission_mismatch_policy: admission_mismatch_policy.to_string(),
         strategy_spec: None, // Phase 22C: CLI doesn't set strategy_spec yet
         enforcement,
+        cost_model_path: None, // Phase 25A: CLI doesn't set cost_model yet
+        latency_ticks: 0,      // Phase 25B: CLI defaults to no latency (immediate execution)
     };
 
     let engine = BacktestEngine::new(config);

@@ -12,16 +12,18 @@
 //! - L4: Permission gate is checked BEFORE execution
 
 use quantlaxmi_gates::{ExecutionClass, StrategySpec};
-use quantlaxmi_models::events::{CorrelationContext, DecisionEvent};
 use quantlaxmi_models::SignalRequirements;
+use quantlaxmi_models::events::{CorrelationContext, DecisionEvent};
 use quantlaxmi_runner_crypto::backtest::{
     BacktestConfig, BacktestEngine, ExchangeConfig, PaceMode,
 };
-use quantlaxmi_strategy::{DecisionOutput, OrderIntent, ReplayEvent, Side, Strategy, StrategyContext};
+use quantlaxmi_strategy::{
+    DecisionOutput, OrderIntent, ReplayEvent, Side, Strategy, StrategyContext,
+};
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::fs::File;
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -90,13 +92,7 @@ impl Strategy for MarketOrderStrategy {
 
         // Emit a MARKET order (no limit_price)
         // qty = 1 * 10^(-4) = 0.0001 BTC (small enough to fit in $10k cash)
-        let intent = OrderIntent::market(
-            decision.decision_id,
-            ctx.symbol,
-            Side::Buy,
-            1,
-            -4,
-        );
+        let intent = OrderIntent::market(decision.decision_id, ctx.symbol, Side::Buy, 1, -4);
 
         vec![DecisionOutput::new(decision, intent)]
     }

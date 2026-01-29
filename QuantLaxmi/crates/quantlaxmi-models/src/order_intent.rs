@@ -130,7 +130,11 @@ pub enum OrderRefuseReason {
     PositionLimitExceeded { current: i64, max: i64 },
 
     /// Rate limit exceeded
-    RateLimitExceeded { window_ms: u64, count: u64, max: u64 },
+    RateLimitExceeded {
+        window_ms: u64,
+        count: u64,
+        max: u64,
+    },
 
     /// Execution disabled for strategy
     ExecutionDisabled { strategy_id: String },
@@ -868,7 +872,10 @@ mod tests {
         assert_eq!(parsed.permission, record.permission);
         assert_eq!(parsed.refuse_reason, record.refuse_reason);
         assert_eq!(parsed.correlation_id, record.correlation_id);
-        assert_eq!(parsed.parent_admission_digest, record.parent_admission_digest);
+        assert_eq!(
+            parsed.parent_admission_digest,
+            record.parent_admission_digest
+        );
         assert_eq!(parsed.digest, record.digest);
     }
 

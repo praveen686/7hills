@@ -38,13 +38,15 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use quantlaxmi_gates::g4_admission_determinism::G4AdmissionDeterminismGate;
+use quantlaxmi_gates::g5_order_intent_determinism::G5OrderIntentDeterminismGate;
+use quantlaxmi_gates::g6_execution_fill_determinism::G6ExecutionFillDeterminismGate;
+use quantlaxmi_gates::g7_position_determinism::G7PositionDeterminismGate;
 use quantlaxmi_gates::promotion_pipeline::{
     GateOutcome, GatesSummary, PromotionRecord, g0_output_path, g1_output_path, g2_output_path,
     gates_dir, gates_summary_path, get_git_branch, get_git_clean, get_git_commit, get_hostname,
     promotion_dir, promotion_record_path, session_wal_path, sha256_hex,
 };
-use quantlaxmi_gates::g4_admission_determinism::G4AdmissionDeterminismGate;
-use quantlaxmi_gates::g5_order_intent_determinism::G5OrderIntentDeterminismGate;
 use quantlaxmi_gates::signal_gates::{
     G0SchemaGate, G1DeterminismGate, G2DataIntegrityGate, G3ExecutionContractGate,
     SignalGatesResult, check_names,
@@ -147,6 +149,28 @@ enum Commands {
         replay: PathBuf,
     },
 
+    /// G6: Execution fill determinism gate (compares execution_fills WALs)
+    G6 {
+        /// Path to live WAL file (execution_fills.jsonl)
+        #[arg(long, short = 'l')]
+        live: PathBuf,
+
+        /// Path to replay WAL file (execution_fills.jsonl)
+        #[arg(long, short = 'r')]
+        replay: PathBuf,
+    },
+
+    /// G7: Position determinism gate (compares position_updates WALs)
+    G7 {
+        /// Path to live WAL file (position_updates.jsonl)
+        #[arg(long, short = 'l')]
+        live: PathBuf,
+
+        /// Path to replay WAL file (position_updates.jsonl)
+        #[arg(long, short = 'r')]
+        replay: PathBuf,
+    },
+
     /// Run all gates (without artifact writing)
     All {
         /// Path to signals_manifest.json
@@ -188,6 +212,22 @@ enum Commands {
         /// Path to replay order_intent.jsonl for G5 (required if g5-live is provided)
         #[arg(long)]
         g5_replay: Option<PathBuf>,
+
+        /// Path to live execution_fills.jsonl for G6 (optional)
+        #[arg(long)]
+        g6_live: Option<PathBuf>,
+
+        /// Path to replay execution_fills.jsonl for G6 (required if g6-live is provided)
+        #[arg(long)]
+        g6_replay: Option<PathBuf>,
+
+        /// Path to live position_updates.jsonl for G7 (optional)
+        #[arg(long)]
+        g7_live: Option<PathBuf>,
+
+        /// Path to replay position_updates.jsonl for G7 (required if g7-live is provided)
+        #[arg(long)]
+        g7_replay: Option<PathBuf>,
     },
 
     /// Phase 20D: Run gates and write promotion artifacts
@@ -265,6 +305,8 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
         ),
         Commands::G4 { live, replay } => run_g4(&live, &replay, cli.format),
         Commands::G5 { live, replay } => run_g5(&live, &replay, cli.format),
+        Commands::G6 { live, replay } => run_g6(&live, &replay, cli.format),
+        Commands::G7 { live, replay } => run_g7(&live, &replay, cli.format),
         Commands::All {
             manifest,
             live,
@@ -276,6 +318,10 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
             g4_replay,
             g5_live,
             g5_replay,
+            g6_live,
+            g6_replay,
+            g7_live,
+            g7_replay,
         } => run_all(
             &manifest,
             live.as_deref(),
@@ -287,6 +333,10 @@ fn run(cli: Cli) -> Result<bool, Box<dyn std::error::Error>> {
             g4_replay.as_deref(),
             g5_live.as_deref(),
             g5_replay.as_deref(),
+            g6_live.as_deref(),
+            g6_replay.as_deref(),
+            g7_live.as_deref(),
+            g7_replay.as_deref(),
             cli.format,
         ),
         Commands::Promote {
@@ -558,6 +608,88 @@ fn run_g5(
     Ok(result.passed)
 }
 
+fn run_g6(
+    live: &Path,
+    replay: &Path,
+    format: OutputFormat,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let result = G6ExecutionFillDeterminismGate::compare(live, replay)
+        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+
+    match format {
+        OutputFormat::Text => {
+            println!(
+                "[{}] {}",
+                quantlaxmi_gates::g6_execution_fill_determinism::check_names::G6_EXECUTION_FILL_PARITY,
+                result.message()
+            );
+            println!(
+                "  Live entries: {}, Replay entries: {}, Matched: {}",
+                result.live_entry_count, result.replay_entry_count, result.matched_count
+            );
+
+            if !result.mismatches.is_empty() {
+                println!("\nMismatches ({}):", result.mismatches.len());
+                for (i, m) in result.mismatches.iter().enumerate() {
+                    if i >= 10 {
+                        println!("  ... and {} more", result.mismatches.len() - 10);
+                        break;
+                    }
+                    println!("  - {}", m.description());
+                }
+            }
+
+            println!("\nG6 {}", if result.passed { "PASSED" } else { "FAILED" });
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+    }
+
+    Ok(result.passed)
+}
+
+fn run_g7(
+    live: &Path,
+    replay: &Path,
+    format: OutputFormat,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let result = G7PositionDeterminismGate::compare(live, replay)
+        .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
+
+    match format {
+        OutputFormat::Text => {
+            println!(
+                "[{}] {}",
+                quantlaxmi_gates::g7_position_determinism::check_names::G7_POSITION_UPDATE_PARITY,
+                result.message()
+            );
+            println!(
+                "  Live entries: {}, Replay entries: {}, Matched: {}",
+                result.live_entry_count, result.replay_entry_count, result.matched_count
+            );
+
+            if !result.mismatches.is_empty() {
+                println!("\nMismatches ({}):", result.mismatches.len());
+                for (i, m) in result.mismatches.iter().enumerate() {
+                    if i >= 10 {
+                        println!("  ... and {} more", result.mismatches.len() - 10);
+                        break;
+                    }
+                    println!("  - {}", m.description());
+                }
+            }
+
+            println!("\nG7 {}", if result.passed { "PASSED" } else { "FAILED" });
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+    }
+
+    Ok(result.passed)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_all(
     manifest: &Path,
@@ -570,6 +702,10 @@ fn run_all(
     g4_replay: Option<&Path>,
     g5_live: Option<&Path>,
     g5_replay: Option<&Path>,
+    g6_live: Option<&Path>,
+    g6_replay: Option<&Path>,
+    g7_live: Option<&Path>,
+    g7_replay: Option<&Path>,
     format: OutputFormat,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let mut combined = SignalGatesResult::new();
@@ -636,12 +772,44 @@ fn run_all(
         (None, None) => None,
     };
 
+    // G6: Run if both g6_live and g6_replay are provided
+    let g6 = match (g6_live, g6_replay) {
+        (Some(l), Some(r)) => Some(
+            G6ExecutionFillDeterminismGate::compare(l, r)
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+        ),
+        (Some(_), None) => {
+            return Err("G6 requires both --g6-live and --g6-replay".into());
+        }
+        (None, Some(_)) => {
+            return Err("G6 requires both --g6-live and --g6-replay".into());
+        }
+        (None, None) => None,
+    };
+
+    // G7: Run if both g7_live and g7_replay are provided
+    let g7 = match (g7_live, g7_replay) {
+        (Some(l), Some(r)) => Some(
+            G7PositionDeterminismGate::compare(l, r)
+                .map_err(|e| Box::<dyn std::error::Error>::from(e))?,
+        ),
+        (Some(_), None) => {
+            return Err("G7 requires both --g7-live and --g7-replay".into());
+        }
+        (None, Some(_)) => {
+            return Err("G7 requires both --g7-live and --g7-replay".into());
+        }
+        (None, None) => None,
+    };
+
     let combined = combined.finalize();
 
-    // Calculate overall pass including G4/G5
+    // Calculate overall pass including G4/G5/G6/G7
     let g4_passed = g4.as_ref().map(|r| r.passed).unwrap_or(true);
     let g5_passed = g5.as_ref().map(|r| r.passed).unwrap_or(true);
-    let all_passed = combined.passed && g4_passed && g5_passed;
+    let g6_passed = g6.as_ref().map(|r| r.passed).unwrap_or(true);
+    let g7_passed = g7.as_ref().map(|r| r.passed).unwrap_or(true);
+    let all_passed = combined.passed && g4_passed && g5_passed && g6_passed && g7_passed;
 
     match format {
         OutputFormat::Text => {
@@ -724,11 +892,47 @@ fn run_all(
                 );
             }
 
+            // G6
+            if let Some(ref r) = g6 {
+                println!(
+                    "\n[{}] {}",
+                    quantlaxmi_gates::g6_execution_fill_determinism::check_names::G6_EXECUTION_FILL_PARITY,
+                    if r.passed { "PASS" } else { "FAIL" }
+                );
+                println!("  {}", r.message());
+                if !r.mismatches.is_empty() {
+                    println!("  Mismatches: {}", r.mismatches.len());
+                }
+            } else {
+                println!(
+                    "\n[{}] SKIPPED (no --g6-live/--g6-replay)",
+                    quantlaxmi_gates::g6_execution_fill_determinism::check_names::G6_EXECUTION_FILL_PARITY
+                );
+            }
+
+            // G7
+            if let Some(ref r) = g7 {
+                println!(
+                    "\n[{}] {}",
+                    quantlaxmi_gates::g7_position_determinism::check_names::G7_POSITION_UPDATE_PARITY,
+                    if r.passed { "PASS" } else { "FAIL" }
+                );
+                println!("  {}", r.message());
+                if !r.mismatches.is_empty() {
+                    println!("  Mismatches: {}", r.mismatches.len());
+                }
+            } else {
+                println!(
+                    "\n[{}] SKIPPED (no --g7-live/--g7-replay)",
+                    quantlaxmi_gates::g7_position_determinism::check_names::G7_POSITION_UPDATE_PARITY
+                );
+            }
+
             let overall = if all_passed { "ALL PASSED" } else { "FAILED" };
             println!("\n=== {} ===", overall);
         }
         OutputFormat::Json => {
-            // Build combined JSON with G4/G5 results
+            // Build combined JSON with G4/G5/G6/G7 results
             let mut result = serde_json::json!({
                 "passed": all_passed,
                 "signal_gates": combined,
@@ -738,6 +942,12 @@ fn run_all(
             }
             if let Some(ref r) = g5 {
                 result["g5"] = serde_json::to_value(r)?;
+            }
+            if let Some(ref r) = g6 {
+                result["g6"] = serde_json::to_value(r)?;
+            }
+            if let Some(ref r) = g7 {
+                result["g7"] = serde_json::to_value(r)?;
             }
             println!("{}", serde_json::to_string_pretty(&result)?);
         }

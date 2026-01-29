@@ -35,6 +35,8 @@ pub mod g3_robustness;
 pub mod g4_admission_determinism;
 pub mod g4_deployability;
 pub mod g5_order_intent_determinism;
+pub mod g6_execution_fill_determinism;
+pub mod g7_position_determinism;
 pub mod intent_shaping;
 pub mod mtm_drawdown;
 pub mod order_permission;
@@ -92,6 +94,12 @@ pub use g4_deployability::{G4Config, G4Deployability};
 pub use g5_order_intent_determinism::{
     G5Mismatch, G5MismatchKind, G5OrderIntentDeterminismGate, G5OrderIntentKey, G5Result,
 };
+pub use g6_execution_fill_determinism::{
+    G6ExecutionFillDeterminismGate, G6ExecutionFillKey, G6Mismatch, G6MismatchKind, G6Result,
+};
+pub use g7_position_determinism::{
+    G7Mismatch, G7MismatchKind, G7PositionDeterminismGate, G7PositionUpdateKey, G7Result,
+};
 pub use intent_shaping::{
     BlockReason, CapReason, INTENT_TRANSFORM_SCHEMA_VERSION, IntentShaper, IntentType,
     ModeRestrictReason, OrderIntentTransform, SHAPING_POLICY_SCHEMA_VERSION, ShapingPolicy,
@@ -102,6 +110,9 @@ pub use mtm_drawdown::{
     EQUITY_POLICY_SCHEMA_VERSION, EquityPolicy, EquityViolationType, MTM_SNAPSHOT_SCHEMA_VERSION,
     MtmEvaluator, MtmMetrics, MtmSnapshot, MtmSnapshotId, PositionValuation, PricePoint,
     PriceSource,
+};
+pub use order_permission::{
+    OrderIntentRef, OrderPermission, OrderPermissionGate, OrderRefuseReason, OrderSide, OrderType,
 };
 pub use portfolio_selector::{
     BucketSelectionResult, IntentId, OrderingRule, PORTFOLIO_INTENT_SCHEMA, PortfolioIntent,
@@ -143,9 +154,6 @@ pub use strategies_manifest::{
 pub use strategy_admission_engine::{
     AdmissionVerdict, StrategyAdmissionEngine, StrategyAdmissionEngineConfig,
     StrategyAdmissionEngineError,
-};
-pub use order_permission::{
-    OrderIntentRef, OrderPermission, OrderPermissionGate, OrderRefuseReason, OrderSide, OrderType,
 };
 
 use chrono::{DateTime, Utc};

@@ -18,7 +18,9 @@ use quantlaxmi_models::{OrderIntentPermission, SignalRequirements};
 use quantlaxmi_runner_crypto::backtest::{
     BacktestConfig, BacktestEngine, ExchangeConfig, PaceMode,
 };
-use quantlaxmi_strategy::{DecisionOutput, OrderIntent, ReplayEvent, Side, Strategy, StrategyContext};
+use quantlaxmi_strategy::{
+    DecisionOutput, OrderIntent, ReplayEvent, Side, Strategy, StrategyContext,
+};
 use quantlaxmi_wal::WalReader;
 
 use std::fs::File;
@@ -86,13 +88,7 @@ impl Strategy for MixedOrderStrategy {
         // Alternate between market (refused) and limit (permitted) orders
         let intent = if count % 2 == 0 {
             // Market order → will be refused by passive spec
-            OrderIntent::market(
-                decision.decision_id,
-                ctx.symbol,
-                Side::Buy,
-                1,
-                -4,
-            )
+            OrderIntent::market(decision.decision_id, ctx.symbol, Side::Buy, 1, -4)
         } else {
             // Limit order → will be permitted by passive spec
             OrderIntent::limit(
@@ -161,13 +157,7 @@ impl Strategy for MarketOnlyStrategy {
         };
 
         // Always emit market order → will be refused
-        let intent = OrderIntent::market(
-            decision.decision_id,
-            ctx.symbol,
-            Side::Buy,
-            1,
-            -4,
-        );
+        let intent = OrderIntent::market(decision.decision_id, ctx.symbol, Side::Buy, 1, -4);
 
         vec![DecisionOutput::new(decision, intent)]
     }

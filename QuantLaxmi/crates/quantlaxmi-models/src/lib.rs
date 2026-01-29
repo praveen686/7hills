@@ -108,11 +108,30 @@ pub use order_intent::{
     OrderIntentRecordBuilder, OrderIntentSide, OrderIntentType, OrderRefuseReason,
 };
 
+// Execution Fill types for WAL observability (Phase 24A)
+pub mod execution_fill;
+pub use execution_fill::{
+    EXECUTION_FILL_SCHEMA_VERSION, ExecutionFillRecord, ExecutionFillRecordBuilder, FillSide,
+    FillType,
+};
+
+// Position Update types for WAL observability (Phase 24D)
+pub mod position_update;
+pub use position_update::{
+    POSITION_UPDATE_SCHEMA_VERSION, PositionUpdateRecord, PositionUpdateRecordBuilder,
+};
+
 // SignalFrame canonical structure (Phase 20A)
 pub mod signal_frame;
 pub use signal_frame::{
     CorrelationId, ExponentKind, Invariant, L1Field, RefuseReason, RequiredL1, SignalFrame,
     signal_frame_from_market,
+};
+
+// Deterministic Cost Model (Phase 25A)
+pub mod cost_model;
+pub use cost_model::{
+    COST_MODEL_SCHEMA_VERSION, CostAdjustments, CostModelV1, CostVenueParamsV1, compute_costs_v1,
 };
 
 /// Market data event from exchange or data feed.

@@ -824,6 +824,8 @@ mod tests {
                 risk_events: 0,
                 admission_events: 0,
                 order_intent_events: 0,
+                execution_fills_events: 0,
+                position_updates_events: 0,
             },
             files,
         };

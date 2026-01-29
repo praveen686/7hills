@@ -37,7 +37,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use quantlaxmi_models::{StrategyAdmissionDecision, StrategyAdmissionOutcome, StrategyRefuseReason};
+use quantlaxmi_models::{
+    StrategyAdmissionDecision, StrategyAdmissionOutcome, StrategyRefuseReason,
+};
 
 use crate::CheckResult;
 
@@ -360,9 +362,16 @@ impl G4AdmissionDeterminismGate {
     /// Returns (map, total_count, parse_errors).
     fn parse_wal(
         path: &Path,
-    ) -> Result<(HashMap<G4DecisionKey, StrategyAdmissionDecision>, usize, Vec<String>), String>
-    {
-        let file = File::open(path).map_err(|e| format!("Cannot open {}: {}", path.display(), e))?;
+    ) -> Result<
+        (
+            HashMap<G4DecisionKey, StrategyAdmissionDecision>,
+            usize,
+            Vec<String>,
+        ),
+        String,
+    > {
+        let file =
+            File::open(path).map_err(|e| format!("Cannot open {}: {}", path.display(), e))?;
         let reader = BufReader::new(file);
 
         let mut map = HashMap::new();
@@ -422,7 +431,9 @@ impl G4AdmissionDeterminismGate {
                     mismatches.push(G4Mismatch::new(key, G4MismatchKind::MissingInReplay));
                 }
                 Some(replay_decision) => {
-                    if let Some(mismatch) = Self::compare_decisions(key, live_decision, replay_decision) {
+                    if let Some(mismatch) =
+                        Self::compare_decisions(key, live_decision, replay_decision)
+                    {
                         mismatches.push(mismatch);
                     } else {
                         matched += 1;
@@ -549,7 +560,11 @@ mod tests {
         }
     }
 
-    fn write_wal(dir: &TempDir, name: &str, decisions: &[StrategyAdmissionDecision]) -> std::path::PathBuf {
+    fn write_wal(
+        dir: &TempDir,
+        name: &str,
+        decisions: &[StrategyAdmissionDecision],
+    ) -> std::path::PathBuf {
         let path = dir.path().join(name);
         let mut file = File::create(&path).unwrap();
         for d in decisions {
@@ -567,10 +582,22 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Admit, vec![]),
-            make_decision("cid2", "strat1", "sig2", StrategyAdmissionOutcome::Refuse, vec![
-                StrategyRefuseReason::SignalNotAdmitted { signal_id: "sig2".to_string() }
-            ]),
+            make_decision(
+                "cid1",
+                "strat1",
+                "sig1",
+                StrategyAdmissionOutcome::Admit,
+                vec![],
+            ),
+            make_decision(
+                "cid2",
+                "strat1",
+                "sig2",
+                StrategyAdmissionOutcome::Refuse,
+                vec![StrategyRefuseReason::SignalNotAdmitted {
+                    signal_id: "sig2".to_string(),
+                }],
+            ),
         ];
 
         let live_path = write_wal(&dir, "live.jsonl", &decisions);
@@ -594,11 +621,29 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         let live_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Admit, vec![]),
-            make_decision("cid2", "strat1", "sig2", StrategyAdmissionOutcome::Admit, vec![]),
+            make_decision(
+                "cid1",
+                "strat1",
+                "sig1",
+                StrategyAdmissionOutcome::Admit,
+                vec![],
+            ),
+            make_decision(
+                "cid2",
+                "strat1",
+                "sig2",
+                StrategyAdmissionOutcome::Admit,
+                vec![],
+            ),
         ];
         let replay_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Admit, vec![]),
+            make_decision(
+                "cid1",
+                "strat1",
+                "sig1",
+                StrategyAdmissionOutcome::Admit,
+                vec![],
+            ),
             // cid2 missing
         ];
 
@@ -624,12 +669,28 @@ mod tests {
     fn test_missing_in_live() {
         let dir = TempDir::new().unwrap();
 
-        let live_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Admit, vec![]),
-        ];
+        let live_decisions = vec![make_decision(
+            "cid1",
+            "strat1",
+            "sig1",
+            StrategyAdmissionOutcome::Admit,
+            vec![],
+        )];
         let replay_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Admit, vec![]),
-            make_decision("cid2", "strat1", "sig2", StrategyAdmissionOutcome::Admit, vec![]),
+            make_decision(
+                "cid1",
+                "strat1",
+                "sig1",
+                StrategyAdmissionOutcome::Admit,
+                vec![],
+            ),
+            make_decision(
+                "cid2",
+                "strat1",
+                "sig2",
+                StrategyAdmissionOutcome::Admit,
+                vec![],
+            ),
         ];
 
         let live_path = write_wal(&dir, "live.jsonl", &live_decisions);
@@ -654,14 +715,22 @@ mod tests {
     fn test_outcome_mismatch() {
         let dir = TempDir::new().unwrap();
 
-        let live_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Admit, vec![]),
-        ];
-        let replay_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Refuse, vec![
-                StrategyRefuseReason::SignalNotAdmitted { signal_id: "sig1".to_string() }
-            ]),
-        ];
+        let live_decisions = vec![make_decision(
+            "cid1",
+            "strat1",
+            "sig1",
+            StrategyAdmissionOutcome::Admit,
+            vec![],
+        )];
+        let replay_decisions = vec![make_decision(
+            "cid1",
+            "strat1",
+            "sig1",
+            StrategyAdmissionOutcome::Refuse,
+            vec![StrategyRefuseReason::SignalNotAdmitted {
+                signal_id: "sig1".to_string(),
+            }],
+        )];
 
         let live_path = write_wal(&dir, "live.jsonl", &live_decisions);
         let replay_path = write_wal(&dir, "replay.jsonl", &replay_decisions);
@@ -671,7 +740,10 @@ mod tests {
         assert!(!result.passed);
         assert_eq!(result.mismatches.len(), 1);
         match &result.mismatches[0].kind {
-            G4MismatchKind::OutcomeMismatch { live_outcome, replay_outcome } => {
+            G4MismatchKind::OutcomeMismatch {
+                live_outcome,
+                replay_outcome,
+            } => {
                 assert_eq!(live_outcome, "admit");
                 assert_eq!(replay_outcome, "refuse");
             }
@@ -687,16 +759,24 @@ mod tests {
     fn test_reasons_mismatch() {
         let dir = TempDir::new().unwrap();
 
-        let live_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Refuse, vec![
-                StrategyRefuseReason::SignalNotAdmitted { signal_id: "sig1".to_string() }
-            ]),
-        ];
-        let replay_decisions = vec![
-            make_decision("cid1", "strat1", "sig1", StrategyAdmissionOutcome::Refuse, vec![
-                StrategyRefuseReason::StrategyNotFound { strategy_id: "strat1".to_string() }
-            ]),
-        ];
+        let live_decisions = vec![make_decision(
+            "cid1",
+            "strat1",
+            "sig1",
+            StrategyAdmissionOutcome::Refuse,
+            vec![StrategyRefuseReason::SignalNotAdmitted {
+                signal_id: "sig1".to_string(),
+            }],
+        )];
+        let replay_decisions = vec![make_decision(
+            "cid1",
+            "strat1",
+            "sig1",
+            StrategyAdmissionOutcome::Refuse,
+            vec![StrategyRefuseReason::StrategyNotFound {
+                strategy_id: "strat1".to_string(),
+            }],
+        )];
 
         let live_path = write_wal(&dir, "live.jsonl", &live_decisions);
         let replay_path = write_wal(&dir, "replay.jsonl", &replay_decisions);
@@ -792,7 +872,11 @@ mod tests {
 
     #[test]
     fn test_mismatch_descriptions() {
-        let key = ("correlation123".to_string(), "strategy1".to_string(), "signal1".to_string());
+        let key = (
+            "correlation123".to_string(),
+            "strategy1".to_string(),
+            "signal1".to_string(),
+        );
 
         let m1 = G4Mismatch::new(&key, G4MismatchKind::MissingInReplay);
         assert!(m1.description().contains("missing in replay"));
@@ -800,10 +884,13 @@ mod tests {
         let m2 = G4Mismatch::new(&key, G4MismatchKind::MissingInLive);
         assert!(m2.description().contains("missing in live"));
 
-        let m3 = G4Mismatch::new(&key, G4MismatchKind::OutcomeMismatch {
-            live_outcome: "admit".to_string(),
-            replay_outcome: "refuse".to_string(),
-        });
+        let m3 = G4Mismatch::new(
+            &key,
+            G4MismatchKind::OutcomeMismatch {
+                live_outcome: "admit".to_string(),
+                replay_outcome: "refuse".to_string(),
+            },
+        );
         assert!(m3.description().contains("admit"));
         assert!(m3.description().contains("refuse"));
     }

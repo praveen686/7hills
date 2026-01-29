@@ -660,7 +660,9 @@ fn option_i64_to_json(opt: &Option<i64>) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use quantlaxmi_models::{OrderIntentRecord, OrderIntentSide, OrderIntentType, OrderRefuseReason};
+    use quantlaxmi_models::{
+        OrderIntentRecord, OrderIntentSide, OrderIntentType, OrderRefuseReason,
+    };
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -1099,7 +1101,10 @@ mod tests {
     fn test_g5_check_names() {
         assert_eq!(check_names::G5_PARSE_LIVE, "g5_parse_live");
         assert_eq!(check_names::G5_PARSE_REPLAY, "g5_parse_replay");
-        assert_eq!(check_names::G5_ORDER_INTENT_PARITY, "g5_order_intent_parity");
+        assert_eq!(
+            check_names::G5_ORDER_INTENT_PARITY,
+            "g5_order_intent_parity"
+        );
     }
 
     // =========================================================================

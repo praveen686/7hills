@@ -50,6 +50,12 @@ pub use quantlaxmi_models::{AdmissionDecision, AdmissionOutcome};
 // Re-export order intent types (Phase 23B)
 pub use quantlaxmi_models::OrderIntentRecord;
 
+// Re-export execution fill types (Phase 24A)
+pub use quantlaxmi_models::ExecutionFillRecord;
+
+// Re-export position update types (Phase 24D)
+pub use quantlaxmi_models::PositionUpdateRecord;
+
 /// WAL record types for polymorphic storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -130,7 +136,13 @@ pub struct WalWriter {
     risk_file: Option<tokio::fs::File>,
     admission_file: Option<tokio::fs::File>,
     order_intent_file: Option<tokio::fs::File>,
+    execution_fills_file: Option<tokio::fs::File>,
+    position_updates_file: Option<tokio::fs::File>,
     counts: WalCounts,
+    /// Track last seen seq per session for monotonicity enforcement (execution fills)
+    execution_fills_last_seq: std::collections::HashMap<String, u64>,
+    /// Track last seen seq per session for monotonicity enforcement (position updates)
+    position_updates_last_seq: std::collections::HashMap<String, u64>,
 }
 
 /// Event counts for manifest.
@@ -143,6 +155,8 @@ pub struct WalCounts {
     pub risk_events: u64,
     pub admission_events: u64,
     pub order_intent_events: u64,
+    pub execution_fills_events: u64,
+    pub position_updates_events: u64,
 }
 
 impl WalWriter {
@@ -162,7 +176,11 @@ impl WalWriter {
             risk_file: None,
             admission_file: None,
             order_intent_file: None,
+            execution_fills_file: None,
+            position_updates_file: None,
             counts: WalCounts::default(),
+            execution_fills_last_seq: std::collections::HashMap::new(),
+            position_updates_last_seq: std::collections::HashMap::new(),
         })
     }
 
@@ -340,13 +358,110 @@ impl WalWriter {
             self.order_intent_file.as_mut().unwrap()
         };
 
-        let mut line =
-            serde_json::to_vec(&record).context("serialize order intent record")?;
+        let mut line = serde_json::to_vec(&record).context("serialize order intent record")?;
         line.push(b'\n');
         file.write_all(&line)
             .await
             .context("write order intent record")?;
         self.counts.order_intent_events += 1;
+        Ok(())
+    }
+
+    /// Write an execution fill record (Phase 24A).
+    ///
+    /// Written BEFORE updating position/ledger state — every fill produces
+    /// an auditable artifact regardless of fill type (full/partial).
+    ///
+    /// Enforces monotonic seq within each session_id (duplicate key = hard error).
+    pub async fn write_execution_fill(&mut self, record: ExecutionFillRecord) -> Result<()> {
+        // Enforce monotonic seq per session (duplicate key = hard error)
+        let last_seq = self
+            .execution_fills_last_seq
+            .get(&record.session_id)
+            .copied();
+        if let Some(prev) = last_seq {
+            if record.seq <= prev {
+                anyhow::bail!(
+                    "Execution fill seq monotonicity violation: session_id={}, prev_seq={}, new_seq={} (duplicate key = broken seq monotonicity)",
+                    record.session_id,
+                    prev,
+                    record.seq
+                );
+            }
+        }
+        self.execution_fills_last_seq
+            .insert(record.session_id.clone(), record.seq);
+
+        let file = if let Some(ref mut f) = self.execution_fills_file {
+            f
+        } else {
+            let path = self.session_dir.join("wal/execution_fills.jsonl");
+            self.execution_fills_file = Some(
+                tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .await
+                    .context("open execution_fills WAL")?,
+            );
+            self.execution_fills_file.as_mut().unwrap()
+        };
+
+        let mut line = serde_json::to_vec(&record).context("serialize execution fill record")?;
+        line.push(b'\n');
+        file.write_all(&line)
+            .await
+            .context("write execution fill record")?;
+        self.counts.execution_fills_events += 1;
+        Ok(())
+    }
+
+    /// Write a position update record (Phase 24D).
+    ///
+    /// Records the post-state snapshot and deltas after applying a fill.
+    /// Written AFTER state update, BEFORE callbacks that observe the updated state.
+    ///
+    /// Enforces monotonic seq within each session_id (duplicate key = hard error).
+    pub async fn write_position_update(&mut self, record: PositionUpdateRecord) -> Result<()> {
+        // Enforce monotonic seq per session (duplicate key = hard error)
+        let last_seq = self
+            .position_updates_last_seq
+            .get(&record.session_id)
+            .copied();
+        if let Some(prev) = last_seq {
+            if record.seq <= prev {
+                anyhow::bail!(
+                    "Position update seq monotonicity violation: session_id={}, prev_seq={}, new_seq={} (duplicate key = broken seq monotonicity)",
+                    record.session_id,
+                    prev,
+                    record.seq
+                );
+            }
+        }
+        self.position_updates_last_seq
+            .insert(record.session_id.clone(), record.seq);
+
+        let file = if let Some(ref mut f) = self.position_updates_file {
+            f
+        } else {
+            let path = self.session_dir.join("wal/position_updates.jsonl");
+            self.position_updates_file = Some(
+                tokio::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .await
+                    .context("open position_updates WAL")?,
+            );
+            self.position_updates_file.as_mut().unwrap()
+        };
+
+        let mut line = serde_json::to_vec(&record).context("serialize position update record")?;
+        line.push(b'\n');
+        file.write_all(&line)
+            .await
+            .context("write position update record")?;
+        self.counts.position_updates_events += 1;
         Ok(())
     }
 
@@ -373,6 +488,12 @@ impl WalWriter {
         if let Some(ref mut f) = self.order_intent_file {
             f.flush().await?;
         }
+        if let Some(ref mut f) = self.execution_fills_file {
+            f.flush().await?;
+        }
+        if let Some(ref mut f) = self.position_updates_file {
+            f.flush().await?;
+        }
         Ok(())
     }
 
@@ -397,6 +518,11 @@ impl WalWriter {
             ("risk.jsonl", self.counts.risk_events),
             ("signals_admission.jsonl", self.counts.admission_events),
             ("order_intent.jsonl", self.counts.order_intent_events),
+            ("execution_fills.jsonl", self.counts.execution_fills_events),
+            (
+                "position_updates.jsonl",
+                self.counts.position_updates_events,
+            ),
         ] {
             let path = wal_dir.join(name);
             if path.exists() {
@@ -503,6 +629,16 @@ impl WalReader {
     /// Read order intent records (Phase 23B).
     pub fn read_order_intent_records(&self) -> Result<Vec<OrderIntentRecord>> {
         self.read_jsonl("wal/order_intent.jsonl")
+    }
+
+    /// Read execution fill records (Phase 24A).
+    pub fn read_execution_fills(&self) -> Result<Vec<ExecutionFillRecord>> {
+        self.read_jsonl("wal/execution_fills.jsonl")
+    }
+
+    /// Read position update records (Phase 24D).
+    pub fn read_position_updates(&self) -> Result<Vec<PositionUpdateRecord>> {
+        self.read_jsonl("wal/position_updates.jsonl")
     }
 
     /// Read JSONL file into typed records.
@@ -1833,8 +1969,8 @@ mod tests {
     #[tokio::test]
     async fn test_order_intent_wal_roundtrip() {
         use quantlaxmi_models::{
-            ORDER_INTENT_SCHEMA_VERSION, OrderIntentPermission, OrderIntentRecord,
-            OrderIntentSide, OrderIntentType, OrderRefuseReason,
+            ORDER_INTENT_SCHEMA_VERSION, OrderIntentPermission, OrderIntentRecord, OrderIntentSide,
+            OrderIntentType, OrderRefuseReason,
         };
 
         let dir = tempfile::tempdir().unwrap();
@@ -1975,7 +2111,11 @@ mod tests {
         let reader = WalReader::open(&session_dir).unwrap();
         let records = reader.read_order_intent_records().unwrap();
 
-        assert_eq!(records.len(), 2, "File should have 2 records after reopen + write");
+        assert_eq!(
+            records.len(),
+            2,
+            "File should have 2 records after reopen + write"
+        );
         assert_eq!(records[0].seq, 1);
         assert_eq!(records[1].seq, 2);
     }
@@ -2007,7 +2147,10 @@ mod tests {
         let file_info = manifest.files.get("order_intent.jsonl").unwrap();
         assert_eq!(file_info.path, "wal/order_intent.jsonl");
         assert_eq!(file_info.record_count, 1);
-        assert!(!file_info.sha256.is_empty(), "SHA256 hash should be computed");
+        assert!(
+            !file_info.sha256.is_empty(),
+            "SHA256 hash should be computed"
+        );
         assert!(file_info.bytes_len > 0, "File should have content");
 
         // Verify integrity
@@ -2015,8 +2158,525 @@ mod tests {
         let report = reader.verify_integrity(&manifest).unwrap();
         assert!(report.passed, "Integrity check should pass");
         assert!(
-            report.verified_files.contains(&"order_intent.jsonl".to_string()),
+            report
+                .verified_files
+                .contains(&"order_intent.jsonl".to_string()),
             "order_intent.jsonl should be verified"
+        );
+    }
+
+    // =========================================================================
+    // Phase 24A: Execution Fill WAL Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_execution_fill_wal_roundtrip() {
+        use quantlaxmi_models::{ExecutionFillRecord, FillSide, FillType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write a full fill with fee
+        let full_fill = ExecutionFillRecord::builder("test_strat", "BTCUSDT")
+            .ts_ns(1706400000000000000)
+            .session_id("backtest_123")
+            .seq(1)
+            .parent_intent_seq(5)
+            .parent_intent_digest("abc123def456")
+            .side(FillSide::Buy)
+            .qty(100000000, -8)
+            .price(4200000, -2)
+            .fee(420, -2)
+            .venue("sim")
+            .correlation_id("event_seq:99")
+            .fill_type(FillType::Full)
+            .build();
+        writer
+            .write_execution_fill(full_fill.clone())
+            .await
+            .unwrap();
+
+        // Write a partial fill without fee
+        let partial_fill = ExecutionFillRecord::builder("test_strat", "ETHUSDT")
+            .ts_ns(1706400001000000000)
+            .session_id("backtest_123")
+            .seq(2)
+            .parent_intent_seq(6)
+            .side(FillSide::Sell)
+            .qty(50000000, -8)
+            .price(250000, -2)
+            // No fee
+            .venue("binance")
+            .correlation_id("event_seq:100")
+            .fill_type(FillType::Partial)
+            .build();
+        writer
+            .write_execution_fill(partial_fill.clone())
+            .await
+            .unwrap();
+
+        let manifest = writer.finalize().await.unwrap();
+
+        // Verify manifest has file info
+        assert!(
+            manifest.files.contains_key("execution_fills.jsonl"),
+            "Manifest should contain execution_fills.jsonl"
+        );
+
+        // Read back and verify
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_execution_fills().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0], full_fill);
+        assert_eq!(records[1], partial_fill);
+    }
+
+    #[tokio::test]
+    async fn test_execution_fill_wal_monotonic_seq_enforcement() {
+        use quantlaxmi_models::{ExecutionFillRecord, FillSide, FillType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write seq=1
+        let fill1 = ExecutionFillRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(1)
+            .side(FillSide::Buy)
+            .qty(100, -8)
+            .price(5000, -2)
+            .venue("sim")
+            .correlation_id("c1")
+            .fill_type(FillType::Full)
+            .build();
+        writer.write_execution_fill(fill1).await.unwrap();
+
+        // Try to write duplicate seq=1 (should fail)
+        let fill_dup = ExecutionFillRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(1) // Duplicate!
+            .side(FillSide::Sell)
+            .qty(100, -8)
+            .price(5001, -2)
+            .venue("sim")
+            .correlation_id("c2")
+            .fill_type(FillType::Full)
+            .build();
+        let result = writer.write_execution_fill(fill_dup).await;
+        assert!(result.is_err(), "Duplicate seq should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("monotonicity violation"),
+            "Error should mention monotonicity: {}",
+            err_msg
+        );
+
+        // Try to write seq=0 (backwards, should fail)
+        let fill_backwards = ExecutionFillRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(0) // Backwards!
+            .side(FillSide::Buy)
+            .qty(50, -8)
+            .price(4999, -2)
+            .venue("sim")
+            .correlation_id("c3")
+            .fill_type(FillType::Partial)
+            .build();
+        let result = writer.write_execution_fill(fill_backwards).await;
+        assert!(result.is_err(), "Backwards seq should fail");
+
+        // seq=2 should succeed
+        let fill2 = ExecutionFillRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(2)
+            .side(FillSide::Buy)
+            .qty(100, -8)
+            .price(5002, -2)
+            .venue("sim")
+            .correlation_id("c4")
+            .fill_type(FillType::Full)
+            .build();
+        writer.write_execution_fill(fill2).await.unwrap();
+
+        // Verify only 2 records written (seq=1 and seq=2)
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_execution_fills().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].seq, 1);
+        assert_eq!(records[1].seq, 2);
+    }
+
+    #[tokio::test]
+    async fn test_execution_fill_wal_different_sessions() {
+        use quantlaxmi_models::{ExecutionFillRecord, FillSide, FillType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Different sessions can have same seq
+        let fill_a1 = ExecutionFillRecord::builder("strat", "BTCUSDT")
+            .session_id("session_a")
+            .seq(1)
+            .side(FillSide::Buy)
+            .qty(100, -8)
+            .price(5000, -2)
+            .venue("sim")
+            .correlation_id("c1")
+            .fill_type(FillType::Full)
+            .build();
+        writer.write_execution_fill(fill_a1).await.unwrap();
+
+        let fill_b1 = ExecutionFillRecord::builder("strat", "BTCUSDT")
+            .session_id("session_b")
+            .seq(1) // Same seq, different session - OK
+            .side(FillSide::Sell)
+            .qty(200, -8)
+            .price(5001, -2)
+            .venue("sim")
+            .correlation_id("c2")
+            .fill_type(FillType::Full)
+            .build();
+        writer.write_execution_fill(fill_b1).await.unwrap();
+
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_execution_fills().unwrap();
+        assert_eq!(records.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_execution_fill_wal_manifest_includes_hash() {
+        use quantlaxmi_models::{ExecutionFillRecord, FillSide, FillType};
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        let fill = ExecutionFillRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(1)
+            .side(FillSide::Buy)
+            .qty(100, -8)
+            .price(5000, -2)
+            .venue("sim")
+            .correlation_id("c1")
+            .fill_type(FillType::Full)
+            .build();
+        writer.write_execution_fill(fill).await.unwrap();
+
+        let manifest = writer.finalize().await.unwrap();
+
+        // Verify manifest has file info
+        let file_info = manifest.files.get("execution_fills.jsonl").unwrap();
+        assert_eq!(file_info.path, "wal/execution_fills.jsonl");
+        assert_eq!(file_info.record_count, 1);
+        assert!(
+            !file_info.sha256.is_empty(),
+            "SHA256 hash should be computed"
+        );
+        assert!(file_info.bytes_len > 0, "File should have content");
+
+        // Verify integrity
+        let reader = WalReader::open(&session_dir).unwrap();
+        let report = reader.verify_integrity(&manifest).unwrap();
+        assert!(report.passed, "Integrity check should pass");
+        assert!(
+            report
+                .verified_files
+                .contains(&"execution_fills.jsonl".to_string()),
+            "execution_fills.jsonl should be verified"
+        );
+    }
+
+    // =========================================================================
+    // Phase 24D: Position Update WAL Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_position_update_wal_roundtrip() {
+        use quantlaxmi_models::PositionUpdateRecord;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write a buy position update
+        let buy_update = PositionUpdateRecord::builder("strat_a", "BTCUSDT")
+            .ts_ns(1706400000000000000)
+            .session_id("test_session")
+            .seq(1)
+            .correlation_id("corr_1")
+            .fill_seq(1)
+            .position_qty(100000000, -8) // 1 BTC
+            .avg_price(4200000, -2) // $42,000
+            .cash_delta(-4200000, -2) // Spent $42,000
+            .realized_pnl_delta(0, -2)
+            .fee(420, -2) // $4.20 fee
+            .venue("sim")
+            .build();
+        writer
+            .write_position_update(buy_update.clone())
+            .await
+            .unwrap();
+
+        // Write a sell position update (close to flat)
+        let sell_update = PositionUpdateRecord::builder("strat_a", "BTCUSDT")
+            .ts_ns(1706400001000000000)
+            .session_id("test_session")
+            .seq(2)
+            .correlation_id("corr_2")
+            .fill_seq(2)
+            .position_qty(0, -8) // Flat
+            .avg_price_flat(-2)
+            .cash_delta(4300000, -2) // Received $43,000
+            .realized_pnl_delta(100000, -2) // $1,000 profit
+            .fee(430, -2) // $4.30 fee
+            .venue("sim")
+            .build();
+        writer
+            .write_position_update(sell_update.clone())
+            .await
+            .unwrap();
+
+        writer.finalize().await.unwrap();
+
+        // Read back
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_position_updates().unwrap();
+
+        assert_eq!(records.len(), 2);
+
+        // Verify buy record
+        assert_eq!(records[0].strategy_id, "strat_a");
+        assert_eq!(records[0].symbol, "BTCUSDT");
+        assert_eq!(records[0].seq, 1);
+        assert_eq!(records[0].fill_seq, 1);
+        assert_eq!(records[0].position_qty_mantissa, 100000000);
+        assert_eq!(records[0].avg_price_mantissa, Some(4200000));
+        assert!(records[0].cash_delta_mantissa < 0); // Negative for buy
+        assert_eq!(records[0].digest, buy_update.digest);
+
+        // Verify sell record
+        assert_eq!(records[1].seq, 2);
+        assert_eq!(records[1].position_qty_mantissa, 0);
+        assert_eq!(records[1].avg_price_mantissa, None); // Flat
+        assert!(records[1].cash_delta_mantissa > 0); // Positive for sell
+        assert!(records[1].realized_pnl_delta_mantissa > 0);
+        assert_eq!(records[1].digest, sell_update.digest);
+    }
+
+    #[tokio::test]
+    async fn test_position_update_wal_append_only() {
+        use quantlaxmi_models::PositionUpdateRecord;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        // First writer
+        {
+            let mut writer = WalWriter::new(&session_dir).await.unwrap();
+            let update1 = PositionUpdateRecord::builder("strat", "BTCUSDT")
+                .session_id("sess")
+                .seq(1)
+                .fill_seq(1)
+                .position_qty(100, -8)
+                .avg_price(5000, -2)
+                .cash_delta(-5000, -2)
+                .realized_pnl_delta(0, -2)
+                .venue("sim")
+                .build();
+            writer.write_position_update(update1).await.unwrap();
+            writer.finalize().await.unwrap();
+        }
+
+        // Second writer (append)
+        {
+            let mut writer = WalWriter::new(&session_dir).await.unwrap();
+            let update2 = PositionUpdateRecord::builder("strat", "BTCUSDT")
+                .session_id("sess")
+                .seq(2)
+                .fill_seq(2)
+                .position_qty(200, -8)
+                .avg_price(5000, -2)
+                .cash_delta(-5000, -2)
+                .realized_pnl_delta(0, -2)
+                .venue("sim")
+                .build();
+            writer.write_position_update(update2).await.unwrap();
+            writer.finalize().await.unwrap();
+        }
+
+        // Read back - should have 2 records
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_position_updates().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].seq, 1);
+        assert_eq!(records[1].seq, 2);
+    }
+
+    #[tokio::test]
+    async fn test_position_update_monotonic_seq_enforced() {
+        use quantlaxmi_models::PositionUpdateRecord;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Write seq=1
+        let update1 = PositionUpdateRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(1)
+            .fill_seq(1)
+            .position_qty(100, -8)
+            .avg_price(5000, -2)
+            .cash_delta(-5000, -2)
+            .realized_pnl_delta(0, -2)
+            .venue("sim")
+            .build();
+        writer.write_position_update(update1).await.unwrap();
+
+        // Try duplicate seq=1 (should fail)
+        let update_dup = PositionUpdateRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(1) // Duplicate!
+            .fill_seq(2)
+            .position_qty(200, -8)
+            .avg_price(5000, -2)
+            .cash_delta(-5000, -2)
+            .realized_pnl_delta(0, -2)
+            .venue("sim")
+            .build();
+        let result = writer.write_position_update(update_dup).await;
+        assert!(result.is_err(), "Duplicate seq should fail");
+        assert!(
+            result.unwrap_err().to_string().contains("monotonicity"),
+            "Error should mention monotonicity"
+        );
+
+        // Try backwards seq (should fail)
+        let update_backwards = PositionUpdateRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(0) // Backwards!
+            .fill_seq(3)
+            .position_qty(300, -8)
+            .avg_price(5000, -2)
+            .cash_delta(-5000, -2)
+            .realized_pnl_delta(0, -2)
+            .venue("sim")
+            .build();
+        let result = writer.write_position_update(update_backwards).await;
+        assert!(result.is_err(), "Backwards seq should fail");
+
+        // seq=2 should succeed
+        let update2 = PositionUpdateRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(2)
+            .fill_seq(4)
+            .position_qty(400, -8)
+            .avg_price(5000, -2)
+            .cash_delta(-5000, -2)
+            .realized_pnl_delta(0, -2)
+            .venue("sim")
+            .build();
+        writer.write_position_update(update2).await.unwrap();
+
+        // Verify only 2 records written (seq=1 and seq=2)
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_position_updates().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].seq, 1);
+        assert_eq!(records[1].seq, 2);
+    }
+
+    #[tokio::test]
+    async fn test_position_update_different_sessions() {
+        use quantlaxmi_models::PositionUpdateRecord;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        // Different sessions can have same seq
+        let update_a1 = PositionUpdateRecord::builder("strat", "BTCUSDT")
+            .session_id("session_a")
+            .seq(1)
+            .fill_seq(1)
+            .position_qty(100, -8)
+            .avg_price(5000, -2)
+            .cash_delta(-5000, -2)
+            .realized_pnl_delta(0, -2)
+            .venue("sim")
+            .build();
+        writer.write_position_update(update_a1).await.unwrap();
+
+        let update_b1 = PositionUpdateRecord::builder("strat", "BTCUSDT")
+            .session_id("session_b")
+            .seq(1) // Same seq, different session - OK
+            .fill_seq(1)
+            .position_qty(200, -8)
+            .avg_price(5001, -2)
+            .cash_delta(-5001, -2)
+            .realized_pnl_delta(0, -2)
+            .venue("sim")
+            .build();
+        writer.write_position_update(update_b1).await.unwrap();
+
+        let reader = WalReader::open(&session_dir).unwrap();
+        let records = reader.read_position_updates().unwrap();
+        assert_eq!(records.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_position_update_manifest_includes_hash() {
+        use quantlaxmi_models::PositionUpdateRecord;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let session_dir = temp_dir.path().join("sess1");
+
+        let mut writer = WalWriter::new(&session_dir).await.unwrap();
+
+        let update = PositionUpdateRecord::builder("strat", "BTCUSDT")
+            .session_id("sess")
+            .seq(1)
+            .fill_seq(1)
+            .position_qty(100, -8)
+            .avg_price(5000, -2)
+            .cash_delta(-5000, -2)
+            .realized_pnl_delta(0, -2)
+            .venue("sim")
+            .build();
+        writer.write_position_update(update).await.unwrap();
+
+        let manifest = writer.finalize().await.unwrap();
+
+        // Verify manifest has file info
+        let file_info = manifest.files.get("position_updates.jsonl").unwrap();
+        assert_eq!(file_info.path, "wal/position_updates.jsonl");
+        assert_eq!(file_info.record_count, 1);
+        assert!(
+            !file_info.sha256.is_empty(),
+            "SHA256 hash should be computed"
+        );
+        assert!(file_info.bytes_len > 0, "File should have content");
+
+        // Verify integrity
+        let reader = WalReader::open(&session_dir).unwrap();
+        let report = reader.verify_integrity(&manifest).unwrap();
+        assert!(report.passed, "Integrity check should pass");
+        assert!(
+            report
+                .verified_files
+                .contains(&"position_updates.jsonl".to_string()),
+            "position_updates.jsonl should be verified"
         );
     }
 }

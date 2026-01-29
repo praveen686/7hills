@@ -12,7 +12,9 @@
 //! - Stable sort: segments by ID, strategies by name
 //! - Canonical JSON serialization (typed structs only)
 
-use crate::backtest::{BacktestConfig, BacktestEngine, EnforcementConfig, ExchangeConfig, PaceMode};
+use crate::backtest::{
+    BacktestConfig, BacktestEngine, EnforcementConfig, ExchangeConfig, PaceMode,
+};
 use crate::segment_manifest::SegmentManifest;
 use anyhow::{Context, Result};
 use quantlaxmi_models::tournament::{
@@ -387,6 +389,8 @@ async fn run_single_evaluation(
         admission_mismatch_policy: "fail".to_string(),
         strategy_spec: None, // Phase 22C: No permission gating in tournament mode
         enforcement: EnforcementConfig::default(), // Phase 22E: Dev mode for tournaments
+        cost_model_path: None, // Phase 25A: No cost model for tournaments (use fill.fee as-is)
+        latency_ticks: 0,    // Phase 25B: No latency in tournament mode (immediate execution)
     };
 
     let engine = BacktestEngine::new(backtest_config);

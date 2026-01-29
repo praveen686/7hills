@@ -1,8 +1,8 @@
 # QuantLaxmi Phase Status
 ## Current Implementation State
 
-**Last Updated:** 2026-01-28
-**Current Phase:** 23A Complete (G4 Admission Determinism Gate)
+**Last Updated:** 2026-01-29
+**Current Phase:** 25B Complete (Latency Buckets)
 
 ---
 
@@ -44,6 +44,149 @@
 | 22D | Permission Enforcement Integration | ✅ Complete | 2026-01-28 |
 | 22E | Runner CLI/Config + Operational Docs | ✅ Complete | 2026-01-28 |
 | 23A | G4 Admission Determinism Gate | ✅ Complete | 2026-01-28 |
+| 25A | Deterministic Cost Model | ✅ Complete | 2026-01-29 |
+| 25B | Latency Buckets | ✅ Complete | 2026-01-29 |
+
+---
+
+## Phase 25A: Deterministic Cost Model (Complete)
+
+**Goal:** Introduce post-hoc cost adjustments (slippage, spread, fee override) computed deterministically from fill data.
+
+### Files Created
+- `crates/quantlaxmi-models/src/cost_model.rs` — Cost model types and computation
+- `crates/quantlaxmi-runner-crypto/tests/phase25a_cost_model_integration.rs` — 15 integration tests
+
+### Key Types
+```rust
+pub const COST_MODEL_SCHEMA_VERSION: &str = "1";
+
+pub struct CostModelV1 {
+    pub schema_version: String,
+    pub venues: BTreeMap<String, CostVenueParamsV1>,
+}
+
+pub struct CostVenueParamsV1 {
+    pub slippage_bps: i32,      // Slippage in basis points
+    pub spread_half_bps: i32,   // Half-spread in basis points
+    pub fee_bps_override: Option<i32>, // Override exchange fee
+}
+
+pub struct CostAdjustments {
+    pub extra_fee_mantissa: i64,    // fee_override - fill.fee (can be negative)
+    pub slippage_cost_mantissa: i64,
+    pub spread_cost_mantissa: i64,
+}
+
+/// Pure deterministic cost computation
+pub fn compute_costs_v1(
+    venue: &str,
+    symbol: &str,
+    notional_abs_mantissa: i128,
+    fill_fee_mantissa: i64,
+    model: &CostModelV1,
+) -> CostAdjustments;
+```
+
+### Config Field
+```rust
+pub struct BacktestConfig {
+    // ...
+    pub cost_model_path: Option<PathBuf>, // Phase 25A
+}
+```
+
+### Cash Delta Computation (with costs)
+```rust
+// effective_fee_delta = fill.fee + extra_fee_mantissa
+// cash_delta = ±notional - effective_fee_delta - slippage - spread
+```
+
+### Tests
+- 12 unit tests in `cost_model.rs`
+- 15 integration tests in `phase25a_cost_model_integration.rs`
+
+### Core Invariants
+1. Zero-cost model produces identical results to baseline (no adjustment)
+2. All cost math in i128 internally, boundary casts to i64
+3. Negative bps clamped to 0
+4. Unknown venue defaults to zero costs
+5. Fee override can be negative (rebate)
+6. Same inputs always produce same outputs (determinism)
+
+---
+
+## Phase 25B: Latency Buckets (Complete)
+
+**Goal:** Introduce deterministic delay between OrderIntent and fill execution for realistic simulation.
+
+### Files Modified
+- `crates/quantlaxmi-runner-crypto/src/backtest.rs` — Latency bucket state machine
+- `crates/quantlaxmi-runner-crypto/src/lib.rs` — CLI config
+- `crates/quantlaxmi-runner-crypto/src/tournament.rs` — Tournament config
+
+### Files Created
+- `crates/quantlaxmi-runner-crypto/tests/phase25b_latency_buckets_integration.rs` — 13 integration tests
+
+### Key Types
+```rust
+/// Pending intent awaiting execution
+#[derive(Clone, Debug)]
+struct PendingIntent {
+    scheduled_tick: u64,           // sim_tick when eligible for execution
+    local_intent: OrderIntent,
+    parent_decision_id: Uuid,
+    intent_seq: u64,
+    intent_digest: String,
+    correlation_id: String,
+}
+```
+
+### Config Field
+```rust
+pub struct BacktestConfig {
+    // ...
+    #[serde(default)]
+    pub latency_ticks: u32,  // Phase 25B: 0 = immediate (baseline)
+}
+```
+
+### State Variables
+```rust
+let mut sim_tick: u64 = 0;
+let mut pending_intents: VecDeque<PendingIntent> = VecDeque::new();
+let latency_ticks = self.config.latency_ticks as u64;
+let mut last_drain_ts: DateTime<Utc> = DateTime::UNIX_EPOCH;
+```
+
+### Execution Flow
+1. **Enqueue**: `scheduled_tick = sim_tick + latency_ticks`
+2. **Drain**: At start of each event, drain intents where `scheduled_tick <= sim_tick`
+3. **Immediate drain**: When `latency_ticks == 0`, drain immediately after enqueue
+4. **End-of-run drain**: Flush remaining intents using `last_drain_ts`
+5. **Increment**: `sim_tick += 1` at end of each event loop iteration
+
+### Latency Values
+- `0` = Baseline behavior (immediate execution)
+- `1` = One tick delay
+- `3` = Three tick delay
+
+### Tests
+13 integration tests covering:
+- Default latency_ticks is 0
+- Scheduling logic
+- Drain condition
+- FIFO ordering preservation
+- End-of-run drain
+- Determinism verification
+
+### Core Invariants
+1. `latency_ticks=0` preserves baseline behavior exactly
+2. Uses `sim_tick` counter (not wall-clock) for deterministic scheduling
+3. FIFO ordering of pending intents preserved
+4. End-of-run drain uses `last_drain_ts` (not `Utc::now()`)
+5. All math deterministic — same inputs produce same outputs
+6. Strategy still receives `on_fill()` notifications for delayed fills
 
 ---
 
@@ -732,13 +875,13 @@ pub struct PromotionDecision {
 | Crate | Tests | Status |
 |-------|-------|--------|
 | quantlaxmi-events | 184 | ✅ All passing |
-| quantlaxmi-models | 106 | ✅ All passing |
+| quantlaxmi-models | 118 | ✅ All passing |
 | quantlaxmi-gates | 231 | ✅ All passing |
-| quantlaxmi-runner-crypto | 70 | ✅ All passing |
+| quantlaxmi-runner-crypto | 98 | ✅ All passing |
 | quantlaxmi-strategy | 39 | ✅ All passing |
 | quantlaxmi-wal | 26 | ✅ All passing |
-| Other crates | 166 | ✅ All passing |
-| **Workspace Total** | 822 | ✅ All passing |
+| Other crates | 293 | ✅ All passing |
+| **Workspace Total** | 989 | ✅ All passing |
 
 ---
 
@@ -1011,6 +1154,20 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | `G4_*` check names | Phase 23A |
 | `gate-check g4` CLI semantics | Phase 23A |
 | Empty correlation_id → parse error | Phase 23A |
+| `COST_MODEL_SCHEMA_VERSION: "1"` | Phase 25A |
+| `CostModelV1` canonical structure | Phase 25A |
+| `CostVenueParamsV1` field semantics | Phase 25A |
+| `CostAdjustments` field semantics | Phase 25A |
+| `compute_costs_v1()` pure function signature | Phase 25A |
+| Cost math in i128 internally | Phase 25A |
+| Negative bps clamped to 0 | Phase 25A |
+| `BacktestConfig.latency_ticks` default = 0 | Phase 25B |
+| `PendingIntent` struct fields | Phase 25B |
+| `scheduled_tick = sim_tick + latency_ticks` | Phase 25B |
+| Drain condition: `scheduled_tick <= sim_tick` | Phase 25B |
+| FIFO ordering preservation | Phase 25B |
+| End-of-run drain uses `last_drain_ts` (not wall-clock) | Phase 25B |
+| `sim_tick` increment at end of event loop | Phase 25B |
 
 ---
 

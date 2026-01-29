@@ -24,12 +24,13 @@ use quantlaxmi_gates::{
     OrderType as GateOrderType, StrategySpec,
 };
 use quantlaxmi_models::{
-    AdmissionDecision, AdmissionOutcome, OrderIntentRecord, OrderIntentSide, OrderIntentType,
-    OrderRefuseReason, SignalRequirements,
+    AdmissionDecision, AdmissionOutcome, CostModelV1, ExecutionFillRecord, FillSide, FillType,
+    OrderIntentRecord, OrderIntentSide, OrderIntentType, OrderRefuseReason, PositionUpdateRecord,
+    SignalRequirements, compute_costs_v1,
 };
 use quantlaxmi_wal::{AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalWriter};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -150,6 +151,28 @@ impl OrderIntent {
         self.tag = Some(tag.into());
         self
     }
+}
+
+/// Phase 25B: Pending intent awaiting delayed execution.
+///
+/// Stores what's needed for:
+/// - Determining when to execute (scheduled_tick)
+/// - Executing the intent (local_intent, parent_decision_id)
+/// - WAL linking (intent_seq, intent_digest, correlation_id)
+#[derive(Clone, Debug)]
+struct PendingIntent {
+    /// Tick at which this intent becomes executable
+    scheduled_tick: u64,
+    /// The intent to execute
+    local_intent: OrderIntent,
+    /// Parent decision ID for correlation
+    parent_decision_id: Uuid,
+    /// OrderIntent WAL sequence for linking
+    intent_seq: u64,
+    /// Intent digest for fill linking
+    intent_digest: String,
+    /// Correlation ID for WAL records
+    correlation_id: String,
 }
 
 /// Execution fill.
@@ -863,7 +886,9 @@ impl EnforcementConfig {
         }
 
         if self.strategies_manifest_path.is_none() {
-            return Err("--strategies-manifest required when --require-promotion is set".to_string());
+            return Err(
+                "--strategies-manifest required when --require-promotion is set".to_string(),
+            );
         }
         if self.signals_manifest_path.is_none() {
             return Err("--signals-manifest required when --require-promotion is set".to_string());
@@ -1410,6 +1435,14 @@ pub struct BacktestConfig {
     /// Phase 22E: Enforcement configuration for production deployment.
     #[serde(default)]
     pub enforcement: EnforcementConfig,
+    /// Phase 25A: Optional path to cost model config (JSON).
+    /// If not provided, uses default (all zeros = no cost adjustment).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_model_path: Option<std::path::PathBuf>,
+    /// Phase 25B: Latency buckets - delay between intent and fill (in ticks).
+    /// 0 = immediate (baseline), 1 = 1 tick delay, 3 = 3 tick delay.
+    #[serde(default)]
+    pub latency_ticks: u32,
 }
 
 impl Default for BacktestConfig {
@@ -1424,6 +1457,8 @@ impl Default for BacktestConfig {
             admission_mismatch_policy: "fail".to_string(),
             strategy_spec: None,
             enforcement: EnforcementConfig::default(),
+            cost_model_path: None,
+            latency_ticks: 0,
         }
     }
 }
@@ -1875,6 +1910,47 @@ impl BacktestEngine {
         // Phase 23B: Order intent WAL sequence counter
         let mut order_intent_seq = 0u64;
 
+        // Phase 24A: Execution fill WAL sequence counter
+        let mut execution_fill_seq = 0u64;
+        // Track current order_intent_seq for linking fills to intents
+        let mut current_intent_seq: Option<u64> = None;
+        let mut current_intent_digest: Option<String> = None;
+
+        // Phase 24D: Position update WAL tracking
+        let mut position_update_seq = 0u64;
+        // Track position state for computing post-state snapshots and deltas
+        let mut position_tracker = PnlAccumulatorFixed::new();
+
+        // Phase 25A: Load deterministic cost model (once per session)
+        let cost_model: CostModelV1 = if let Some(ref path) = self.config.cost_model_path {
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read cost model from {:?}", path))?;
+            serde_json::from_str(&content)
+                .with_context(|| format!("Failed to parse cost model from {:?}", path))?
+        } else {
+            CostModelV1::default() // All zeros = no cost adjustment
+        };
+        if !cost_model.venues.is_empty() {
+            tracing::info!(
+                venues = cost_model.venues.len(),
+                "Phase 25A: Cost model loaded"
+            );
+        }
+
+        // Phase 25B: Latency bucket state
+        let mut sim_tick: u64 = 0;
+        let mut pending_intents: VecDeque<PendingIntent> = VecDeque::new();
+        let latency_ticks = self.config.latency_ticks as u64;
+        // Track last event timestamp for end-of-run drain (deterministic, no wall-clock)
+        let mut last_drain_ts: DateTime<Utc> = DateTime::UNIX_EPOCH;
+
+        if latency_ticks > 0 {
+            tracing::info!(
+                latency_ticks = latency_ticks,
+                "Phase 25B: Latency buckets enabled"
+            );
+        }
+
         // Phase 19D: Build admission mode
         let admission_mode = if self.config.enforce_admission_from_wal && has_admission_gating {
             // Load admission index from existing WAL
@@ -1940,6 +2016,196 @@ impl BacktestEngine {
             }
             last_event_ts = Some(event.ts);
             end_ts = Some(event.ts);
+            last_drain_ts = event.ts; // Phase 25B: Track for end-of-run drain
+
+            // =======================================================
+            // PHASE 25B: Drain ready pending intents BEFORE processing new events
+            // =======================================================
+            // Create a ctx for fill notifications in drain loop
+            // Uses current market_snapshot state from previous event(s)
+            let drain_ctx = quantlaxmi_strategy::StrategyContext {
+                ts: event.ts,
+                run_id: &run_id,
+                symbol: &event.symbol,
+                market: &market_snapshot,
+            };
+
+            while let Some(front) = pending_intents.front() {
+                if front.scheduled_tick > sim_tick {
+                    break;
+                }
+                let pending = pending_intents.pop_front().unwrap();
+
+                // Restore intent context for fill processing
+                current_intent_seq = Some(pending.intent_seq);
+                current_intent_digest = Some(pending.intent_digest.clone());
+                let drain_correlation_id = pending.correlation_id.clone();
+
+                // Execute the delayed intent using current event timestamp
+                if let Some(fill) =
+                    exchange.execute(&pending.local_intent, event.ts, pending.parent_decision_id)
+                {
+                    // --- FILL PROCESSING (same as immediate path) ---
+                    let drain_ts_ns = event.ts.timestamp_nanos_opt().unwrap_or(0);
+                    execution_fill_seq += 1;
+
+                    let fill_qty_mantissa = (fill.qty
+                        * 10f64.powi(-market_snapshot.qty_exponent() as i32))
+                    .round() as i64;
+                    let fill_price_mantissa = (fill.price
+                        * 10f64.powi(-market_snapshot.price_exponent() as i32))
+                    .round() as i64;
+
+                    let (fill_fee_mantissa, fill_fee_exponent) = if fill.fee > 0.0 {
+                        let fee_m = (fill.fee * 10f64.powi(-market_snapshot.qty_exponent() as i32))
+                            .round() as i64;
+                        (Some(fee_m), market_snapshot.qty_exponent())
+                    } else {
+                        (None, market_snapshot.qty_exponent())
+                    };
+
+                    let fill_side = match fill.side {
+                        Side::Buy => FillSide::Buy,
+                        Side::Sell => FillSide::Sell,
+                    };
+
+                    let fill_strategy_id = self
+                        .config
+                        .strategy_spec
+                        .as_ref()
+                        .map(|s| s.strategy_id.as_str())
+                        .unwrap_or("unknown");
+
+                    let mut ef_builder =
+                        ExecutionFillRecord::builder(fill_strategy_id, &fill.symbol)
+                            .ts_ns(drain_ts_ns)
+                            .session_id(&session_id)
+                            .seq(execution_fill_seq)
+                            .side(fill_side)
+                            .qty(fill_qty_mantissa, market_snapshot.qty_exponent())
+                            .price(fill_price_mantissa, market_snapshot.price_exponent())
+                            .venue("sim")
+                            .correlation_id(&drain_correlation_id)
+                            .fill_type(FillType::Full);
+
+                    if let Some(fee_m) = fill_fee_mantissa {
+                        ef_builder = ef_builder.fee(fee_m, fill_fee_exponent);
+                    }
+                    if let Some(parent_seq) = current_intent_seq {
+                        ef_builder = ef_builder.parent_intent_seq(parent_seq);
+                    }
+                    if let Some(ref parent_digest) = current_intent_digest {
+                        ef_builder = ef_builder.parent_intent_digest(parent_digest);
+                    }
+
+                    let ef_record = ef_builder.build();
+                    wal_writer.write_execution_fill(ef_record).await?;
+
+                    // Position update
+                    position_update_seq += 1;
+                    let pre_realized_pnl = position_tracker.realized_pnl_mantissa;
+                    let pre_fees = position_tracker.total_fees_mantissa;
+
+                    let is_buy = matches!(fill.side, Side::Buy);
+                    position_tracker.process_fill(
+                        fill_price_mantissa,
+                        fill_qty_mantissa,
+                        fill_fee_mantissa.unwrap_or(0),
+                        is_buy,
+                    );
+
+                    let realized_pnl_delta_i128 =
+                        position_tracker.realized_pnl_mantissa - pre_realized_pnl;
+                    let fee_delta_i128 = position_tracker.total_fees_mantissa - pre_fees;
+                    let notional_mantissa_i128 =
+                        (fill_price_mantissa as i128 * fill_qty_mantissa as i128) / 100;
+                    let notional_abs_i128 = notional_mantissa_i128.abs();
+
+                    let fill_venue = "sim";
+                    let costs = compute_costs_v1(
+                        fill_venue,
+                        &fill.symbol,
+                        notional_abs_i128,
+                        fill_fee_mantissa.unwrap_or(0),
+                        &cost_model,
+                    );
+
+                    let effective_fee_delta_i128 =
+                        fee_delta_i128 + costs.extra_fee_mantissa as i128;
+                    let mut cash_delta_i128 = if is_buy {
+                        -notional_mantissa_i128 - effective_fee_delta_i128
+                    } else {
+                        notional_mantissa_i128 - effective_fee_delta_i128
+                    };
+                    cash_delta_i128 -= costs.slippage_cost_mantissa as i128;
+                    cash_delta_i128 -= costs.spread_cost_mantissa as i128;
+
+                    let cash_delta_mantissa: i64 = i64::try_from(cash_delta_i128)
+                        .map_err(|_| anyhow::anyhow!("cash_delta overflow: {}", cash_delta_i128))?;
+                    let realized_pnl_delta: i64 =
+                        i64::try_from(realized_pnl_delta_i128).map_err(|_| {
+                            anyhow::anyhow!(
+                                "realized_pnl_delta overflow: {}",
+                                realized_pnl_delta_i128
+                            )
+                        })?;
+                    let effective_fee_delta: i64 = i64::try_from(effective_fee_delta_i128)
+                        .map_err(|_| {
+                            anyhow::anyhow!("fee_delta overflow: {}", effective_fee_delta_i128)
+                        })?;
+
+                    let mut pu_builder =
+                        PositionUpdateRecord::builder(fill_strategy_id, &fill.symbol)
+                            .ts_ns(drain_ts_ns)
+                            .session_id(&session_id)
+                            .seq(position_update_seq)
+                            .correlation_id(&drain_correlation_id)
+                            .fill_seq(execution_fill_seq)
+                            .position_qty(
+                                position_tracker.position_qty_mantissa as i64,
+                                market_snapshot.qty_exponent(),
+                            )
+                            .cash_delta(cash_delta_mantissa, PNL_EXPONENT)
+                            .realized_pnl_delta(realized_pnl_delta, PNL_EXPONENT)
+                            .venue(fill_venue);
+
+                    if position_tracker.position_qty_mantissa != 0 {
+                        pu_builder = pu_builder
+                            .avg_price(position_tracker.avg_entry_price_mantissa as i64, -2);
+                    } else {
+                        pu_builder = pu_builder.avg_price_flat(-2);
+                    }
+
+                    if effective_fee_delta != 0 {
+                        pu_builder = pu_builder.fee(effective_fee_delta, PNL_EXPONENT);
+                    } else {
+                        pu_builder = pu_builder.fee_exponent(PNL_EXPONENT);
+                    }
+
+                    let pu_record = pu_builder.build();
+                    wal_writer.write_position_update(pu_record).await?;
+
+                    current_intent_seq = None;
+                    current_intent_digest = None;
+
+                    let notification = quantlaxmi_strategy::FillNotification {
+                        ts: fill.ts,
+                        symbol: fill.symbol.clone(),
+                        side: match fill.side {
+                            Side::Buy => quantlaxmi_strategy::Side::Buy,
+                            Side::Sell => quantlaxmi_strategy::Side::Sell,
+                        },
+                        qty_mantissa: fill_qty_mantissa,
+                        qty_exponent: market_snapshot.qty_exponent(),
+                        price_mantissa: fill_price_mantissa,
+                        price_exponent: market_snapshot.price_exponent(),
+                        fee_mantissa: fill_fee_mantissa.unwrap_or(0),
+                        fee_exponent: fill_fee_exponent,
+                        tag: fill.tag.clone(),
+                    };
+                    strategy.on_fill(&notification, &drain_ctx);
+                }
+            }
 
             // Update market state (for PaperExchange - still uses floats internally)
             exchange.update_market(&event);
@@ -2164,19 +2430,17 @@ impl BacktestEngine {
                         };
 
                         // Build common fields
-                        let mut oi_builder = OrderIntentRecord::builder(
-                            &spec.strategy_id,
-                            &intent.symbol,
-                        )
-                        .ts_ns(ts_ns)
-                        .session_id(&session_id)
-                        .seq(order_intent_seq)
-                        .side(oi_side)
-                        .order_type(oi_type)
-                        .qty(intent.qty_mantissa, intent.qty_exponent)
-                        .price_exponent(intent.price_exponent)
-                        .correlation_id(&correlation_id)
-                        .parent_admission_digest(&correlation_id);
+                        let mut oi_builder =
+                            OrderIntentRecord::builder(&spec.strategy_id, &intent.symbol)
+                                .ts_ns(ts_ns)
+                                .session_id(&session_id)
+                                .seq(order_intent_seq)
+                                .side(oi_side)
+                                .order_type(oi_type)
+                                .qty(intent.qty_mantissa, intent.qty_exponent)
+                                .price_exponent(intent.price_exponent)
+                                .correlation_id(&correlation_id)
+                                .parent_admission_digest(&correlation_id);
 
                         // Set limit price through builder if present
                         if let Some(lp) = intent.limit_price_mantissa {
@@ -2192,6 +2456,10 @@ impl BacktestEngine {
                                 oi_builder.build_refuse(oi_reason)
                             }
                         };
+
+                        // Phase 24A: Store intent seq/digest for linking to fills
+                        current_intent_seq = Some(order_intent_seq);
+                        current_intent_digest = Some(oi_record.digest.clone());
 
                         wal_writer.write_order_intent(oi_record).await?;
 
@@ -2210,32 +2478,208 @@ impl BacktestEngine {
                         permitted_orders += 1;
                     }
 
-                    if let Some(fill) =
-                        exchange.execute(&local_intent, event.ts, parent_decision_id)
-                    {
-                        // Convert fill to Phase 2 FillNotification
-                        let notification = quantlaxmi_strategy::FillNotification {
-                            ts: fill.ts,
-                            symbol: fill.symbol.clone(),
-                            side: match fill.side {
-                                Side::Buy => quantlaxmi_strategy::Side::Buy,
-                                Side::Sell => quantlaxmi_strategy::Side::Sell,
-                            },
-                            qty_mantissa: (fill.qty
-                                * 10f64.powi(-market_snapshot.qty_exponent() as i32))
-                            .round() as i64,
-                            qty_exponent: market_snapshot.qty_exponent(),
-                            price_mantissa: (fill.price
-                                * 10f64.powi(-market_snapshot.price_exponent() as i32))
-                            .round() as i64,
-                            price_exponent: market_snapshot.price_exponent(),
-                            fee_mantissa: (fill.fee
-                                * 10f64.powi(-market_snapshot.qty_exponent() as i32))
-                            .round() as i64,
-                            fee_exponent: market_snapshot.qty_exponent(),
-                            tag: fill.tag.clone(),
-                        };
-                        strategy.on_fill(&notification, &ctx);
+                    // =======================================================
+                    // PHASE 25B: Enqueue intent for delayed execution
+                    // =======================================================
+                    let scheduled_tick = sim_tick + latency_ticks;
+                    pending_intents.push_back(PendingIntent {
+                        scheduled_tick,
+                        local_intent: local_intent.clone(),
+                        parent_decision_id,
+                        intent_seq: current_intent_seq.unwrap_or(order_intent_seq),
+                        intent_digest: current_intent_digest.clone().unwrap_or_default(),
+                        correlation_id: correlation_id.clone(),
+                    });
+
+                    // For latency_ticks == 0, immediately drain to preserve baseline behavior
+                    if latency_ticks == 0 {
+                        while let Some(front) = pending_intents.front() {
+                            if front.scheduled_tick > sim_tick {
+                                break;
+                            }
+                            let pending = pending_intents.pop_front().unwrap();
+
+                            current_intent_seq = Some(pending.intent_seq);
+                            current_intent_digest = Some(pending.intent_digest.clone());
+                            let imm_correlation_id = pending.correlation_id.clone();
+
+                            if let Some(fill) = exchange.execute(
+                                &pending.local_intent,
+                                event.ts,
+                                pending.parent_decision_id,
+                            ) {
+                                let imm_ts_ns = event.ts.timestamp_nanos_opt().unwrap_or(0);
+                                execution_fill_seq += 1;
+
+                                let fill_qty_mantissa =
+                                    (fill.qty * 10f64.powi(-market_snapshot.qty_exponent() as i32))
+                                        .round() as i64;
+                                let fill_price_mantissa = (fill.price
+                                    * 10f64.powi(-market_snapshot.price_exponent() as i32))
+                                .round()
+                                    as i64;
+
+                                let (fill_fee_mantissa, fill_fee_exponent) = if fill.fee > 0.0 {
+                                    let fee_m = (fill.fee
+                                        * 10f64.powi(-market_snapshot.qty_exponent() as i32))
+                                    .round() as i64;
+                                    (Some(fee_m), market_snapshot.qty_exponent())
+                                } else {
+                                    (None, market_snapshot.qty_exponent())
+                                };
+
+                                let fill_side = match fill.side {
+                                    Side::Buy => FillSide::Buy,
+                                    Side::Sell => FillSide::Sell,
+                                };
+
+                                let fill_strategy_id = self
+                                    .config
+                                    .strategy_spec
+                                    .as_ref()
+                                    .map(|s| s.strategy_id.as_str())
+                                    .unwrap_or("unknown");
+
+                                let mut ef_builder =
+                                    ExecutionFillRecord::builder(fill_strategy_id, &fill.symbol)
+                                        .ts_ns(imm_ts_ns)
+                                        .session_id(&session_id)
+                                        .seq(execution_fill_seq)
+                                        .side(fill_side)
+                                        .qty(fill_qty_mantissa, market_snapshot.qty_exponent())
+                                        .price(
+                                            fill_price_mantissa,
+                                            market_snapshot.price_exponent(),
+                                        )
+                                        .venue("sim")
+                                        .correlation_id(&imm_correlation_id)
+                                        .fill_type(FillType::Full);
+
+                                if let Some(fee_m) = fill_fee_mantissa {
+                                    ef_builder = ef_builder.fee(fee_m, fill_fee_exponent);
+                                }
+                                if let Some(parent_seq) = current_intent_seq {
+                                    ef_builder = ef_builder.parent_intent_seq(parent_seq);
+                                }
+                                if let Some(ref parent_digest) = current_intent_digest {
+                                    ef_builder = ef_builder.parent_intent_digest(parent_digest);
+                                }
+
+                                let ef_record = ef_builder.build();
+                                wal_writer.write_execution_fill(ef_record).await?;
+
+                                position_update_seq += 1;
+                                let pre_realized_pnl = position_tracker.realized_pnl_mantissa;
+                                let pre_fees = position_tracker.total_fees_mantissa;
+
+                                let is_buy = matches!(fill.side, Side::Buy);
+                                position_tracker.process_fill(
+                                    fill_price_mantissa,
+                                    fill_qty_mantissa,
+                                    fill_fee_mantissa.unwrap_or(0),
+                                    is_buy,
+                                );
+
+                                let realized_pnl_delta_i128 =
+                                    position_tracker.realized_pnl_mantissa - pre_realized_pnl;
+                                let fee_delta_i128 =
+                                    position_tracker.total_fees_mantissa - pre_fees;
+                                let notional_mantissa_i128 =
+                                    (fill_price_mantissa as i128 * fill_qty_mantissa as i128) / 100;
+                                let notional_abs_i128 = notional_mantissa_i128.abs();
+
+                                let fill_venue = "sim";
+                                let costs = compute_costs_v1(
+                                    fill_venue,
+                                    &fill.symbol,
+                                    notional_abs_i128,
+                                    fill_fee_mantissa.unwrap_or(0),
+                                    &cost_model,
+                                );
+
+                                let effective_fee_delta_i128 =
+                                    fee_delta_i128 + costs.extra_fee_mantissa as i128;
+                                let mut cash_delta_i128 = if is_buy {
+                                    -notional_mantissa_i128 - effective_fee_delta_i128
+                                } else {
+                                    notional_mantissa_i128 - effective_fee_delta_i128
+                                };
+                                cash_delta_i128 -= costs.slippage_cost_mantissa as i128;
+                                cash_delta_i128 -= costs.spread_cost_mantissa as i128;
+
+                                let cash_delta_mantissa: i64 = i64::try_from(cash_delta_i128)
+                                    .map_err(|_| {
+                                        anyhow::anyhow!("cash_delta overflow: {}", cash_delta_i128)
+                                    })?;
+                                let realized_pnl_delta: i64 =
+                                    i64::try_from(realized_pnl_delta_i128).map_err(|_| {
+                                        anyhow::anyhow!(
+                                            "realized_pnl_delta overflow: {}",
+                                            realized_pnl_delta_i128
+                                        )
+                                    })?;
+                                let effective_fee_delta: i64 =
+                                    i64::try_from(effective_fee_delta_i128).map_err(|_| {
+                                        anyhow::anyhow!(
+                                            "fee_delta overflow: {}",
+                                            effective_fee_delta_i128
+                                        )
+                                    })?;
+
+                                let mut pu_builder =
+                                    PositionUpdateRecord::builder(fill_strategy_id, &fill.symbol)
+                                        .ts_ns(imm_ts_ns)
+                                        .session_id(&session_id)
+                                        .seq(position_update_seq)
+                                        .correlation_id(&imm_correlation_id)
+                                        .fill_seq(execution_fill_seq)
+                                        .position_qty(
+                                            position_tracker.position_qty_mantissa as i64,
+                                            market_snapshot.qty_exponent(),
+                                        )
+                                        .cash_delta(cash_delta_mantissa, PNL_EXPONENT)
+                                        .realized_pnl_delta(realized_pnl_delta, PNL_EXPONENT)
+                                        .venue(fill_venue);
+
+                                if position_tracker.position_qty_mantissa != 0 {
+                                    pu_builder = pu_builder.avg_price(
+                                        position_tracker.avg_entry_price_mantissa as i64,
+                                        -2,
+                                    );
+                                } else {
+                                    pu_builder = pu_builder.avg_price_flat(-2);
+                                }
+
+                                if effective_fee_delta != 0 {
+                                    pu_builder = pu_builder.fee(effective_fee_delta, PNL_EXPONENT);
+                                } else {
+                                    pu_builder = pu_builder.fee_exponent(PNL_EXPONENT);
+                                }
+
+                                let pu_record = pu_builder.build();
+                                wal_writer.write_position_update(pu_record).await?;
+
+                                current_intent_seq = None;
+                                current_intent_digest = None;
+
+                                let notification = quantlaxmi_strategy::FillNotification {
+                                    ts: fill.ts,
+                                    symbol: fill.symbol.clone(),
+                                    side: match fill.side {
+                                        Side::Buy => quantlaxmi_strategy::Side::Buy,
+                                        Side::Sell => quantlaxmi_strategy::Side::Sell,
+                                    },
+                                    qty_mantissa: fill_qty_mantissa,
+                                    qty_exponent: market_snapshot.qty_exponent(),
+                                    price_mantissa: fill_price_mantissa,
+                                    price_exponent: market_snapshot.price_exponent(),
+                                    fee_mantissa: fill_fee_mantissa.unwrap_or(0),
+                                    fee_exponent: fill_fee_exponent,
+                                    tag: fill.tag.clone(),
+                                };
+                                strategy.on_fill(&notification, &ctx);
+                            }
+                        }
                     }
                 }
             }
@@ -2272,6 +2716,156 @@ impl BacktestEngine {
                     exchange.realized_pnl() + exchange.unrealized_pnl(),
                     elapsed
                 );
+            }
+
+            // Increment sim_tick at end of each event loop iteration
+            sim_tick += 1;
+        }
+
+        // End-of-run drain: flush any remaining pending intents using last_drain_ts
+        while let Some(pending) = pending_intents.pop_front() {
+            current_intent_seq = Some(pending.intent_seq);
+            current_intent_digest = Some(pending.intent_digest.clone());
+            let eor_correlation_id = pending.correlation_id.clone();
+
+            if let Some(fill) = exchange.execute(
+                &pending.local_intent,
+                last_drain_ts,
+                pending.parent_decision_id,
+            ) {
+                let eor_ts_ns = last_drain_ts.timestamp_nanos_opt().unwrap_or(0);
+                execution_fill_seq += 1;
+
+                let fill_qty_mantissa =
+                    (fill.qty * 10f64.powi(-market_snapshot.qty_exponent() as i32)).round() as i64;
+                let fill_price_mantissa = (fill.price
+                    * 10f64.powi(-market_snapshot.price_exponent() as i32))
+                .round() as i64;
+
+                let (fill_fee_mantissa, fill_fee_exponent) = if fill.fee > 0.0 {
+                    let fee_m = (fill.fee * 10f64.powi(-market_snapshot.qty_exponent() as i32))
+                        .round() as i64;
+                    (Some(fee_m), market_snapshot.qty_exponent())
+                } else {
+                    (None, market_snapshot.qty_exponent())
+                };
+
+                let fill_side = match fill.side {
+                    Side::Buy => FillSide::Buy,
+                    Side::Sell => FillSide::Sell,
+                };
+
+                let fill_strategy_id = self
+                    .config
+                    .strategy_spec
+                    .as_ref()
+                    .map(|s| s.strategy_id.as_str())
+                    .unwrap_or("unknown");
+
+                let mut ef_builder = ExecutionFillRecord::builder(fill_strategy_id, &fill.symbol)
+                    .ts_ns(eor_ts_ns)
+                    .session_id(&session_id)
+                    .seq(execution_fill_seq)
+                    .side(fill_side)
+                    .qty(fill_qty_mantissa, market_snapshot.qty_exponent())
+                    .price(fill_price_mantissa, market_snapshot.price_exponent())
+                    .venue("sim")
+                    .correlation_id(&eor_correlation_id)
+                    .fill_type(FillType::Full);
+
+                if let Some(fee_m) = fill_fee_mantissa {
+                    ef_builder = ef_builder.fee(fee_m, fill_fee_exponent);
+                }
+                if let Some(parent_seq) = current_intent_seq {
+                    ef_builder = ef_builder.parent_intent_seq(parent_seq);
+                }
+                if let Some(ref parent_digest) = current_intent_digest {
+                    ef_builder = ef_builder.parent_intent_digest(parent_digest);
+                }
+
+                let ef_record = ef_builder.build();
+                wal_writer.write_execution_fill(ef_record).await?;
+
+                position_update_seq += 1;
+                let pre_realized_pnl = position_tracker.realized_pnl_mantissa;
+                let pre_fees = position_tracker.total_fees_mantissa;
+
+                let is_buy = matches!(fill.side, Side::Buy);
+                position_tracker.process_fill(
+                    fill_price_mantissa,
+                    fill_qty_mantissa,
+                    fill_fee_mantissa.unwrap_or(0),
+                    is_buy,
+                );
+
+                let realized_pnl_delta_i128 =
+                    position_tracker.realized_pnl_mantissa - pre_realized_pnl;
+                let fee_delta_i128 = position_tracker.total_fees_mantissa - pre_fees;
+                let notional_mantissa_i128 =
+                    (fill_price_mantissa as i128 * fill_qty_mantissa as i128) / 100;
+                let notional_abs_i128 = notional_mantissa_i128.abs();
+
+                let fill_venue = "sim";
+                let costs = compute_costs_v1(
+                    fill_venue,
+                    &fill.symbol,
+                    notional_abs_i128,
+                    fill_fee_mantissa.unwrap_or(0),
+                    &cost_model,
+                );
+
+                let effective_fee_delta_i128 = fee_delta_i128 + costs.extra_fee_mantissa as i128;
+                let mut cash_delta_i128 = if is_buy {
+                    -notional_mantissa_i128 - effective_fee_delta_i128
+                } else {
+                    notional_mantissa_i128 - effective_fee_delta_i128
+                };
+                cash_delta_i128 -= costs.slippage_cost_mantissa as i128;
+                cash_delta_i128 -= costs.spread_cost_mantissa as i128;
+
+                let cash_delta_mantissa: i64 = i64::try_from(cash_delta_i128)
+                    .map_err(|_| anyhow::anyhow!("cash_delta overflow: {}", cash_delta_i128))?;
+                let realized_pnl_delta: i64 =
+                    i64::try_from(realized_pnl_delta_i128).map_err(|_| {
+                        anyhow::anyhow!("realized_pnl_delta overflow: {}", realized_pnl_delta_i128)
+                    })?;
+                let effective_fee_delta: i64 =
+                    i64::try_from(effective_fee_delta_i128).map_err(|_| {
+                        anyhow::anyhow!("fee_delta overflow: {}", effective_fee_delta_i128)
+                    })?;
+
+                let mut pu_builder = PositionUpdateRecord::builder(fill_strategy_id, &fill.symbol)
+                    .ts_ns(eor_ts_ns)
+                    .session_id(&session_id)
+                    .seq(position_update_seq)
+                    .correlation_id(&eor_correlation_id)
+                    .fill_seq(execution_fill_seq)
+                    .position_qty(
+                        position_tracker.position_qty_mantissa as i64,
+                        market_snapshot.qty_exponent(),
+                    )
+                    .cash_delta(cash_delta_mantissa, PNL_EXPONENT)
+                    .realized_pnl_delta(realized_pnl_delta, PNL_EXPONENT)
+                    .venue(fill_venue);
+
+                if position_tracker.position_qty_mantissa != 0 {
+                    pu_builder =
+                        pu_builder.avg_price(position_tracker.avg_entry_price_mantissa as i64, -2);
+                } else {
+                    pu_builder = pu_builder.avg_price_flat(-2);
+                }
+
+                if effective_fee_delta != 0 {
+                    pu_builder = pu_builder.fee(effective_fee_delta, PNL_EXPONENT);
+                } else {
+                    pu_builder = pu_builder.fee_exponent(PNL_EXPONENT);
+                }
+
+                let pu_record = pu_builder.build();
+                wal_writer.write_position_update(pu_record).await?;
+
+                current_intent_seq = None;
+                current_intent_digest = None;
             }
         }
 
