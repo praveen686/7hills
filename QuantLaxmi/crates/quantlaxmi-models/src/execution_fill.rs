@@ -101,6 +101,7 @@ impl FillType {
 /// For fills not linked to a tracked intent (parent_intent_seq=None, venue!="sim"):
 /// - `strategy_id` may be "unknown"
 /// - `correlation_id` may be "corr_unknown"
+///
 /// These sentinels are allowed only in that constrained case.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExecutionFillRecord {
