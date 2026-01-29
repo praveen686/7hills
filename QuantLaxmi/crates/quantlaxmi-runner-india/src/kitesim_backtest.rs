@@ -393,8 +393,7 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
             all_results.push((intent.order.clone(), res));
         }
     } else {
-        for (order_idx, order) in order_file.orders.iter().enumerate() {
-            let order_idx = order_idx as u64;
+        for (_order_idx, order) in order_file.orders.iter().enumerate() {
             let mut coord = MultiLegCoordinator::new(&mut sim, policy.clone());
             let res = coord.execute_with_feed(order, &mut feed).await?;
 
@@ -422,34 +421,16 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
                 }
             }
 
-            // Step 1.3: Emit equity point using LIVE quotes only (no lookahead)
-            // LIMITATION: For bulk orders mode, live_quotes is NOT updated during execution
-            // because execute_with_feed consumes events internally. Equity curve shows
-            // cashflow-only progression. Use intent mode for proper MTM-adjusted equity curve.
-            let running_mtm = compute_running_mtm(&running_positions, &live_quotes);
-            let equity_inr = running_cashflow + running_mtm;
-            // For bulk orders, use a synthetic timestamp based on order index
-            let synthetic_ts = Utc::now() + Duration::seconds(order_idx as i64);
-            let bar_ts = floor_to_bar(synthetic_ts, eq_cfg.interval_secs);
-
-            if equity_bar_count == 0 {
-                mdd_tracker = Some(MaxDrawdownTracker::new(equity_inr, bar_ts));
-            }
-
-            let mut pt = EquityPoint::with_components(bar_ts, running_cashflow, running_mtm);
-            pt.pnl_inr = Some(equity_inr);
-
-            writeln!(equity_curve_file, "{}", serde_json::to_string(&pt)?)?;
-            equity_bar_count += 1;
-            equity_last_inr = Some(equity_inr);
-
-            if let Some(tr) = mdd_tracker.as_mut() {
-                tr.update(equity_inr, bar_ts);
-            }
-            returns_tracker.update(equity_inr);
-
+            // BULK MODE: Do NOT emit per-order equity curve (no live quote updates)
+            // Equity curve is only valid in intent mode where we control quote ingestion
             all_results.push((order.clone(), res));
         }
+
+        // Bulk mode warning: equity curve disabled during execution
+        tracing::warn!(
+            "Bulk orders mode: equity curve disabled during execution. \
+             Use --intents for proper MTM-adjusted equity curve."
+        );
     }
 
     // Step 2.1: Drain remaining events from feed to get terminal quotes
@@ -459,6 +440,21 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
             live_quotes.insert(q.tradingsymbol.clone(), q.clone());
         }
         sim.ingest_event(&ev)?;
+    }
+
+    // For bulk mode: emit single terminal equity point after draining feed
+    if !use_intents {
+        let terminal_mtm = compute_running_mtm(&running_positions, &live_quotes);
+        let terminal_equity = running_cashflow + terminal_mtm;
+        let terminal_ts = Utc::now();
+        let bar_ts = floor_to_bar(terminal_ts, eq_cfg.interval_secs);
+
+        let pt = EquityPoint::with_components(bar_ts, running_cashflow, terminal_mtm);
+        use std::io::Write;
+        writeln!(equity_curve_file, "{}", serde_json::to_string(&pt)?)?;
+        equity_bar_count = 1; // Only terminal point
+        equity_first_inr = Some(terminal_equity);
+        equity_last_inr = Some(terminal_equity);
     }
 
     let stats = sim.stats();
@@ -960,15 +956,36 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     tracing::info!("Daily PnL report written to: {}", daily_pnl_path.display());
 
     // Step 5: Emit run_summary.json with provenance for reproducibility
-    // Compute file stats for provenance (lightweight alternative to SHA256)
+    // Use streaming line counts and SHA256 (no full file load into RAM)
+    fn stream_file_stats(path: &Path) -> (usize, String) {
+        use sha2::{Digest, Sha256};
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(_) => return (0, String::new()),
+        };
+        let mut reader = BufReader::new(file);
+        let mut hasher = Sha256::new();
+        let mut line_count = 0usize;
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            match reader.read_line(&mut buf) {
+                Ok(0) => break,
+                Ok(_) => {
+                    line_count += 1;
+                    hasher.update(buf.as_bytes());
+                }
+                Err(_) => break,
+            }
+        }
+        let hash = format!("{:x}", hasher.finalize());
+        (line_count, hash)
+    }
+
+    let (replay_line_count, replay_sha256) = stream_file_stats(replay_path);
+    let (orders_line_count, orders_sha256) = stream_file_stats(orders_path);
     let replay_metadata = std::fs::metadata(replay_path).ok();
     let orders_metadata = std::fs::metadata(orders_path).ok();
-    let replay_line_count = std::fs::read_to_string(replay_path)
-        .map(|s| s.lines().count())
-        .unwrap_or(0);
-    let orders_line_count = std::fs::read_to_string(orders_path)
-        .map(|s| s.lines().count())
-        .unwrap_or(0);
 
     // Try to get git commit (best effort)
     let git_commit = std::env::var("GIT_COMMIT")
@@ -983,8 +1000,9 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
         })
         .ok();
 
+    // Keep v1 schema with optional provenance fields for compatibility
     let run_summary = serde_json::json!({
-        "schema": "quantlaxmi.reports.run_summary.v2",
+        "schema": "quantlaxmi.reports.run_summary.v1",
         "equity_first_inr": equity_first_inr,
         "equity_last_inr": equity_last_inr,
         "gross_mtm_inr": gross_mtm,
@@ -995,14 +1013,17 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
             "equity_last_equals_gross_mtm": equity_last_inr.map(|el| (el - gross_mtm).abs() < 0.01).unwrap_or(false),
             "note": "With baseline, equity_first=0 and equity_last==gross_mtm_inr"
         },
+        // Optional provenance fields (v1 compatible)
         "provenance": {
             "git_commit": git_commit,
             "replay_file": cfg.replay_path,
             "replay_size_bytes": replay_metadata.as_ref().map(|m| m.len()),
             "replay_line_count": replay_line_count,
+            "replay_sha256": replay_sha256,
             "orders_file": cfg.orders_path,
             "orders_size_bytes": orders_metadata.as_ref().map(|m| m.len()),
             "orders_line_count": orders_line_count,
+            "orders_sha256": orders_sha256,
             "intents_file": cfg.intents_path,
             "strategy_name": strategy_name.clone(),
             "qty_scale": cfg.qty_scale,

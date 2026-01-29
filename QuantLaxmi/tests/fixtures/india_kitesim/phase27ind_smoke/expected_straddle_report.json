@@ -1,0 +1,27 @@
+{
+  "created_at": "2026-01-29T06:20:08.741012546Z",
+  "engine": "KiteSim",
+  "venue": "NSE-Zerodha-Sim",
+  "dataset": "data/sessions/banknifty_phase27ind_20260129_112835/straddle_quotes.jsonl",
+  "fill": {
+    "orders_total": 2,
+    "legs_total": 4,
+    "legs_filled": 4,
+    "legs_partially_filled": 0,
+    "legs_rejected": 0,
+    "legs_cancelled": 0,
+    "rollbacks": 0,
+    "timeouts": 0,
+    "hedges_attempted": 0,
+    "hedges_filled": 0,
+    "slippage_bps_p50": 12.66850738996294,
+    "slippage_bps_p90": 14.524155337030535,
+    "slippage_bps_p99": 14.524155337030535
+  },
+  "notes": [
+    "strategy=Phase27IND_ATM_Straddle",
+    "orders_file=data/sessions/banknifty_phase27ind_20260129_112835/orders_straddle_test.json",
+    "qty_scale=1",
+    "total_pnl=-174.00"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "strategy_name": "Phase27IND_ATM_Straddle",
+  "orders": [
+    {
+      "strategy_name": "Open_Straddle",
+      "legs": [
+        {
+          "tradingsymbol": "BANKNIFTY26FEB59700CE",
+          "exchange": "NFO",
+          "side": "Buy",
+          "quantity": 30,
+          "order_type": "Market",
+          "price": null
+        },
+        {
+          "tradingsymbol": "BANKNIFTY26FEB59700PE",
+          "exchange": "NFO",
+          "side": "Buy",
+          "quantity": 30,
+          "order_type": "Market",
+          "price": null
+        }
+      ],
+      "total_margin_required": 0.0
+    },
+    {
+      "strategy_name": "Close_Straddle",
+      "legs": [
+        {
+          "tradingsymbol": "BANKNIFTY26FEB59700CE",
+          "exchange": "NFO",
+          "side": "Sell",
+          "quantity": 30,
+          "order_type": "Market",
+          "price": null
+        },
+        {
+          "tradingsymbol": "BANKNIFTY26FEB59700PE",
+          "exchange": "NFO",
+          "side": "Sell",
+          "quantity": 30,
+          "order_type": "Market",
+          "price": null
+        }
+      ],
+      "total_margin_required": 0.0
+    }
+  ]
+}
