@@ -34,6 +34,10 @@ pub struct LegOrder {
     pub quantity: u32,
     pub order_type: LegOrderType,
     pub price: Option<f64>,
+    /// B1.2: Content-addressed intent ID for routing→fill join.
+    /// Computed in order_generation, propagated through KiteSim to fills.
+    #[serde(default)]
+    pub intent_id: Option<String>,
 }
 
 /// Direction of the leg execution.
@@ -72,6 +76,9 @@ pub struct LegExecutionResult {
     pub filled_qty: u32,
     pub fill_price: Option<f64>,
     pub error: Option<String>,
+    /// B1.2: Content-addressed intent ID for routing→fill join.
+    #[serde(default)]
+    pub intent_id: Option<String>,
 }
 
 /// Lifecycle state of an individual leg order.
@@ -110,6 +117,7 @@ impl MultiLegOrder {
                     quantity: (leg.quantity.abs() as u32) * lot_size,
                     order_type: LegOrderType::Market,
                     price: None,
+                    intent_id: None, // B1.2: Set by order_generation when routing
                 }
             })
             .collect();
@@ -306,6 +314,7 @@ impl MultiLegExecutor {
                     filled_qty: leg.quantity,
                     fill_price: leg.price.or(Some(100.0)),
                     error: None,
+                    intent_id: leg.intent_id.clone(), // B1.2
                 });
                 continue;
             }
@@ -361,6 +370,7 @@ impl MultiLegExecutor {
                         filled_qty,
                         fill_price: final_fill_price,
                         error: final_error,
+                        intent_id: leg.intent_id.clone(), // B1.2
                     });
 
                     if !all_success {
@@ -377,6 +387,7 @@ impl MultiLegExecutor {
                         filled_qty: 0,
                         fill_price: None,
                         error: Some(e.to_string()),
+                        intent_id: leg.intent_id.clone(), // B1.2
                     });
 
                     warn!("Initiating rollback of {} placed legs", i);
@@ -607,6 +618,7 @@ mod tests {
                     quantity: 50,
                     order_type: LegOrderType::Market,
                     price: None,
+                    intent_id: None,
                 },
                 LegOrder {
                     tradingsymbol: "NIFTY25D2525800PE".to_string(),
@@ -615,6 +627,7 @@ mod tests {
                     quantity: 50,
                     order_type: LegOrderType::Market,
                     price: None,
+                    intent_id: None,
                 },
             ],
             total_margin_required: 50000.0,

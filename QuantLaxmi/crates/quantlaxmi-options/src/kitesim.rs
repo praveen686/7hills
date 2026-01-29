@@ -121,8 +121,17 @@ pub struct KiteSimRunStats {
     pub hedges_attempted: u64,
     /// Number of hedge orders filled.
     pub hedges_filled: u64,
-    /// Slippage samples in basis points for analysis.
+    /// Slippage samples in basis points for analysis (valid books only).
     pub slippage_samples_bps: Vec<f64>,
+    /// Gate B0.4.1: Fills on invalid books (ask <= bid, crossed/locked).
+    pub invalid_book_fills: u64,
+    /// Gate M2: Fills via queue consumption (bid/ask qty decrease).
+    pub queue_consumption_fills: u64,
+    /// Gate M2.1: Fill attempts blocked by queue priority (ahead_qty > 0).
+    pub queue_priority_blocked: u64,
+    /// Gate B0.4.2: Quote timing mode for edge computation.
+    /// "current" = edge measured against same quote that triggered fill.
+    pub slip_quote_mode: &'static str,
 }
 
 /// Snapshot of last known quote.
@@ -151,6 +160,11 @@ struct SimOrder {
     eligible_ts: DateTime<Utc>,
     /// Mid price at order placement (Patch 3: for adverse selection).
     mid_at_place: f64,
+    /// Gate M2.1: Queue position ahead of this order at top-of-book.
+    /// Initialized when order becomes eligible. Must reach 0 before we can fill.
+    queue_ahead_qty: Option<u32>,
+    /// B1.2: Content-addressed intent ID for routing→fill join.
+    intent_id: Option<String>,
 }
 
 impl SimOrder {
@@ -169,6 +183,8 @@ pub struct KiteSim {
     cfg: KiteSimConfig,
     specs: Option<SpecStore>,
     last_quotes: HashMap<String, Quote>,
+    /// Gate M2: Previous quotes for queue consumption detection.
+    prev_quotes: HashMap<String, Quote>,
     /// L2 order books per symbol (only used in L2Book mode).
     /// Uses the canonical OrderBook from quantlaxmi-core.
     order_books: HashMap<String, OrderBook>,
@@ -185,9 +201,13 @@ impl KiteSim {
             cfg,
             specs: None,
             last_quotes: HashMap::new(),
+            prev_quotes: HashMap::new(),
             order_books: HashMap::new(),
             orders: HashMap::new(),
-            stats: KiteSimRunStats::default(),
+            stats: KiteSimRunStats {
+                slip_quote_mode: "current",
+                ..KiteSimRunStats::default()
+            },
             next_id: AtomicU64::new(1),
             now: Utc::now(),
         }
@@ -252,11 +272,20 @@ impl KiteSim {
         }
     }
 
-    /// Record slippage sample in bps (Patch 3).
-    fn record_slip(&mut self, side: LegSide, fill_px: f64, mid: f64) {
-        if mid <= 0.0 {
+    /// Record slippage sample in bps (Patch 3 + Gate B0.4.1).
+    /// Only records slippage on valid books (ask > bid).
+    /// Invalid books are counted separately.
+    fn record_slip(&mut self, side: LegSide, fill_px: f64, q: &Quote) {
+        let bid = q.bid;
+        let ask = q.ask;
+
+        // Gate B0.4.1: Check for invalid book (crossed/locked)
+        if ask <= bid || bid <= 0.0 || !bid.is_finite() || !ask.is_finite() {
+            self.stats.invalid_book_fills += 1;
             return;
         }
+
+        let mid = (bid + ask) / 2.0;
         let bps = match side {
             LegSide::Buy => ((fill_px - mid) / mid) * 10000.0,
             LegSide::Sell => ((mid - fill_px) / mid) * 10000.0,
@@ -281,6 +310,7 @@ impl KiteSim {
             filled_qty: o.filled_qty,
             fill_price: o.avg_price,
             error: None,
+            intent_id: o.intent_id.clone(), // B1.2: Propagate for join
         })
     }
 
@@ -346,17 +376,22 @@ impl KiteSim {
     }
 
     pub fn on_quote(&mut self, q: QuoteEvent) {
-        self.last_quotes.insert(
-            q.tradingsymbol.clone(),
-            Quote {
-                ts: q.ts,
-                bid: q.bid_f64(),
-                ask: q.ask_f64(),
-                bid_qty: q.bid_qty,
-                ask_qty: q.ask_qty,
-            },
-        );
-        self.match_eligible_orders_for(&q.tradingsymbol);
+        let sym = q.tradingsymbol.clone();
+        let new_quote = Quote {
+            ts: q.ts,
+            bid: q.bid_f64(),
+            ask: q.ask_f64(),
+            bid_qty: q.bid_qty,
+            ask_qty: q.ask_qty,
+        };
+
+        // Gate M2: Track previous quote for queue consumption detection
+        if let Some(old_quote) = self.last_quotes.get(&sym) {
+            self.prev_quotes.insert(sym.clone(), *old_quote);
+        }
+
+        self.last_quotes.insert(sym.clone(), new_quote);
+        self.match_eligible_orders_for(&sym);
     }
 
     /// Places a leg order into the simulator.
@@ -385,6 +420,8 @@ impl KiteSim {
             created_ts: ts,
             eligible_ts,
             mid_at_place,
+            queue_ahead_qty: None, // M2.1: Initialized on first eligible check
+            intent_id: leg.intent_id.clone(), // B1.2: Propagate for routing→fill join
         };
 
         self.orders.insert(order_id.clone(), order);
@@ -565,8 +602,22 @@ impl KiteSim {
                     LegStatus::PartiallyFilled
                 };
 
-                // Record slippage
-                self.record_slip(side, fill_px, current_mid);
+                // Record slippage - create synthetic quote from book for B0.4.1 validation
+                // Note: L2 mode uses book depth, so we extract best bid/ask for slippage tracking
+                if let Some(book) = self.order_books.get(tradingsymbol) {
+                    if let (Some(best_bid), Some(best_ask)) =
+                        (book.best_bid_f64(), book.best_ask_f64())
+                    {
+                        let synthetic_q = Quote {
+                            ts: self.now,
+                            bid: best_bid,
+                            ask: best_ask,
+                            bid_qty: 0, // Not used in record_slip
+                            ask_qty: 0,
+                        };
+                        self.record_slip(side, fill_px, &synthetic_q);
+                    }
+                }
             }
         }
     }
@@ -596,27 +647,199 @@ impl KiteSim {
         }
 
         // Determine executable price and visible quantity.
-        let (px, visible_qty) = match side {
-            LegSide::Buy => (q.ask, q.ask_qty),
-            LegSide::Sell => (q.bid, q.bid_qty),
-        };
-
-        // Limit price check.
-        if order_type == LegOrderType::Limit {
-            if let Some(lim) = limit_price {
-                match side {
-                    LegSide::Buy if px > lim => return,
-                    LegSide::Sell if px < lim => return,
-                    _ => {}
-                }
-            } else {
-                // Malformed: limit order without price.
-                if let Some(o) = self.orders.get_mut(order_id) {
-                    o.status = LegStatus::Rejected;
-                }
+        // Gate M2: Branch on order type with queue consumption for makers.
+        let tradingsymbol = {
+            let Some(o) = self.orders.get(order_id) else {
                 return;
+            };
+            o.tradingsymbol.clone()
+        };
+        let prev_q = self.prev_quotes.get(&tradingsymbol).copied();
+
+        let (px, visible_qty, is_queue_fill) = match order_type {
+            // MARKET orders: taker semantics - cross the spread immediately
+            LegOrderType::Market => match side {
+                LegSide::Buy => (q.ask, q.ask_qty, false),
+                LegSide::Sell => (q.bid, q.bid_qty, false),
+            },
+
+            // LIMIT orders: Gate M2 + M2.1 queue consumption with priority model
+            // Fill when queue at our price level trades AND we've worked through queue ahead
+            LegOrderType::Limit => {
+                let Some(lim) = limit_price else {
+                    // Malformed: limit order without price
+                    if let Some(o) = self.orders.get_mut(order_id) {
+                        o.status = LegStatus::Rejected;
+                    }
+                    return;
+                };
+
+                match side {
+                    LegSide::Buy => {
+                        // Buy limit at price lim
+                        // M2.1 queue priority model:
+                        // - bid > lim: We're behind the book, no fills
+                        // - bid == lim: We're at the book, apply queue priority
+                        // - bid < lim: We're in front of the book, immediate fill
+
+                        if q.bid > lim {
+                            // Behind the book - reset queue position, no fill
+                            if let Some(o) = self.orders.get_mut(order_id) {
+                                o.queue_ahead_qty = None;
+                            }
+                            return;
+                        }
+
+                        if q.bid < lim {
+                            // In front of the book - we're the best bid
+                            // Any sell that hits bid hits us first (no queue ahead)
+                            // Check for any trading at bid level
+                            let trading_qty = if let Some(pq) = prev_q {
+                                if q.bid_qty < pq.bid_qty {
+                                    // Bid queue decreased, trades happened
+                                    pq.bid_qty.saturating_sub(q.bid_qty)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+
+                            if trading_qty == 0 {
+                                return; // No trading activity
+                            }
+
+                            // We're in front, so all trading flows to us
+                            self.stats.queue_consumption_fills += 1;
+                            (lim, trading_qty, true)
+                        } else {
+                            // q.bid == lim: At the book, apply queue priority
+                            let queue_consumed = if let Some(pq) = prev_q {
+                                if q.bid == pq.bid && q.bid_qty < pq.bid_qty {
+                                    pq.bid_qty.saturating_sub(q.bid_qty)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+
+                            // M2.1: Get or initialize queue_ahead_qty
+                            let ahead = {
+                                let o = self.orders.get_mut(order_id).unwrap();
+                                if o.queue_ahead_qty.is_none() {
+                                    // First time at top-of-book: join at back of queue
+                                    let initial_ahead =
+                                        prev_q.map(|pq| pq.bid_qty).unwrap_or(q.bid_qty);
+                                    o.queue_ahead_qty = Some(initial_ahead);
+                                }
+                                o.queue_ahead_qty.unwrap()
+                            };
+
+                            if queue_consumed == 0 {
+                                return; // No queue consumption
+                            }
+
+                            // Calculate overflow (what flows to us after queue ahead is exhausted)
+                            let overflow = queue_consumed.saturating_sub(ahead);
+                            let new_ahead = ahead.saturating_sub(queue_consumed);
+
+                            // Update queue position
+                            if let Some(o) = self.orders.get_mut(order_id) {
+                                o.queue_ahead_qty = Some(new_ahead);
+                            }
+
+                            if overflow == 0 {
+                                self.stats.queue_priority_blocked += 1;
+                                return; // Still working through queue ahead of us
+                            }
+
+                            self.stats.queue_consumption_fills += 1;
+                            (lim, overflow, true)
+                        }
+                    }
+                    LegSide::Sell => {
+                        // Sell limit at price lim
+                        // M2.1 queue priority model:
+                        // - ask < lim: We're behind the book, no fills
+                        // - ask == lim: We're at the book, apply queue priority
+                        // - ask > lim: We're in front of the book, immediate fill
+
+                        if q.ask < lim {
+                            // Behind the book - reset queue position, no fill
+                            if let Some(o) = self.orders.get_mut(order_id) {
+                                o.queue_ahead_qty = None;
+                            }
+                            return;
+                        }
+
+                        if q.ask > lim {
+                            // In front of the book - we're the best ask
+                            // Any buy that hits ask hits us first
+                            let trading_qty = if let Some(pq) = prev_q {
+                                if q.ask_qty < pq.ask_qty {
+                                    pq.ask_qty.saturating_sub(q.ask_qty)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+
+                            if trading_qty == 0 {
+                                return; // No trading activity
+                            }
+
+                            self.stats.queue_consumption_fills += 1;
+                            (lim, trading_qty, true)
+                        } else {
+                            // q.ask == lim: At the book, apply queue priority
+                            let queue_consumed = if let Some(pq) = prev_q {
+                                if q.ask == pq.ask && q.ask_qty < pq.ask_qty {
+                                    pq.ask_qty.saturating_sub(q.ask_qty)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+
+                            // M2.1: Get or initialize queue_ahead_qty
+                            let ahead = {
+                                let o = self.orders.get_mut(order_id).unwrap();
+                                if o.queue_ahead_qty.is_none() {
+                                    let initial_ahead =
+                                        prev_q.map(|pq| pq.ask_qty).unwrap_or(q.ask_qty);
+                                    o.queue_ahead_qty = Some(initial_ahead);
+                                }
+                                o.queue_ahead_qty.unwrap()
+                            };
+
+                            if queue_consumed == 0 {
+                                return; // No queue consumption
+                            }
+
+                            // Calculate overflow
+                            let overflow = queue_consumed.saturating_sub(ahead);
+                            let new_ahead = ahead.saturating_sub(queue_consumed);
+
+                            if let Some(o) = self.orders.get_mut(order_id) {
+                                o.queue_ahead_qty = Some(new_ahead);
+                            }
+
+                            if overflow == 0 {
+                                self.stats.queue_priority_blocked += 1;
+                                return;
+                            }
+
+                            self.stats.queue_consumption_fills += 1;
+                            (lim, overflow, true)
+                        }
+                    }
+                }
             }
-        }
+        };
+        let _ = is_queue_fill; // Used for stats tracking above
 
         if visible_qty == 0 {
             return;
@@ -636,19 +859,26 @@ impl KiteSim {
             return;
         }
 
-        // Apply pessimistic slippage for taker-style fills.
-        let slip = px * (self.cfg.taker_slippage_bps / 10_000.0);
-        let base_px = match side {
-            LegSide::Buy => px + slip,
-            LegSide::Sell => px - slip,
+        // Determine fill price based on order type
+        let mid_now = Self::mid(&q);
+        let fill_px = match order_type {
+            // MARKET orders: apply taker slippage and adverse selection
+            LegOrderType::Market => {
+                let slip = px * (self.cfg.taker_slippage_bps / 10_000.0);
+                let base_px = match side {
+                    LegSide::Buy => px + slip,
+                    LegSide::Sell => px - slip,
+                };
+                self.adverse_adjust(base_px, side, mid_at_place, mid_now)
+            }
+            // LIMIT orders: fill at exactly the limit price (maker semantics)
+            // No slippage, no adverse selection - we posted and got filled
+            LegOrderType::Limit => px,
         };
 
-        // Apply adverse selection (Patch 3): penalize when mid moved against order
-        let mid_now = Self::mid(&q);
-        let fill_px = self.adverse_adjust(base_px, side, mid_at_place, mid_now);
-
-        // Record slippage sample (Patch 3)
-        self.record_slip(side, fill_px, mid_now);
+        // Record slippage sample (even for makers, to track fill quality vs mid)
+        // Gate B0.4.1: Now passes full quote for book validity checking
+        self.record_slip(side, fill_px, &q);
 
         // Update VWAP.
         let prev_notional = avg_price.unwrap_or(0.0) * (filled_qty as f64);
@@ -775,6 +1005,7 @@ impl<'a> MultiLegCoordinator<'a> {
                         filled_qty: filled,
                         fill_price: avg,
                         error: None,
+                        intent_id: leg.intent_id.clone(), // B1.2: Propagate for join
                     });
                     break;
                 }
@@ -788,6 +1019,7 @@ impl<'a> MultiLegCoordinator<'a> {
                         filled_qty: filled,
                         fill_price: avg,
                         error: Some(format!("partial fill: {}/{}", filled, qty)),
+                        intent_id: leg.intent_id.clone(), // B1.2: Propagate for join
                     });
                     break;
                 }
@@ -859,6 +1091,7 @@ impl<'a> MultiLegCoordinator<'a> {
                 quantity: filled,
                 order_type: LegOrderType::Market,
                 price: None,
+                intent_id: None, // Hedge orders don't have routing intents
             };
             let hedge_oid = self.sim.place_order(&hedge_leg, self.sim.now());
             // Best-effort: immediately try to fill on current quote if present.
@@ -926,6 +1159,7 @@ mod tests {
                     quantity: 50,
                     order_type: LegOrderType::Market,
                     price: None,
+                    intent_id: None,
                 },
                 LegOrder {
                     tradingsymbol: "NIFTY25JAN20100CE".to_string(),
@@ -934,6 +1168,7 @@ mod tests {
                     quantity: 50,
                     order_type: LegOrderType::Market,
                     price: None,
+                    intent_id: None,
                 },
             ],
             total_margin_required: 0.0,
@@ -1062,6 +1297,7 @@ mod tests {
                 quantity: 1, // Buy 1 unit (will be scaled by qty_exponent)
                 order_type: LegOrderType::Market,
                 price: None,
+                intent_id: None,
             }],
             total_margin_required: 0.0,
         };
