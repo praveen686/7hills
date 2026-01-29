@@ -15,7 +15,12 @@
 //! - `paper` - Run paper trading
 //! - `live` - Run live trading
 
+pub mod equity_curve;
+pub mod india_fees;
+pub mod intent_pnl;
 pub mod kitesim_backtest;
+pub mod label_generation;
+pub mod order_generation;
 pub mod sanos_io;
 pub mod session_capture;
 pub mod zerodha_capture;
@@ -199,6 +204,81 @@ pub enum Commands {
         #[arg(long, default_value_t = 1000000.0)]
         initial_capital: f64,
     },
+
+    /// Generate orders from replay data using a strategy
+    ///
+    /// Deterministic order generation: same replay + config = same orders.
+    /// Output is compatible with `backtest-kitesim --orders`.
+    GenerateOrders {
+        /// Strategy name: india_micro_mm, india_straddle, etc.
+        #[arg(long)]
+        strategy: String,
+
+        /// Path to replay quotes (JSONL of QuoteEvent)
+        #[arg(long)]
+        replay: String,
+
+        /// Output path for orders JSON
+        #[arg(long)]
+        out: String,
+
+        /// Optional strategy config TOML
+        #[arg(long)]
+        config: Option<String>,
+
+        /// Gate B1.3: Path for routing_decisions.jsonl sidecar (optional).
+        /// Contains per-decision feature vectors for training/audit.
+        #[arg(long)]
+        routing_log: Option<String>,
+
+        /// Random seed for deterministic generation (default: 0 = no randomness)
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
+
+    /// B1.2: Generate labels.jsonl by joining routing decisions with fills.
+    ///
+    /// Joins routing_decisions.jsonl (features at decision time) with fills.jsonl
+    /// (execution outcomes) to produce labeled training data for execution prediction.
+    GenerateLabels {
+        /// Path to routing_decisions.jsonl (from generate-orders --routing-log)
+        #[arg(long)]
+        routing_decisions: String,
+
+        /// Path to fills.jsonl (from backtest-kitesim output dir)
+        #[arg(long)]
+        fills: String,
+
+        /// Path to quotes replay (for horizon labels)
+        #[arg(long)]
+        quotes: String,
+
+        /// Output path for labels.jsonl
+        #[arg(long)]
+        out: String,
+    },
+
+    /// Generate intent_pnl.jsonl with per-intent PnL and performance metrics.
+    ///
+    /// Joins labels.jsonl with fee_ledger.jsonl to compute:
+    /// - gross_pnl_inr: execution edge vs mid_at_decision
+    /// - fees_inr: total transaction costs
+    /// - net_pnl_inr: gross - fees
+    ///
+    /// Also computes win rate, profit factor, and intent-level Sharpe ratio.
+    GenerateIntentPnl {
+        /// Path to labels.jsonl (from generate-labels)
+        #[arg(long)]
+        labels: String,
+
+        /// Path to fee_ledger.jsonl (from backtest-kitesim output dir)
+        #[arg(long)]
+        fee_ledger: String,
+
+        /// Output path for intent_pnl.jsonl
+        #[arg(long)]
+        out: String,
+    },
 }
 
 /// Main entry point for the India runner
@@ -284,6 +364,38 @@ async fn async_main() -> anyhow::Result<()> {
             config,
             initial_capital,
         } => run_live_mode(&config, initial_capital).await,
+        Commands::GenerateOrders {
+            strategy,
+            replay,
+            out,
+            config,
+            routing_log,
+            seed,
+        } => {
+            order_generation::run_generate_orders(
+                &strategy,
+                &replay,
+                &out,
+                config.as_deref(),
+                routing_log.as_deref(),
+                seed,
+            )
+            .await
+        }
+        Commands::GenerateLabels {
+            routing_decisions,
+            fills,
+            quotes,
+            out,
+        } => label_generation::run_generate_labels(&routing_decisions, &fills, &quotes, &out).await,
+        Commands::GenerateIntentPnl {
+            labels,
+            fee_ledger,
+            out,
+        } => {
+            intent_pnl::run_generate_intent_pnl(&labels, &fee_ledger, &out)?;
+            Ok(())
+        }
     }
 }
 
