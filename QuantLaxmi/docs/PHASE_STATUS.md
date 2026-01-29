@@ -2,7 +2,7 @@
 ## Current Implementation State
 
 **Last Updated:** 2026-01-29
-**Current Phase:** 26.2 Complete (Strategy Truth Report)
+**Current Phase:** 26.3 Complete (Truth Report Runner Wiring)
 
 ---
 
@@ -48,6 +48,7 @@
 | 25B | Latency Buckets | ✅ Complete | 2026-01-29 |
 | 26.1 | Strategy Aggregator | ✅ Complete | 2026-01-29 |
 | 26.2 | Truth Report Builder | ✅ Complete | 2026-01-29 |
+| 26.3 | Truth Report Runner Wiring | ✅ Complete | 2026-01-29 |
 
 ---
 
@@ -327,6 +328,64 @@ hex = "0.4"
 4. **net_pnl = equity_mantissa:** Cash evolution metric
 5. **Canonical JSON:** BTreeMap ordering, string-encoded i128s
 6. **Stable Digest:** Same inputs → same SHA-256
+
+### Phase 26.3: Truth Report Runner Wiring (✅ Complete)
+
+**Goal:** Wire Phase 26.1/26.2 into the backtest runner to emit reports automatically.
+
+**Hook Point:** After WAL finalization, before function return in `run_with_strategy()`.
+
+**Files Modified:**
+- `crates/quantlaxmi-runner-crypto/Cargo.toml` — Added quantlaxmi-eval dependency
+- `crates/quantlaxmi-runner-crypto/src/backtest.rs` — Added truth report generation
+
+**Files Created:**
+- `crates/quantlaxmi-runner-crypto/tests/phase26_truth_report_integration.rs` — 7 integration tests
+
+**Runner Integration Steps:**
+1. Read position updates from WAL using `WalReader`
+2. Build aggregator from position updates
+3. Build `SessionMetadata` from session context
+4. Build `StrategyTruthReport` from metadata + accumulators
+5. Write `reports/strategy_truth_report.json` and `reports/strategy_truth_summary.txt`
+6. Print compact summary to stdout
+
+**Output Directory:** `<segment_dir>/reports/`
+
+**Output Files:**
+- `strategy_truth_report.json` — Full report with digest
+- `strategy_truth_summary.txt` — Human-readable summary
+
+**Stdout Summary Format:**
+```
+================================================================================
+STRATEGY TRUTH REPORT (Phase 26.3)
+================================================================================
+Session:    backtest_<run_id>
+Instrument: BTCUSDT
+Latency:    0 tick(s)
+Exponent:   -2
+Digest:     abcd1234...
+
+--- strategy_id ---
+  Trades: 10 (7 W / 3 L)  Win Rate: 0.70
+  Net PnL:      12345 (exp=-2)
+  Gross PnL:    15000 (exp=-2)
+  Max Drawdown: 2000 (exp=-2)
+  Exposure:     20 updates
+================================================================================
+```
+
+**Determinism Guarantee:** Same WAL → same report bytes → same digest.
+
+**Tests:** 7 integration tests covering:
+1. Report built from WAL position updates
+2. Digest stability across identical inputs
+3. Text summary contains expected fields
+4. JSON roundtrip preserves data
+5. Empty strategies produces valid report
+6. Report files written to correct location
+7. Multi-strategy report with sorted ordering
 
 ---
 
@@ -1022,7 +1081,7 @@ pub struct PromotionDecision {
 | quantlaxmi-wal | 26 | ✅ All passing |
 | quantlaxmi-eval | 21 | ✅ All passing |
 | Other crates | 293 | ✅ All passing |
-| **Workspace Total** | 1010 | ✅ All passing |
+| **Workspace Total** | 1017 | ✅ All passing |
 
 ---
 
@@ -1323,6 +1382,11 @@ The following are now contractual surfaces and cannot change without a Phase bum
 | net_pnl = equity_mantissa (cash evolution) | Phase 26.2 |
 | gross_pnl = realized_pnl_delta sum | Phase 26.2 |
 | Text summary uses raw ts_ns | Phase 26.2 |
+| Report output dir: `<segment_dir>/reports/` | Phase 26.3 |
+| Report file: `strategy_truth_report.json` | Phase 26.3 |
+| Report file: `strategy_truth_summary.txt` | Phase 26.3 |
+| Stdout summary format (compact) | Phase 26.3 |
+| Hook point: after WAL flush, before return | Phase 26.3 |
 
 ---
 

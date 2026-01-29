@@ -42,6 +42,7 @@ quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
 quantlaxmi-strategy = { path = "../quantlaxmi-strategy" }
 quantlaxmi-gates = { path = "../quantlaxmi-gates" }
 quantlaxmi-wal = { path = "../quantlaxmi-wal" }
+quantlaxmi-eval = { path = "../quantlaxmi-eval" }
 
 # Async runtime
 tokio = { workspace = true }

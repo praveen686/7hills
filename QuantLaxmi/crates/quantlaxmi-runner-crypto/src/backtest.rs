@@ -28,7 +28,8 @@ use quantlaxmi_models::{
     OrderIntentRecord, OrderIntentSide, OrderIntentType, OrderRefuseReason, PositionUpdateRecord,
     SignalRequirements, compute_costs_v1,
 };
-use quantlaxmi_wal::{AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalWriter};
+use quantlaxmi_eval::{SessionMetadata, StrategyAggregatorRegistry, StrategyTruthReport};
+use quantlaxmi_wal::{AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalReader, WalWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -2933,6 +2934,119 @@ impl BacktestEngine {
                 "Phase 22C order permission gating complete"
             );
         }
+
+        // =========================================================================
+        // Phase 26.3: Truth Report Generation
+        // =========================================================================
+        // After WAL finalization, build and emit strategy truth report.
+        // This is pure plumbing: reads WAL, builds aggregator, writes artifacts.
+
+        // Step 1: Read position updates from WAL
+        let wal_reader = WalReader::open(segment_dir)?;
+        let position_updates = wal_reader.read_position_updates()?;
+
+        // Step 2: Build aggregator from position updates
+        let mut aggregator_registry = StrategyAggregatorRegistry::new();
+        for record in &position_updates {
+            if let Err(e) = aggregator_registry.process_position_update(record) {
+                tracing::warn!(error = %e, "Phase 26.3: Aggregator error (skipping record)");
+            }
+        }
+
+        // Step 3: Build SessionMetadata
+        let start_ts_ns = start_ts
+            .and_then(|t| t.timestamp_nanos_opt())
+            .unwrap_or(0);
+        let end_ts_ns = end_ts.and_then(|t| t.timestamp_nanos_opt()).unwrap_or(0);
+
+        // Compute cost model digest (SHA-256 of JSON, or None if default/empty)
+        let cost_model_digest: Option<String> = if cost_model.venues.is_empty() {
+            None
+        } else {
+            use sha2::{Digest as Sha2Digest, Sha256};
+            let json = serde_json::to_string(&cost_model).unwrap_or_default();
+            let mut hasher = Sha256::new();
+            hasher.update(json.as_bytes());
+            Some(hex::encode(hasher.finalize()))
+        };
+
+        // Get unified exponent from aggregator (default to PNL_EXPONENT if no records)
+        let unified_exponent = aggregator_registry
+            .unified_exponent()
+            .unwrap_or(PNL_EXPONENT);
+
+        let truth_metadata = SessionMetadata {
+            session_id: session_id.clone(),
+            instrument: fills
+                .first()
+                .map(|f| f.symbol.clone())
+                .unwrap_or_else(|| "UNKNOWN".to_string()),
+            start_ts_ns,
+            end_ts_ns,
+            latency_ticks: self.config.latency_ticks,
+            cost_model_digest,
+            unified_exponent,
+        };
+
+        // Step 4: Build Truth Report
+        let accumulators = aggregator_registry.finalize();
+        let truth_report = StrategyTruthReport::build(truth_metadata, accumulators);
+
+        // Step 5: Write artifacts to disk
+        let reports_dir = segment_dir.join("reports");
+        std::fs::create_dir_all(&reports_dir)
+            .with_context(|| format!("Failed to create reports dir: {:?}", reports_dir))?;
+
+        let json_path = reports_dir.join("strategy_truth_report.json");
+        std::fs::write(&json_path, truth_report.to_json())
+            .with_context(|| format!("Failed to write truth report JSON: {:?}", json_path))?;
+
+        let summary_path = reports_dir.join("strategy_truth_summary.txt");
+        std::fs::write(&summary_path, truth_report.to_text_summary())
+            .with_context(|| format!("Failed to write truth summary: {:?}", summary_path))?;
+
+        tracing::info!(
+            json_path = %json_path.display(),
+            summary_path = %summary_path.display(),
+            digest = %truth_report.digest,
+            "Phase 26.3: Truth report written"
+        );
+
+        // Step 6: Print summary to stdout (compact format for CI logs)
+        println!();
+        println!("================================================================================");
+        println!("STRATEGY TRUTH REPORT (Phase 26.3)");
+        println!("================================================================================");
+        println!("Session:    {}", truth_report.session_id);
+        println!("Instrument: {}", truth_report.instrument);
+        println!("Latency:    {} tick(s)", truth_report.latency_ticks);
+        println!("Exponent:   {}", truth_report.unified_exponent);
+        println!("Digest:     {}...", &truth_report.digest[..16]);
+        println!();
+
+        for (strategy_id, metrics) in &truth_report.strategies {
+            println!("--- {} ---", strategy_id);
+            println!(
+                "  Trades: {} ({} W / {} L)  Win Rate: {}",
+                metrics.trades, metrics.winning_trades, metrics.losing_trades, metrics.win_rate
+            );
+            println!(
+                "  Net PnL:      {} (exp={})",
+                metrics.net_pnl_mantissa, truth_report.unified_exponent
+            );
+            println!(
+                "  Gross PnL:    {} (exp={})",
+                metrics.gross_pnl_mantissa, truth_report.unified_exponent
+            );
+            println!(
+                "  Max Drawdown: {} (exp={})",
+                metrics.max_drawdown_mantissa, truth_report.unified_exponent
+            );
+            println!("  Exposure:     {} updates", metrics.exposure_updates);
+            println!();
+        }
+        println!("================================================================================");
+        println!();
 
         // Create strategy binding for manifest
         let strategy_binding = Some(crate::segment_manifest::StrategyBinding {
