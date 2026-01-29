@@ -341,23 +341,23 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
             // Update running positions and cashflow from this execution
             for (i, lr) in res.leg_results.iter().enumerate() {
-                if lr.status == LegStatus::Filled || lr.status == LegStatus::PartiallyFilled {
-                    if let Some(leg) = intent.order.legs.get(i) {
-                        let fill_price = lr.fill_price.unwrap_or(0.0);
-                        let fill_qty = lr.filled_qty as i64;
-                        match leg.side {
-                            LegSide::Buy => {
-                                running_cashflow -= fill_price * fill_qty as f64;
-                                *running_positions
-                                    .entry(leg.tradingsymbol.clone())
-                                    .or_insert(0) += fill_qty;
-                            }
-                            LegSide::Sell => {
-                                running_cashflow += fill_price * fill_qty as f64;
-                                *running_positions
-                                    .entry(leg.tradingsymbol.clone())
-                                    .or_insert(0) -= fill_qty;
-                            }
+                if (lr.status == LegStatus::Filled || lr.status == LegStatus::PartiallyFilled)
+                    && let Some(leg) = intent.order.legs.get(i)
+                {
+                    let fill_price = lr.fill_price.unwrap_or(0.0);
+                    let fill_qty = lr.filled_qty as i64;
+                    match leg.side {
+                        LegSide::Buy => {
+                            running_cashflow -= fill_price * fill_qty as f64;
+                            *running_positions
+                                .entry(leg.tradingsymbol.clone())
+                                .or_insert(0) += fill_qty;
+                        }
+                        LegSide::Sell => {
+                            running_cashflow += fill_price * fill_qty as f64;
+                            *running_positions
+                                .entry(leg.tradingsymbol.clone())
+                                .or_insert(0) -= fill_qty;
                         }
                     }
                 }
@@ -395,30 +395,30 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
             all_results.push((intent.order.clone(), res));
         }
     } else {
-        let mut order_idx = 0u64;
-        for order in order_file.orders.iter() {
+        for (order_idx, order) in order_file.orders.iter().enumerate() {
+            let order_idx = order_idx as u64;
             let mut coord = MultiLegCoordinator::new(&mut sim, policy.clone());
             let res = coord.execute_with_feed(order, &mut feed).await?;
 
             // Update running positions and cashflow
             for (i, lr) in res.leg_results.iter().enumerate() {
-                if lr.status == LegStatus::Filled || lr.status == LegStatus::PartiallyFilled {
-                    if let Some(leg) = order.legs.get(i) {
-                        let fill_price = lr.fill_price.unwrap_or(0.0);
-                        let fill_qty = lr.filled_qty as i64;
-                        match leg.side {
-                            LegSide::Buy => {
-                                running_cashflow -= fill_price * fill_qty as f64;
-                                *running_positions
-                                    .entry(leg.tradingsymbol.clone())
-                                    .or_insert(0) += fill_qty;
-                            }
-                            LegSide::Sell => {
-                                running_cashflow += fill_price * fill_qty as f64;
-                                *running_positions
-                                    .entry(leg.tradingsymbol.clone())
-                                    .or_insert(0) -= fill_qty;
-                            }
+                if (lr.status == LegStatus::Filled || lr.status == LegStatus::PartiallyFilled)
+                    && let Some(leg) = order.legs.get(i)
+                {
+                    let fill_price = lr.fill_price.unwrap_or(0.0);
+                    let fill_qty = lr.filled_qty as i64;
+                    match leg.side {
+                        LegSide::Buy => {
+                            running_cashflow -= fill_price * fill_qty as f64;
+                            *running_positions
+                                .entry(leg.tradingsymbol.clone())
+                                .or_insert(0) += fill_qty;
+                        }
+                        LegSide::Sell => {
+                            running_cashflow += fill_price * fill_qty as f64;
+                            *running_positions
+                                .entry(leg.tradingsymbol.clone())
+                                .or_insert(0) -= fill_qty;
                         }
                     }
                 }
@@ -448,7 +448,6 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
             returns_tracker.update(equity_inr);
 
             all_results.push((order.clone(), res));
-            order_idx += 1;
         }
     }
 
@@ -890,7 +889,7 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     // Risk metrics
     daily_report.risk.max_position_contracts = positions
         .values()
-        .map(|q| q.abs() as u32)
+        .map(|q| q.unsigned_abs() as u32)
         .max()
         .unwrap_or(0);
 

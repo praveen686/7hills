@@ -9,7 +9,7 @@
 //! - Track max drawdown online with MaxDrawdownTracker
 //! - Compute Sharpe from the resulting equity_curve.jsonl
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for equity curve emission
@@ -192,12 +192,12 @@ impl OnlineReturnsTracker {
 
     /// Update with new equity value, computing return from previous
     pub fn update(&mut self, equity: f64) {
-        if let Some(prev) = self.prev_equity {
-            if prev > 0.0 {
-                // Simple return
-                let ret = (equity - prev) / prev;
-                self.add_return(ret);
-            }
+        if let Some(prev) = self.prev_equity
+            && prev > 0.0
+        {
+            // Simple return
+            let ret = (equity - prev) / prev;
+            self.add_return(ret);
         }
         self.prev_equity = Some(equity);
     }
@@ -283,6 +283,7 @@ pub struct EquityCurveSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
 
     #[test]
     fn test_floor_to_bar() {
