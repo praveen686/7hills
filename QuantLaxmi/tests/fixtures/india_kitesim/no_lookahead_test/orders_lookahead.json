@@ -1,0 +1,16 @@
+{
+  "strategy_name": "lookahead_test",
+  "orders": [
+    {
+      "legs": [
+        {
+          "tradingsymbol": "NIFTY26FEB22000CE",
+          "side": "Buy",
+          "quantity": 1,
+          "order_type": "Market",
+          "price": null
+        }
+      ]
+    }
+  ]
+}

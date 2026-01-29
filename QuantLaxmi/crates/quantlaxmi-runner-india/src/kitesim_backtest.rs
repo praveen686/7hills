@@ -149,16 +149,8 @@ pub fn get_nse_tick_size(_symbol: &str) -> f64 {
     0.05
 }
 
-/// Extract last quote per symbol from replay events (for MTM valuation)
-fn extract_last_quotes(events: &[ReplayEvent]) -> std::collections::HashMap<String, QuoteEvent> {
-    let mut last_quotes = std::collections::HashMap::new();
-    for ev in events {
-        if let ReplayEvent::Quote(q) = ev {
-            last_quotes.insert(q.tradingsymbol.clone(), q.clone());
-        }
-    }
-    last_quotes
-}
+// REMOVED: extract_last_quotes was lookahead bias - used future prices for MTM
+// Now using live_quotes updated incrementally as events are ingested
 
 pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     let replay_path = Path::new(&cfg.replay_path);
@@ -178,17 +170,14 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
     let mut replay_events = load_quotes_jsonl(replay_path)?;
 
-    // Gate B0.3: Extract last quotes per symbol for MTM valuation
-    let last_quotes = extract_last_quotes(&replay_events);
-
     if let Some(ref depth_path) = cfg.depth_path {
         let depth_events = load_depth_jsonl(Path::new(depth_path))?;
         tracing::info!("Loaded {} depth events for L2Book mode", depth_events.len());
         replay_events.extend(depth_events);
     }
 
-    // Defensive: ensure replay events are strictly time-ordered
-    replay_events.sort_by_key(|ev| ev.ts());
+    // Step 3: Do NOT sort here - ReplayFeed handles canonical ordering via sort_key()
+    // Sorting by ts() alone is non-deterministic for same-timestamp events
 
     let use_intents = cfg.intents_path.is_some();
     let intents_file = if let Some(ref ip) = cfg.intents_path {
@@ -254,10 +243,14 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
         hedge_on_failure: cfg.hedge_on_failure,
     };
 
-    // Extract first quote timestamp for baseline (before creating feed)
-    let first_quote_ts: Option<DateTime<Utc>> = replay_events.first().map(|ev| ev.ts());
+    // Step 4: Use min timestamp for baseline (not first - input may be unordered)
+    let min_event_ts: Option<DateTime<Utc>> = replay_events.iter().map(|ev| ev.ts()).min();
 
     let mut feed = ReplayFeed::new(replay_events);
+
+    // Step 1.2: Live quotes map - updated ONLY as quotes are ingested (no lookahead)
+    let mut live_quotes: std::collections::HashMap<String, QuoteEvent> =
+        std::collections::HashMap::new();
     // Store (order, result) pairs to track side info for PnL computation
     let mut all_results: Vec<(MultiLegOrder, quantlaxmi_options::execution::MultiLegResult)> =
         Vec::new();
@@ -279,8 +272,8 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     let mut equity_last_inr: Option<f64> = None;
 
     // Emit baseline point (equity=0 before any trades)
-    if let Some(first_ts) = first_quote_ts {
-        let baseline_ts = first_ts - Duration::milliseconds(1); // Strictly before first quote
+    if let Some(min_ts) = min_event_ts {
+        let baseline_ts = min_ts - Duration::milliseconds(1); // Strictly before earliest event
         let baseline = EquityPoint::with_components(baseline_ts, 0.0, 0.0);
         use std::io::Write;
         writeln!(equity_curve_file, "{}", serde_json::to_string(&baseline)?)?;
@@ -298,7 +291,8 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     let mut running_positions: std::collections::BTreeMap<String, i64> =
         std::collections::BTreeMap::new();
 
-    // Helper to compute MTM from positions using latest quotes
+    // Step 1.3: Helper to compute MTM from positions using LIVE quotes only
+    // Mark rules: long qty > 0 → bid (conservative liquidation), short qty < 0 → ask
     let compute_running_mtm = |positions: &std::collections::BTreeMap<String, i64>,
                                quotes: &std::collections::HashMap<String, QuoteEvent>|
      -> f64 {
@@ -331,6 +325,10 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
                     break;
                 }
                 if let Some(ev) = feed.next() {
+                    // Step 1.2: Update live_quotes BEFORE ingesting (no lookahead)
+                    if let ReplayEvent::Quote(ref q) = ev {
+                        live_quotes.insert(q.tradingsymbol.clone(), q.clone());
+                    }
                     sim.ingest_event(&ev)?;
                 }
             }
@@ -363,8 +361,8 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
                 }
             }
 
-            // Emit equity point at this timestamp
-            let running_mtm = compute_running_mtm(&running_positions, &last_quotes);
+            // Step 1.3: Emit equity point using LIVE quotes only (no lookahead)
+            let running_mtm = compute_running_mtm(&running_positions, &live_quotes);
             let equity_inr = running_cashflow + running_mtm;
             let bar_ts = floor_to_bar(target_ts, eq_cfg.interval_secs);
 
@@ -424,8 +422,11 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
                 }
             }
 
-            // Emit equity point (use synthetic timestamp for bulk orders)
-            let running_mtm = compute_running_mtm(&running_positions, &last_quotes);
+            // Step 1.3: Emit equity point using LIVE quotes only (no lookahead)
+            // LIMITATION: For bulk orders mode, live_quotes is NOT updated during execution
+            // because execute_with_feed consumes events internally. Equity curve shows
+            // cashflow-only progression. Use intent mode for proper MTM-adjusted equity curve.
+            let running_mtm = compute_running_mtm(&running_positions, &live_quotes);
             let equity_inr = running_cashflow + running_mtm;
             // For bulk orders, use a synthetic timestamp based on order index
             let synthetic_ts = Utc::now() + Duration::seconds(order_idx as i64);
@@ -449,6 +450,15 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
 
             all_results.push((order.clone(), res));
         }
+    }
+
+    // Step 2.1: Drain remaining events from feed to get terminal quotes
+    // This ensures end-of-run valuation uses actual end-of-replay marks
+    while let Some(ev) = feed.next() {
+        if let ReplayEvent::Quote(ref q) = ev {
+            live_quotes.insert(q.tradingsymbol.clone(), q.clone());
+        }
+        sim.ingest_event(&ev)?;
     }
 
     let stats = sim.stats();
@@ -541,28 +551,27 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
         }
     }
 
-    // MTM valuation using conservative pricing:
-    // - Long positions (pos > 0): value at bid (worst-case liquidation)
-    // - Short positions (pos < 0): value at ask (worst-case buyback)
+    // Step 2.2: MTM valuation using TERMINAL live_quotes (after draining feed)
+    // Conservative pricing: long → bid, short → ask
     // Using BTreeMap for deterministic JSON output
     let mut mtm_value: f64 = 0.0;
     let mut eod_marks: std::collections::BTreeMap<String, serde_json::Value> =
         std::collections::BTreeMap::new();
-    let mut mtm_warnings: Vec<String> = Vec::new();
+    let mut mtm_errors: Vec<String> = Vec::new();
 
     for (sym, &qty) in &positions {
         if qty == 0 {
             continue;
         }
-        match last_quotes.get(sym) {
+        match live_quotes.get(sym) {
             Some(q) => {
                 let bid = q.bid_f64();
                 let ask = q.ask_f64();
 
                 // Mark sanity + NaN guard (gate-grade validation)
                 if !bid.is_finite() || !ask.is_finite() || ask < bid || bid <= 0.0 {
-                    mtm_warnings.push(format!(
-                        "invalid last quote for {}: bid={}, ask={}",
+                    mtm_errors.push(format!(
+                        "invalid terminal quote for {}: bid={}, ask={}",
                         sym, bid, ask
                     ));
                     continue;
@@ -582,9 +591,21 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
                 );
             }
             None => {
-                mtm_warnings.push(format!("missing last quote for {}", sym));
+                // Step 2.2: Fail on missing quote for nonzero position
+                mtm_errors.push(format!(
+                    "FATAL: missing terminal quote for {} with qty={}",
+                    sym, qty
+                ));
             }
         }
+    }
+
+    // Step 2.2: Fail run if any position has missing terminal quote
+    if mtm_errors.iter().any(|e| e.starts_with("FATAL:")) {
+        anyhow::bail!(
+            "Terminal MTM valuation failed - missing quotes for open positions:\n{}",
+            mtm_errors.join("\n")
+        );
     }
 
     let mtm_pnl = cashflow + mtm_value;
@@ -714,8 +735,8 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     if let Some(scorecard) = maker_scorecard {
         pnl_json["maker_scorecard"] = scorecard;
     }
-    if !mtm_warnings.is_empty() {
-        pnl_json["mtm_warnings"] = serde_json::json!(mtm_warnings);
+    if !mtm_errors.is_empty() {
+        pnl_json["mtm_errors"] = serde_json::json!(mtm_errors);
     }
     std::fs::write(&pnl_path, serde_json::to_string_pretty(&pnl_json)?)?;
     tracing::info!("PnL summary written to: {}", pnl_path.display());
@@ -938,9 +959,32 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
     )?;
     tracing::info!("Daily PnL report written to: {}", daily_pnl_path.display());
 
-    // Emit run_summary.json for offline verification: equity_last == gross_mtm_inr
+    // Step 5: Emit run_summary.json with provenance for reproducibility
+    // Compute file stats for provenance (lightweight alternative to SHA256)
+    let replay_metadata = std::fs::metadata(replay_path).ok();
+    let orders_metadata = std::fs::metadata(orders_path).ok();
+    let replay_line_count = std::fs::read_to_string(replay_path)
+        .map(|s| s.lines().count())
+        .unwrap_or(0);
+    let orders_line_count = std::fs::read_to_string(orders_path)
+        .map(|s| s.lines().count())
+        .unwrap_or(0);
+
+    // Try to get git commit (best effort)
+    let git_commit = std::env::var("GIT_COMMIT")
+        .or_else(|_| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .ok_or(std::env::VarError::NotPresent)
+        })
+        .ok();
+
     let run_summary = serde_json::json!({
-        "schema": "quantlaxmi.reports.run_summary.v1",
+        "schema": "quantlaxmi.reports.run_summary.v2",
         "equity_first_inr": equity_first_inr,
         "equity_last_inr": equity_last_inr,
         "gross_mtm_inr": gross_mtm,
@@ -950,6 +994,18 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
         "verification": {
             "equity_last_equals_gross_mtm": equity_last_inr.map(|el| (el - gross_mtm).abs() < 0.01).unwrap_or(false),
             "note": "With baseline, equity_first=0 and equity_last==gross_mtm_inr"
+        },
+        "provenance": {
+            "git_commit": git_commit,
+            "replay_file": cfg.replay_path,
+            "replay_size_bytes": replay_metadata.as_ref().map(|m| m.len()),
+            "replay_line_count": replay_line_count,
+            "orders_file": cfg.orders_path,
+            "orders_size_bytes": orders_metadata.as_ref().map(|m| m.len()),
+            "orders_line_count": orders_line_count,
+            "intents_file": cfg.intents_path,
+            "strategy_name": strategy_name.clone(),
+            "qty_scale": cfg.qty_scale,
         }
     });
     let run_summary_path = out_dir.join("run_summary.json");
