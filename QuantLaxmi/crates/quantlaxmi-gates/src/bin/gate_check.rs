@@ -790,8 +790,7 @@ fn run_all(
     // G7: Run if both g7_live and g7_replay are provided
     let g7 = match (g7_live, g7_replay) {
         (Some(l), Some(r)) => Some(
-            G7PositionDeterminismGate::compare(l, r)
-                .map_err(Box::<dyn std::error::Error>::from)?,
+            G7PositionDeterminismGate::compare(l, r).map_err(Box::<dyn std::error::Error>::from)?,
         ),
         (Some(_), None) => {
             return Err("G7 requires both --g7-live and --g7-replay".into());

@@ -15,6 +15,7 @@
 use crate::replay::{EventKind, ReplayEvent, SegmentReplayAdapter};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use quantlaxmi_eval::{SessionMetadata, StrategyAggregatorRegistry, StrategyTruthReport};
 use quantlaxmi_events::{CorrelationContext, DecisionEvent, DecisionTraceBuilder, MarketSnapshot};
 use quantlaxmi_gates::admission::{
     AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
@@ -28,8 +29,9 @@ use quantlaxmi_models::{
     OrderIntentRecord, OrderIntentSide, OrderIntentType, OrderRefuseReason, PositionUpdateRecord,
     SignalRequirements, compute_costs_v1,
 };
-use quantlaxmi_eval::{SessionMetadata, StrategyAggregatorRegistry, StrategyTruthReport};
-use quantlaxmi_wal::{AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalReader, WalWriter};
+use quantlaxmi_wal::{
+    AdmissionIndex, AdmissionMismatch, AdmissionMismatchReason, WalReader, WalWriter,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -2954,9 +2956,7 @@ impl BacktestEngine {
         }
 
         // Step 3: Build SessionMetadata
-        let start_ts_ns = start_ts
-            .and_then(|t| t.timestamp_nanos_opt())
-            .unwrap_or(0);
+        let start_ts_ns = start_ts.and_then(|t| t.timestamp_nanos_opt()).unwrap_or(0);
         let end_ts_ns = end_ts.and_then(|t| t.timestamp_nanos_opt()).unwrap_or(0);
 
         // Compute cost model digest (SHA-256 of JSON, or None if default/empty)
@@ -3014,9 +3014,13 @@ impl BacktestEngine {
 
         // Step 6: Print summary to stdout (compact format for CI logs)
         println!();
-        println!("================================================================================");
+        println!(
+            "================================================================================"
+        );
         println!("STRATEGY TRUTH REPORT (Phase 26.3)");
-        println!("================================================================================");
+        println!(
+            "================================================================================"
+        );
         println!("Session:    {}", truth_report.session_id);
         println!("Instrument: {}", truth_report.instrument);
         println!("Latency:    {} tick(s)", truth_report.latency_ticks);
@@ -3045,7 +3049,9 @@ impl BacktestEngine {
             println!("  Exposure:     {} updates", metrics.exposure_updates);
             println!();
         }
-        println!("================================================================================");
+        println!(
+            "================================================================================"
+        );
         println!();
 
         // Create strategy binding for manifest
