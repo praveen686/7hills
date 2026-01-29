@@ -1011,7 +1011,11 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
         "equity_bars": equity_bar_count,
         "verification": {
             "equity_last_equals_gross_mtm": equity_last_inr.map(|el| (el - gross_mtm).abs() < 0.01).unwrap_or(false),
-            "note": "With baseline, equity_first=0 and equity_last==gross_mtm_inr"
+            "note": if use_intents {
+                "Intent mode: baseline at min_ts-1ms, equity_first=0, equity_last==gross_mtm"
+            } else {
+                "Bulk mode: terminal-only equity emission, equity_first==equity_last==gross_mtm"
+            }
         },
         // Optional provenance fields (v1 compatible)
         "provenance": {
