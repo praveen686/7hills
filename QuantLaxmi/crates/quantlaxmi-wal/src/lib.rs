@@ -379,15 +379,15 @@ impl WalWriter {
             .execution_fills_last_seq
             .get(&record.session_id)
             .copied();
-        if let Some(prev) = last_seq {
-            if record.seq <= prev {
-                anyhow::bail!(
-                    "Execution fill seq monotonicity violation: session_id={}, prev_seq={}, new_seq={} (duplicate key = broken seq monotonicity)",
-                    record.session_id,
-                    prev,
-                    record.seq
-                );
-            }
+        if let Some(prev) = last_seq
+            && record.seq <= prev
+        {
+            anyhow::bail!(
+                "Execution fill seq monotonicity violation: session_id={}, prev_seq={}, new_seq={} (duplicate key = broken seq monotonicity)",
+                record.session_id,
+                prev,
+                record.seq
+            );
         }
         self.execution_fills_last_seq
             .insert(record.session_id.clone(), record.seq);
@@ -428,15 +428,15 @@ impl WalWriter {
             .position_updates_last_seq
             .get(&record.session_id)
             .copied();
-        if let Some(prev) = last_seq {
-            if record.seq <= prev {
-                anyhow::bail!(
-                    "Position update seq monotonicity violation: session_id={}, prev_seq={}, new_seq={} (duplicate key = broken seq monotonicity)",
-                    record.session_id,
-                    prev,
-                    record.seq
-                );
-            }
+        if let Some(prev) = last_seq
+            && record.seq <= prev
+        {
+            anyhow::bail!(
+                "Position update seq monotonicity violation: session_id={}, prev_seq={}, new_seq={} (duplicate key = broken seq monotonicity)",
+                record.session_id,
+                prev,
+                record.seq
+            );
         }
         self.position_updates_last_seq
             .insert(record.session_id.clone(), record.seq);
