@@ -406,34 +406,77 @@ impl ZerodhaConnector {
         symbols: &[String],
     ) -> anyhow::Result<Vec<(String, u32)>> {
         let client = reqwest::Client::new();
-
-        // Fetch NFO instruments
-        let url = format!("{}/instruments/NFO", KITE_API_URL);
-        let response = client
-            .get(&url)
-            .header("X-Kite-Version", "3")
-            .header(
-                "Authorization",
-                format!("token {}:{}", api_key, access_token),
-            )
-            .send()
-            .await?
-            .text()
-            .await?;
-
         let mut tokens = Vec::new();
 
-        // Parse CSV (header: instrument_token,exchange_token,tradingsymbol,...)
-        for line in response.lines().skip(1) {
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() >= 3 {
-                let token: u32 = parts[0].parse().unwrap_or(0);
-                let tradingsymbol = parts[2];
+        // Separate symbols by exchange
+        let nfo_symbols: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.contains("CE") || s.contains("PE") || s.contains("FUT"))
+            .collect();
+        let nse_symbols: Vec<_> = symbols
+            .iter()
+            .filter(|s| !s.contains("CE") && !s.contains("PE") && !s.contains("FUT"))
+            .collect();
 
-                for symbol in symbols {
-                    if tradingsymbol == symbol {
-                        tokens.push((symbol.clone(), token));
-                        info!(symbol = %symbol, token = token, "Found instrument token");
+        // Fetch NFO instruments for options/futures
+        if !nfo_symbols.is_empty() {
+            let url = format!("{}/instruments/NFO", KITE_API_URL);
+            let response = client
+                .get(&url)
+                .header("X-Kite-Version", "3")
+                .header(
+                    "Authorization",
+                    format!("token {}:{}", api_key, access_token),
+                )
+                .send()
+                .await?
+                .text()
+                .await?;
+
+            // Parse CSV (header: instrument_token,exchange_token,tradingsymbol,...)
+            for line in response.lines().skip(1) {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 3 {
+                    let token: u32 = parts[0].parse().unwrap_or(0);
+                    let tradingsymbol = parts[2];
+
+                    for symbol in &nfo_symbols {
+                        if tradingsymbol == *symbol {
+                            tokens.push(((*symbol).clone(), token));
+                            info!(symbol = %symbol, token = token, "Found NFO instrument token");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fetch NSE instruments for indices/equities
+        if !nse_symbols.is_empty() {
+            let url = format!("{}/instruments/NSE", KITE_API_URL);
+            let response = client
+                .get(&url)
+                .header("X-Kite-Version", "3")
+                .header(
+                    "Authorization",
+                    format!("token {}:{}", api_key, access_token),
+                )
+                .send()
+                .await?
+                .text()
+                .await?;
+
+            // Parse CSV (header: instrument_token,exchange_token,tradingsymbol,...)
+            for line in response.lines().skip(1) {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 3 {
+                    let token: u32 = parts[0].parse().unwrap_or(0);
+                    let tradingsymbol = parts[2];
+
+                    for symbol in &nse_symbols {
+                        if tradingsymbol == *symbol {
+                            tokens.push(((*symbol).clone(), token));
+                            info!(symbol = %symbol, token = token, "Found NSE instrument token");
+                        }
                     }
                 }
             }
@@ -1549,6 +1592,7 @@ impl ZerodhaAutoDiscovery {
     /// Markers: "NIFTY-AUTO", "BANKNIFTY-AUTO", "NIFTY-ATM", etc.
     pub async fn resolve_symbols(&self, symbols: &[String]) -> anyhow::Result<Vec<(String, u32)>> {
         let mut result = Vec::new();
+        let mut regular_symbols = Vec::new();
 
         for symbol in symbols {
             let upper = symbol.to_uppercase();
@@ -1584,8 +1628,94 @@ impl ZerodhaAutoDiscovery {
                     }
                 }
             } else {
-                // Regular symbol - will need token lookup later
-                result.push((symbol.clone(), 0));
+                // Regular symbol - collect for batch token lookup
+                regular_symbols.push(symbol.clone());
+            }
+        }
+
+        // Lookup tokens for regular symbols (index, futures, specific options)
+        if !regular_symbols.is_empty() {
+            info!(
+                "[RESOLVE] Looking up tokens for {} regular symbols",
+                regular_symbols.len()
+            );
+
+            // Separate by exchange
+            let nfo_symbols: Vec<_> = regular_symbols
+                .iter()
+                .filter(|s| s.contains("CE") || s.contains("PE") || s.contains("FUT"))
+                .cloned()
+                .collect();
+            let nse_symbols: Vec<_> = regular_symbols
+                .iter()
+                .filter(|s| !s.contains("CE") && !s.contains("PE") && !s.contains("FUT"))
+                .cloned()
+                .collect();
+
+            // Fetch NFO instruments for options/futures
+            if !nfo_symbols.is_empty() {
+                let url = format!("{}/instruments/NFO", KITE_API_URL);
+                if let Ok(response) = self
+                    .client
+                    .get(&url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .header("X-Kite-Version", "3")
+                    .header(
+                        "Authorization",
+                        format!("token {}:{}", self.api_key, self.access_token),
+                    )
+                    .send()
+                    .await
+                {
+                    if let Ok(text) = response.text().await {
+                        for line in text.lines().skip(1) {
+                            let parts: Vec<&str> = line.split(',').collect();
+                            if parts.len() >= 3 {
+                                let token: u32 = parts[0].parse().unwrap_or(0);
+                                let tradingsymbol = parts[2];
+                                for sym in &nfo_symbols {
+                                    if tradingsymbol == sym {
+                                        info!("[RESOLVE] NFO {} -> token {}", sym, token);
+                                        result.push((sym.clone(), token));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fetch NSE instruments for indices/equities
+            if !nse_symbols.is_empty() {
+                let url = format!("{}/instruments/NSE", KITE_API_URL);
+                if let Ok(response) = self
+                    .client
+                    .get(&url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .header("X-Kite-Version", "3")
+                    .header(
+                        "Authorization",
+                        format!("token {}:{}", self.api_key, self.access_token),
+                    )
+                    .send()
+                    .await
+                {
+                    if let Ok(text) = response.text().await {
+                        for line in text.lines().skip(1) {
+                            let parts: Vec<&str> = line.split(',').collect();
+                            if parts.len() >= 3 {
+                                let token: u32 = parts[0].parse().unwrap_or(0);
+                                let tradingsymbol = parts[2];
+                                for sym in &nse_symbols {
+                                    if tradingsymbol == sym {
+                                        info!("[RESOLVE] NSE {} -> token {}", sym, token);
+                                        result.push((sym.clone(), token));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1693,6 +1823,200 @@ impl ZerodhaAutoDiscovery {
             missing,
         })
     }
+
+    // =========================================================================
+    // HISTORICAL DATA API (for regime warmup)
+    // =========================================================================
+
+    /// Fetch historical candle data for regime warmup
+    ///
+    /// # Parameters
+    /// * `instrument_token` - Kite instrument token
+    /// * `interval` - Candle interval: "minute", "3minute", "5minute", "15minute", "60minute", "day"
+    /// * `from` - Start datetime
+    /// * `to` - End datetime
+    ///
+    /// # Returns
+    /// Vector of OHLCV candles
+    pub async fn fetch_historical(
+        &self,
+        instrument_token: u32,
+        interval: &str,
+        from: chrono::DateTime<Utc>,
+        to: chrono::DateTime<Utc>,
+    ) -> anyhow::Result<Vec<HistoricalCandle>> {
+        let url = format!(
+            "{}/instruments/historical/{}/{}",
+            KITE_API_URL, instrument_token, interval
+        );
+
+        // Kite API expects dates in IST (UTC+5:30), not UTC
+        use chrono::FixedOffset;
+        let ist = FixedOffset::east_opt(5 * 3600 + 30 * 60).unwrap(); // UTC+5:30
+        let from_ist = from.with_timezone(&ist);
+        let to_ist = to.with_timezone(&ist);
+
+        // Kite API expects format: YYYY-MM-DD HH:MM:SS (space separator, not +)
+        let from_str = from_ist.format("%Y-%m-%d %H:%M:%S").to_string();
+        let to_str = to_ist.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        info!(
+            "[HISTORICAL] Fetching {} candles for token {} from {} to {} (IST)",
+            interval, instrument_token, from_str, to_str
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .query(&[("from", &from_str), ("to", &to_str)])
+            .header("X-Kite-Version", "3")
+            .header(
+                "Authorization",
+                format!("token {}:{}", self.api_key, self.access_token),
+            )
+            .send()
+            .await?;
+
+        let status = response.status();
+        let response_text = response.text().await?;
+
+        if !status.is_success() {
+            warn!(
+                "[HISTORICAL] API returned status {}: {}",
+                status, response_text
+            );
+            return Err(anyhow::anyhow!(
+                "Historical API returned status {}: {}",
+                status,
+                response_text
+            ));
+        }
+
+        let resp: HistoricalResponse = serde_json::from_str(&response_text).map_err(|e| {
+            warn!(
+                "[HISTORICAL] Failed to parse response: {} - body: {}",
+                e, response_text
+            );
+            anyhow::anyhow!("Failed to parse historical response: {}", e)
+        })?;
+
+        if resp.status != "success" {
+            warn!("[HISTORICAL] API status not success: {}", response_text);
+            return Err(anyhow::anyhow!(
+                "Historical data fetch failed for token {}: {}",
+                instrument_token,
+                response_text
+            ));
+        }
+
+        let candles: Vec<HistoricalCandle> = resp
+            .data
+            .candles
+            .into_iter()
+            .filter_map(|row| {
+                if row.len() >= 6 {
+                    Some(HistoricalCandle {
+                        timestamp: row[0].as_str()?.to_string(),
+                        open: row[1].as_f64()?,
+                        high: row[2].as_f64()?,
+                        low: row[3].as_f64()?,
+                        close: row[4].as_f64()?,
+                        volume: row[5].as_u64().unwrap_or(0),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        info!(
+            "[HISTORICAL] Fetched {} candles for token {}",
+            candles.len(),
+            instrument_token
+        );
+
+        Ok(candles)
+    }
+
+    /// Fetch last N minutes of historical data for multiple tokens (for warmup)
+    pub async fn fetch_warmup_data(
+        &self,
+        tokens: &[(String, u32)],
+        lookback_minutes: i64,
+    ) -> anyhow::Result<HashMap<String, Vec<HistoricalCandle>>> {
+        let to = Utc::now();
+        let from = to - chrono::Duration::minutes(lookback_minutes);
+
+        info!(
+            "[WARMUP] Fetching historical data for {} tokens, lookback {} minutes (from {} to {})",
+            tokens.len(),
+            lookback_minutes,
+            from,
+            to
+        );
+
+        let mut result = HashMap::new();
+        let mut errors = Vec::new();
+
+        for (symbol, token) in tokens {
+            if *token == 0 {
+                warn!("[WARMUP] Skipping {} - token is 0", symbol);
+                continue;
+            }
+
+            info!("[WARMUP] Fetching {} (token {})...", symbol, token);
+
+            match self.fetch_historical(*token, "minute", from, to).await {
+                Ok(candles) => {
+                    info!(
+                        "[WARMUP] {} (token {}): fetched {} candles",
+                        symbol,
+                        token,
+                        candles.len()
+                    );
+                    result.insert(symbol.clone(), candles);
+                }
+                Err(e) => {
+                    let err_msg = format!("{}: {}", symbol, e);
+                    warn!("[WARMUP] Failed to fetch historical for {}", err_msg);
+                    errors.push(err_msg);
+                }
+            }
+
+            // Rate limit: Kite allows 3 requests/second for historical
+            tokio::time::sleep(Duration::from_millis(350)).await;
+        }
+
+        if !errors.is_empty() {
+            warn!("[WARMUP] Errors during fetch: {:?}", errors);
+        }
+
+        info!("[WARMUP] Total: {} symbols with data", result.len());
+        Ok(result)
+    }
+}
+
+/// Historical candle data from Kite API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoricalCandle {
+    pub timestamp: String,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: u64,
+}
+
+/// Kite historical API response
+#[derive(Debug, Deserialize)]
+struct HistoricalResponse {
+    status: String,
+    data: HistoricalData,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoricalData {
+    candles: Vec<Vec<serde_json::Value>>,
 }
 
 // =============================================================================

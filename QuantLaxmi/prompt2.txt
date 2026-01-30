@@ -1,0 +1,120 @@
+﻿Message to Claude (Phase 2: B2 + B3) — paste exactly
+0) Scope + non-negotiables
+    1. This PR is Phase 2 only: implement B2 inventory/exposure controls and B3 horizon-labeled PnL for KiteSim backtest.
+    2. Do not change alpha logic, signal generation, feature computation, or existing fill rules.
+    3. All new logic must be deterministic and logged in a machine-readable form.
+    4. Must compile with cargo build -p quantlaxmi-runner-india and run backtest-kitesim successfully.
+
+B2 — Inventory / Exposure Control (stop “unbounded drift”)
+1) Add a config struct for risk caps (with defaults)
+Create or extend config in quantlaxmi-runner-india (where the backtest cfg lives) with:
+    • max_net_qty_per_symbol: i64 (default: 0 or conservative e.g. 1 lot)
+    • max_gross_qty_per_symbol: i64 (default: 2 lots)
+    • max_total_gross_qty: i64 (default: 6 lots)
+    • max_open_positions: usize (default: 8)
+    • flatten_at_end: bool (default: true)
+    • flatten_before_close_secs: i64 (default: 120)
+    • cooldown_after_fill_ms: i64 (default: 250)
+    • skip_if_spread_bps_above: f64 (default: 50.0) // optional but useful
+Make these visible in CLI flags (or config file), but keep defaults stable.
+Acceptance: running without flags behaves deterministically with defaults.
+
+2) Introduce a “RiskGate” function used before placing each order/leg
+In kitesim_backtest.rs (or a helper module), implement:
+fn risk_allows(order: &MultiLegOrder, positions: &BTreeMap<String, i64>, live_quotes: &HashMap<String, QuoteEvent>, cfg: &RiskCaps, now_ts: DateTime<Utc>, last_fill_ts_by_symbol: &HashMap<String, DateTime<Utc>>) -> RiskDecision
+Where RiskDecision is one of:
+    • Allow
+    • Deny { reason: String }
+    • Reduce { new_qty: i64, reason: String } (optional; if you can do quantity reduction safely)
+Rules:
+    1. Cooldown: if now_ts - last_fill_ts_by_symbol[sym] < cooldown_after_fill_ms ⇒ Deny.
+    2. Max net: projected pos[sym] + delta_qty must satisfy abs(net) <= max_net_qty_per_symbol.
+    3. Max gross per symbol: abs(pos[sym] + delta_qty) <= max_gross_qty_per_symbol.
+    4. Max total gross: sum of abs(pos) across symbols must stay <= max_total_gross_qty.
+    5. Max open positions: count of nonzero symbols <= max_open_positions.
+    6. Spread sanity (optional): if live quote exists and spread_bps > threshold ⇒ Deny (or require MARKET routing only).
+Each Deny/Reduce must be logged as a structured JSON line:
+risk_decisions.jsonl with fields:
+    • ts, order_id, symbol, reason, positions_snapshot (small), quote_snapshot (optional)
+Acceptance: any skipped trades are explainable by risk_decisions.jsonl.
+
+3) End-of-session flattening
+If flatten_at_end:
+    • When replay time is within flatten_before_close_secs of end-of-replay timestamp:
+        ◦ stop opening new risk
+        ◦ submit close orders to flatten all positions deterministically
+Implementation approach:
+    • Determine end_ts as max event timestamp in replay (or terminal feed time).
+    • When now_ts >= end_ts - flatten_before_close_secs, start flatten regime.
+    • Flatten with MARKET (or aggressive LIMIT) according to current routing mode, but deterministic.
+Log:
+    • flatten_actions.jsonl with ts, symbol, qty, method, fill result.
+Acceptance: after completion, positions must be zero (or explicitly reported nonzero with reasons).
+
+B3 — Horizon-labeled PnL (make the strategy diagnosable)
+4) Add horizon PnL attribution for each filled leg or each “entry decision”
+We need to label what happens after each entry, over horizons:
+    • 30s, 2m, 5m (configurable list)
+Create:
+    • horizon_pnl.jsonl
+For each “entry event” (choose one consistent definition; simplest: each filled leg, or each filled multi-leg order):
+Record:
+    • entry_ts
+    • symbol
+    • side
+    • fill_price
+    • fill_qty
+    • spread_bps_at_entry (from live_quotes)
+    • mark_bid, mark_ask at entry
+    • horizons: for each horizon H, compute:
+        ◦ mtm_pnl_H using conservative marks at entry_ts + H
+        ◦ adverse_selection_flag_H (e.g., pnl < 0)
+Critical: Use the same live quote timeline (no lookahead). You can implement this by:
+    • recording future evaluation timestamps into a min-heap
+    • while replay progresses, when now_ts >= eval_ts, compute PnL using current live_quotes
+If live_quotes missing at eval time, mark as missing and log.
+Acceptance: horizon labels are produced without peeking into the future (only computed when time passes).
+
+5) Summary metrics in run_summary.json
+Extend run_summary with:
+    • risk_caps snapshot (all cap values)
+    • risk_denies_count
+    • risk_reductions_count (if used)
+    • flatten_trades_count
+    • horizon_stats:
+        ◦ win_rate_30s/2m/5m
+        ◦ avg_pnl_30s/2m/5m
+        ◦ adverse_selection_rate_30s/2m/5m
+Acceptance: a single run_summary tells whether the strategy is:
+    • overtrading,
+    • paying spread unnecessarily,
+    • suffering adverse selection.
+
+6) Regression fixtures / tests
+Add one deterministic fixture (tiny replay):
+    • a position opens
+    • price moves against it within 30s
+    • price recovers by 2m
+This should yield:
+    • negative 30s pnl, positive 2m pnl
+Test:
+    • horizon labeling matches expected signs
+    • risk caps deny a second trade during cooldown
+Acceptance: cargo test -p quantlaxmi-runner-india includes these.
+
+7) Deliverables
+    1. Commit message: feat(india/kitesim): B2 risk caps + B3 horizon pnl attribution
+    2. New artifacts written on run:
+        ◦ risk_decisions.jsonl
+        ◦ flatten_actions.jsonl (if flatten enabled)
+        ◦ horizon_pnl.jsonl
+    3. Updated docs:
+        ◦ Add a “B2/B3” section explaining exactly what is enforced and how to reproduce.
+
+Notes
+    • Keep all outputs deterministic and stable order.
+    • Do not change existing file schemas except adding new optional fields.
+    • Keep performance reasonable; horizon evaluation should be O(n log k) at worst.
+
+If you want, I can also give you a third message for “B1.2 learned routing”: training the Python execution-tax model from horizon_pnl.jsonl + routing_decisions.jsonl and deploying it as a deterministic thresholded scorer in Rust.
+

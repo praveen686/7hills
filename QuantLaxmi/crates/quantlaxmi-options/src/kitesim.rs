@@ -848,11 +848,7 @@ impl KiteSim {
         let fill_qty = if self.cfg.allow_partial {
             visible_qty.min(rem)
         } else {
-            if visible_qty >= rem {
-                rem
-            } else {
-                0
-            }
+            if visible_qty >= rem { rem } else { 0 }
         };
 
         if fill_qty == 0 {
@@ -1212,11 +1208,13 @@ mod tests {
         assert_eq!(res.leg_results.len(), 2);
         assert_eq!(res.leg_results[0].status, LegStatus::Filled);
         assert_eq!(res.leg_results[1].status, LegStatus::PartiallyFilled);
-        assert!(res.leg_results[1]
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("partial fill"));
+        assert!(
+            res.leg_results[1]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("partial fill")
+        );
     }
 
     /// P1.3: Golden determinism test - same input always produces identical output.

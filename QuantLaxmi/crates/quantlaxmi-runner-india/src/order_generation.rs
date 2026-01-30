@@ -10,6 +10,10 @@
 //! - Deterministic: no RNG unless seeded
 //! - Pure function: replay in, orders out
 //! - No lookahead: decisions use only past data
+//!
+//! ## Regime Detection (Phase 28)
+//! - Grassmann manifold-based regime detection
+//! - Optional regime gating: only trade in favorable regimes
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -20,6 +24,13 @@ use std::path::Path;
 
 use quantlaxmi_options::execution::{LegOrder, LegOrderType, LegSide, MultiLegOrder};
 use quantlaxmi_options::replay::QuoteEvent;
+use quantlaxmi_regime::{
+    cpd::CusumDetector,
+    features::FeatureVector,
+    lift::{RegimeLift, RegimeLiftConfig},
+    prototypes::RegimeLabel,
+    ramanujan::{MicrostructurePeriodicity, PeriodicityFeatures},
+};
 
 use crate::kitesim_backtest::get_nse_lot_size;
 
@@ -97,6 +108,44 @@ pub struct MicroMmConfig {
     /// Max dt (ms) for velocity calculation (stale = reset)
     #[serde(default = "default_vel_dt_max_ms")]
     pub vel_dt_max_ms: i64,
+
+    // === Phase 28: Regime Detection Config ===
+    /// Enable regime gating (skip trades during unfavorable regimes)
+    #[serde(default)]
+    pub regime_gating_enabled: bool,
+
+    /// Rolling window size for regime detection (default: 64 quotes)
+    #[serde(default = "default_regime_window_size")]
+    pub regime_window_size: usize,
+
+    /// Subspace dimension k for Gr(k,6) (default: 3)
+    #[serde(default = "default_regime_subspace_dim")]
+    pub regime_subspace_dim: usize,
+
+    /// CUSUM threshold for regime shift detection (mantissa, exp=-4)
+    #[serde(default = "default_regime_cusum_threshold")]
+    pub regime_cusum_threshold: i64,
+
+    /// Allowed regime labels for trading (empty = trade all)
+    #[serde(default)]
+    pub regime_allowed_labels: Vec<String>,
+
+    // === Phase 29: Ramanujan Periodicity Detection ===
+    /// Enable Ramanujan periodicity filtering (block on HFT detection)
+    #[serde(default)]
+    pub ramanujan_enabled: bool,
+
+    /// Max period Q to detect (default: 16)
+    #[serde(default = "default_ramanujan_max_period")]
+    pub ramanujan_max_period: usize,
+
+    /// Detection threshold (energy ratio, default: 0.3)
+    #[serde(default = "default_ramanujan_threshold")]
+    pub ramanujan_threshold: f64,
+
+    /// Block trading when HFT activity detected
+    #[serde(default = "default_ramanujan_block_on_hft")]
+    pub ramanujan_block_on_hft: bool,
 }
 
 fn default_max_spread_bps() -> f64 {
@@ -136,6 +185,26 @@ fn default_vel_dt_min_ms() -> i64 {
 fn default_vel_dt_max_ms() -> i64 {
     5000 // 5 seconds = stale, reset velocity
 }
+// Phase 28: Regime detection defaults
+fn default_regime_window_size() -> usize {
+    64 // 64 quotes for rolling covariance
+}
+fn default_regime_subspace_dim() -> usize {
+    3 // k=3 for Gr(3,6)
+}
+fn default_regime_cusum_threshold() -> i64 {
+    5000 // 0.5 in mantissa with exp=-4
+}
+// Phase 29: Ramanujan periodicity defaults
+fn default_ramanujan_max_period() -> usize {
+    16 // Detect periods up to 16 quotes
+}
+fn default_ramanujan_threshold() -> f64 {
+    0.3 // 30% energy ratio threshold
+}
+fn default_ramanujan_block_on_hft() -> bool {
+    true // Block trading during detected HFT activity
+}
 
 impl Default for MicroMmConfig {
     fn default() -> Self {
@@ -154,6 +223,17 @@ impl Default for MicroMmConfig {
             signal_strength_market_min: default_signal_strength_market_min(),
             vel_dt_min_ms: default_vel_dt_min_ms(),
             vel_dt_max_ms: default_vel_dt_max_ms(),
+            // Phase 28: Regime detection
+            regime_gating_enabled: false,
+            regime_window_size: default_regime_window_size(),
+            regime_subspace_dim: default_regime_subspace_dim(),
+            regime_cusum_threshold: default_regime_cusum_threshold(),
+            regime_allowed_labels: Vec::new(),
+            // Phase 29: Ramanujan periodicity
+            ramanujan_enabled: false,
+            ramanujan_max_period: default_ramanujan_max_period(),
+            ramanujan_threshold: default_ramanujan_threshold(),
+            ramanujan_block_on_hft: default_ramanujan_block_on_hft(),
         }
     }
 }
@@ -521,6 +601,7 @@ impl RoutingDecisionsWriter {
 /// Position state for tracking signals (NOT fills - generator doesn't know fills)
 /// Gate B0: We only track last signal time to avoid spam, not position.
 /// Gate B1: Added mid/ts tracking for velocity estimation (only on actionable quotes).
+/// Phase 28: Added regime detection state.
 #[derive(Debug, Clone, Default)]
 struct SignalState {
     /// Last signal timestamp (to throttle order generation)
@@ -529,6 +610,186 @@ struct SignalState {
     last_mid: Option<f64>,
     /// Gate B1: Last observed quote timestamp on actionable quote (for dt)
     last_quote_ts: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Phase 28: Per-symbol regime detection state.
+struct RegimeState {
+    /// Geometric lift engine (features → subspace)
+    lift: RegimeLift,
+    /// CUSUM change-point detector
+    cusum: CusumDetector,
+    /// Current inferred regime label (heuristic until prototypes trained)
+    current_regime: RegimeLabel,
+    /// Whether regime lift is ready (window full)
+    is_ready: bool,
+    /// Number of regime shifts detected
+    shift_count: u64,
+    /// Phase 29: Ramanujan periodicity detector
+    periodicity: Option<MicrostructurePeriodicity>,
+    /// Latest periodicity features
+    periodicity_features: Option<PeriodicityFeatures>,
+}
+
+impl RegimeState {
+    fn new(config: &MicroMmConfig) -> Self {
+        let lift_config = RegimeLiftConfig {
+            n_features: 6,
+            subspace_dim: config.regime_subspace_dim,
+            window_size: config.regime_window_size,
+        };
+        // CUSUM detector: threshold from config, small drift for sensitivity, exp=-4
+        let cusum = CusumDetector::new(
+            config.regime_cusum_threshold,
+            100, // drift_mantissa: small drift for sensitivity
+            -4,  // exponent: 10^-4 scale
+        );
+        // Phase 29: Ramanujan periodicity detector (if enabled)
+        let periodicity = if config.ramanujan_enabled {
+            Some(MicrostructurePeriodicity::with_params(
+                config.ramanujan_max_period,   // max_period
+                4,                             // num_reps (filter replications)
+                config.regime_window_size * 8, // buffer_size (8x window)
+                config.ramanujan_threshold,    // threshold
+                10000,                         // price_scale (basis points)
+            ))
+        } else {
+            None
+        };
+        Self {
+            lift: RegimeLift::new(lift_config),
+            cusum,
+            current_regime: RegimeLabel::Unknown,
+            is_ready: false,
+            shift_count: 0,
+            periodicity,
+            periodicity_features: None,
+        }
+    }
+
+    /// Update regime state from quote, return true if regime shift detected
+    fn update(&mut self, quote: &QuoteEvent, prev_quote: Option<&QuoteEvent>) -> bool {
+        // Compute features from quote
+        let mid = (quote.bid_f64() + quote.ask_f64()) / 2.0;
+
+        // Mid return: bps change from previous quote
+        let mid_return = if let Some(prev) = prev_quote {
+            let prev_mid = (prev.bid_f64() + prev.ask_f64()) / 2.0;
+            if prev_mid > 0.0 {
+                (((mid - prev_mid) / prev_mid) * 10000.0) as i64
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        // Book imbalance: (bid_qty - ask_qty) / (bid_qty + ask_qty) * 10000
+        let total_qty = quote.bid_qty as i64 + quote.ask_qty as i64;
+        let imbalance = if total_qty > 0 {
+            ((quote.bid_qty as i64 - quote.ask_qty as i64) * 10000) / total_qty
+        } else {
+            0
+        };
+
+        // Spread in basis points
+        let spread_bps = if mid > 0.0 {
+            (((quote.ask_f64() - quote.bid_f64()) / mid) * 10000.0) as i64
+        } else {
+            0
+        };
+
+        // Volatility proxy (spread as proxy)
+        let vol_proxy = spread_bps;
+
+        // Pressure: bid_qty * 100 / (bid_qty + ask_qty)
+        let pressure = if total_qty > 0 {
+            (quote.bid_qty as i64 * 100) / total_qty
+        } else {
+            50 // neutral
+        };
+
+        // VPIN proxy (using imbalance magnitude)
+        let vpin = imbalance.abs();
+
+        let features =
+            FeatureVector::new(mid_return, imbalance, spread_bps, vol_proxy, pressure, vpin);
+
+        // Update lift (covariance → SVD → subspace)
+        let subspace = self.lift.update(&features);
+
+        if let Some(subspace) = subspace {
+            self.is_ready = true;
+
+            // Update regime label based on eigenvalue spectrum (heuristic)
+            let eigenvalues = subspace.eigenvalues();
+            if eigenvalues.len() >= 2 {
+                let ratio = eigenvalues[0] / eigenvalues[1].max(1e-10);
+
+                // Heuristic regime classification based on eigenvalue concentration
+                self.current_regime = if ratio > 10.0 {
+                    // Highly concentrated variance = trending
+                    RegimeLabel::TrendImpulse
+                } else if ratio < 2.0 {
+                    // Diffuse variance = choppy/mean-reverting
+                    RegimeLabel::MeanReversionChop
+                } else if eigenvalues[0] < 0.01 {
+                    // Very low total variance = quiet
+                    RegimeLabel::Quiet
+                } else {
+                    // Default
+                    RegimeLabel::Unknown
+                };
+            }
+        }
+
+        // Phase 29: Update Ramanujan periodicity detector
+        if let Some(ref mut periodicity) = self.periodicity {
+            let ready = periodicity.update(mid_return, imbalance, spread_bps);
+            if ready {
+                self.periodicity_features = Some(periodicity.detect());
+            }
+        }
+
+        // Check for regime shift via CUSUM (would need distance to prev subspace)
+        // For now, we just track whether ready
+        false
+    }
+
+    /// Check if current regime allows trading
+    fn allows_trading(&self, allowed_labels: &[String], block_on_hft: bool) -> bool {
+        if !self.is_ready {
+            return true; // Allow trading until regime is established
+        }
+
+        // Phase 29: Block on HFT activity detected by Ramanujan periodicity
+        if block_on_hft {
+            if let Some(ref features) = self.periodicity_features {
+                if features.hft_likely() {
+                    return false; // Block: periodic HFT activity detected
+                }
+            }
+        }
+
+        if allowed_labels.is_empty() {
+            return true; // No restrictions on regime label
+        }
+        let current_label_str = self.current_regime.as_str();
+        allowed_labels.iter().any(|l| l == current_label_str)
+    }
+
+    /// Get periodicity features for logging
+    fn periodicity_summary(&self) -> String {
+        if let Some(ref features) = self.periodicity_features {
+            format!(
+                "periods={:?}, hft={}, mm={}",
+                features.dominant_periods(),
+                features.hft_likely(),
+                features.market_maker_likely()
+            )
+        } else {
+            "periodicity=disabled".to_string()
+        }
+    }
 }
 
 /// Compute mid price from quote
@@ -595,11 +856,22 @@ fn pressure_ratio(quote: &QuoteEvent) -> f64 {
     quote.bid_qty as f64 / quote.ask_qty as f64
 }
 
+/// Phase 28/29: Regime gating statistics
+#[derive(Debug, Default)]
+struct RegimeGatingStats {
+    quotes_processed: u64,
+    regime_blocked: u64,
+    regime_allowed: u64,
+    /// Phase 29: Blocked due to HFT periodicity detection
+    hft_blocked: u64,
+}
+
 /// Generate orders using india_micro_mm strategy
 ///
 /// Gate B0: Entry-only, stateless signal generator.
 /// Gate B1: Execution-aware routing (LIMIT vs MARKET) with dt-normalized velocity.
 /// Gate B1.3: Optional routing_decisions.jsonl sidecar via writer parameter.
+/// Phase 28: Grassmann manifold regime gating.
 ///
 /// - Emits entry orders at bid (long) or ask (short) when pressure threshold met
 /// - Routes LIMIT vs MARKET based on spread, velocity (bps/sec), and signal strength
@@ -607,6 +879,7 @@ fn pressure_ratio(quote: &QuoteEvent) -> f64 {
 /// - Does NOT track position (generator doesn't know fills)
 /// - Does NOT generate exits
 /// - Throttles signals per symbol to avoid spam
+/// - Phase 28: Optionally gates trading based on regime detection
 fn generate_micro_mm_orders(
     quotes: &[QuoteEvent],
     config: &MicroMmConfig,
@@ -614,6 +887,10 @@ fn generate_micro_mm_orders(
 ) -> Vec<MultiLegOrder> {
     let mut orders = Vec::new();
     let mut signals: HashMap<String, SignalState> = HashMap::new();
+
+    // Phase 28: Per-symbol regime state
+    let mut regime_states: HashMap<String, RegimeState> = HashMap::new();
+    let mut regime_stats = RegimeGatingStats::default();
 
     // Minimum gap between signals for the same symbol (throttle)
     let min_signal_gap = chrono::Duration::milliseconds(config.min_hold_ms);
@@ -628,6 +905,32 @@ fn generate_micro_mm_orders(
         config.vel_dt_min_ms,
         config.vel_dt_max_ms
     );
+
+    // Phase 28: Log regime gating config
+    if config.regime_gating_enabled {
+        tracing::info!(
+            "Phase 28 regime gating ENABLED: window={}, k={}, cusum_threshold={}, allowed={:?}",
+            config.regime_window_size,
+            config.regime_subspace_dim,
+            config.regime_cusum_threshold,
+            config.regime_allowed_labels
+        );
+    } else {
+        tracing::info!("Phase 28 regime gating DISABLED (pass-through)");
+    }
+
+    // Phase 29: Log Ramanujan periodicity config
+    if config.ramanujan_enabled {
+        tracing::info!(
+            "Phase 29 Ramanujan periodicity ENABLED: max_period={}, threshold={:.2}, block_on_hft={}",
+            config.ramanujan_max_period,
+            config.ramanujan_threshold,
+            config.ramanujan_block_on_hft
+        );
+    }
+
+    // Track previous quote per symbol for mid_return calculation
+    let mut prev_quotes: HashMap<String, QuoteEvent> = HashMap::new();
 
     // Filter symbols if specified
     let trade_symbols: std::collections::HashSet<&str> = if config.symbols.is_empty() {
@@ -645,6 +948,19 @@ fn generate_micro_mm_orders(
         let state = signals.entry(symbol.clone()).or_default();
         let lot_size = get_nse_lot_size(symbol);
         let quantity = lot_size * config.lots;
+
+        // Phase 28/29: Update regime state for this symbol
+        if config.regime_gating_enabled || config.ramanujan_enabled {
+            let regime_state = regime_states
+                .entry(symbol.clone())
+                .or_insert_with(|| RegimeState::new(config));
+            let prev_quote = prev_quotes.get(symbol);
+            regime_state.update(quote, prev_quote);
+            regime_stats.quotes_processed += 1;
+        }
+
+        // Track previous quote for next iteration
+        prev_quotes.insert(symbol.clone(), quote.clone());
 
         let mid = mid_f64(quote);
 
@@ -708,6 +1024,36 @@ fn generate_micro_mm_orders(
 
         if !should_long && !should_short {
             continue; // No signal
+        }
+
+        // Phase 28/29: Regime + Ramanujan gating check
+        if config.regime_gating_enabled || config.ramanujan_enabled {
+            if let Some(regime_state) = regime_states.get(symbol) {
+                let block_on_hft = config.ramanujan_enabled && config.ramanujan_block_on_hft;
+                if !regime_state.allows_trading(&config.regime_allowed_labels, block_on_hft) {
+                    // Determine block reason for stats
+                    if let Some(ref features) = regime_state.periodicity_features {
+                        if features.hft_likely() && block_on_hft {
+                            regime_stats.hft_blocked += 1;
+                            tracing::trace!(
+                                symbol = %symbol,
+                                periodicity = %regime_state.periodicity_summary(),
+                                "Signal blocked by Ramanujan HFT detection"
+                            );
+                            continue;
+                        }
+                    }
+                    regime_stats.regime_blocked += 1;
+                    tracing::trace!(
+                        symbol = %symbol,
+                        regime = ?regime_state.current_regime,
+                        periodicity = %regime_state.periodicity_summary(),
+                        "Signal blocked by regime gating"
+                    );
+                    continue; // Skip this signal due to unfavorable regime
+                }
+                regime_stats.regime_allowed += 1;
+            }
         }
 
         // Gate B1: Compute signal strength (distance beyond threshold; >= 0)
@@ -1008,6 +1354,29 @@ fn generate_micro_mm_orders(
 
             orders.push(entry_order);
             state.last_signal_ts = Some(quote.ts);
+        }
+    }
+
+    // Phase 28/29: Log regime gating statistics
+    if config.regime_gating_enabled || config.ramanujan_enabled {
+        tracing::info!(
+            "Phase 28/29 gating stats: quotes={}, regime_blocked={}, hft_blocked={}, allowed={}",
+            regime_stats.quotes_processed,
+            regime_stats.regime_blocked,
+            regime_stats.hft_blocked,
+            regime_stats.regime_allowed
+        );
+
+        // Log per-symbol regime state summary
+        for (symbol, regime_state) in &regime_states {
+            tracing::debug!(
+                symbol = %symbol,
+                regime = ?regime_state.current_regime,
+                is_ready = regime_state.is_ready,
+                shifts = regime_state.shift_count,
+                periodicity = %regime_state.periodicity_summary(),
+                "Final regime state"
+            );
         }
     }
 

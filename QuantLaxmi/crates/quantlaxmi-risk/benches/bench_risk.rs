@@ -10,11 +10,11 @@
 //! - IEEE Std 1016-2009: Software Design Descriptions
 
 use chrono::Utc;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use quantlaxmi_models::{OrderEvent, OrderPayload, OrderType, Side};
 use quantlaxmi_risk::{RiskConfig, RiskEngine};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
 fn bench_risk_check(c: &mut Criterion) {

@@ -628,7 +628,7 @@ async fn capture_symbol(
             let result =
                 binance_capture::capture_book_ticker_jsonl(&sym, &path, duration_secs).await?;
             Ok(CaptureResult::Spot {
-                events: result.events_written,
+                events: result.stats.events_written,
             })
         }));
     }
@@ -652,9 +652,9 @@ async fn capture_symbol(
             )
             .await?;
             Ok(CaptureResult::Perp {
-                events: result.events_written,
-                bid: result.last_bid,
-                ask: result.last_ask,
+                events: result.stats.events_written,
+                bid: result.stats.last_bid,
+                ask: result.stats.last_ask,
             })
         }));
     } else {
@@ -662,9 +662,9 @@ async fn capture_symbol(
             let result =
                 binance_perp_capture::capture_perp_bookticker_jsonl(&sym, &path, dur).await?;
             Ok(CaptureResult::Perp {
-                events: result.events_written,
-                bid: result.last_bid,
-                ask: result.last_ask,
+                events: result.stats.events_written,
+                bid: result.stats.last_bid,
+                ask: result.stats.last_ask,
             })
         }));
     }
@@ -676,9 +676,9 @@ async fn capture_symbol(
     handles.push(tokio::spawn(async move {
         let result = binance_funding_capture::capture_funding_jsonl(&sym, &path, dur).await?;
         Ok(CaptureResult::Funding {
-            events: result.events_written,
-            rate: result.last_funding_rate_f64(),
-            settlements: result.funding_settlements,
+            events: result.stats.events_written,
+            rate: result.stats.last_funding_rate_f64(),
+            settlements: result.stats.funding_settlements,
         })
     }));
 

@@ -46,7 +46,19 @@
 //! - v1 (0x01): Initial encoding format
 
 use chrono::{DateTime, Utc};
-use quantlaxmi_models::{CorrelationContext, DecisionEvent, MarketSnapshot};
+use quantlaxmi_models::{
+    CorrelationContext,
+    DecisionEvent,
+    MarketSnapshot,
+    encode_i8,
+    // Shared encoding primitives
+    encode_i64,
+    encode_optional_string,
+    encode_optional_uuid,
+    encode_string,
+    encode_u16,
+    encode_uuid,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -440,7 +452,7 @@ pub fn canonical_bytes(decision: &DecisionEvent) -> Vec<u8> {
     buf.push(ENCODING_VERSION);
 
     // 1. ts: DateTime as nanoseconds since Unix epoch
-    encode_datetime(&mut buf, &decision.ts);
+    encode_datetime_ns(&mut buf, &decision.ts);
 
     // 2. decision_id: UUID as 16 bytes
     encode_uuid(&mut buf, &decision.decision_id);
@@ -485,63 +497,10 @@ pub fn canonical_bytes(decision: &DecisionEvent) -> Vec<u8> {
 }
 
 /// Encode DateTime as i64 nanoseconds since Unix epoch.
-fn encode_datetime(buf: &mut Vec<u8>, dt: &DateTime<Utc>) {
+/// NOTE: This uses nanoseconds (not microseconds) for trace precision.
+fn encode_datetime_ns(buf: &mut Vec<u8>, dt: &DateTime<Utc>) {
     let nanos = dt.timestamp_nanos_opt().unwrap_or(0);
     buf.extend_from_slice(&nanos.to_le_bytes());
-}
-
-/// Encode UUID as 16 bytes.
-fn encode_uuid(buf: &mut Vec<u8>, uuid: &Uuid) {
-    buf.extend_from_slice(uuid.as_bytes());
-}
-
-/// Encode string with u32 length prefix.
-fn encode_string(buf: &mut Vec<u8>, s: &str) {
-    let bytes = s.as_bytes();
-    let len = bytes.len() as u32;
-    buf.extend_from_slice(&len.to_le_bytes());
-    buf.extend_from_slice(bytes);
-}
-
-/// Encode optional string with presence marker.
-fn encode_optional_string(buf: &mut Vec<u8>, opt: &Option<String>) {
-    match opt {
-        Some(s) => {
-            buf.push(0x01); // Present
-            encode_string(buf, s);
-        }
-        None => {
-            buf.push(0x00); // Absent
-        }
-    }
-}
-
-/// Encode optional UUID with presence marker.
-fn encode_optional_uuid(buf: &mut Vec<u8>, opt: &Option<Uuid>) {
-    match opt {
-        Some(uuid) => {
-            buf.push(0x01); // Present
-            encode_uuid(buf, uuid);
-        }
-        None => {
-            buf.push(0x00); // Absent
-        }
-    }
-}
-
-/// Encode i8.
-fn encode_i8(buf: &mut Vec<u8>, val: i8) {
-    buf.push(val as u8);
-}
-
-/// Encode i64 in little-endian.
-fn encode_i64(buf: &mut Vec<u8>, val: i64) {
-    buf.extend_from_slice(&val.to_le_bytes());
-}
-
-/// Encode u16 in little-endian.
-fn encode_u16(buf: &mut Vec<u8>, val: u16) {
-    buf.extend_from_slice(&val.to_le_bytes());
 }
 
 /// Encode MarketSnapshot (versioned enum).

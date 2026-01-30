@@ -1,0 +1,7 @@
+{
+  "schema_version": "1",
+  "venues": {
+    "binance": { "slippage_bps": 5, "spread_half_bps": 5, "fee_bps_override": 10 },
+    "sim":     { "slippage_bps": 5, "spread_half_bps": 5, "fee_bps_override": 10 }
+  }
+}

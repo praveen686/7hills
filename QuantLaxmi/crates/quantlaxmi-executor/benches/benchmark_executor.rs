@@ -1,5 +1,5 @@
 use chrono::Utc;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use quantlaxmi_core::EventBus;
 use quantlaxmi_executor::{CommissionModel, SimulatedExchange};
 use quantlaxmi_models::{MarketEvent, MarketPayload, OrderEvent, OrderPayload, OrderType, Side};

@@ -134,6 +134,14 @@ pub use cost_model::{
     COST_MODEL_SCHEMA_VERSION, CostAdjustments, CostModelV1, CostVenueParamsV1, compute_costs_v1,
 };
 
+// Canonical binary encoding primitives (shared across crates)
+pub mod encoding;
+pub use encoding::{
+    encode_bool, encode_datetime, encode_i8, encode_i16, encode_i32, encode_i64, encode_i128,
+    encode_option, encode_optional_string, encode_optional_uuid, encode_string, encode_u16,
+    encode_u32, encode_u64, encode_uuid,
+};
+
 /// Market data event from exchange or data feed.
 ///
 /// # Description

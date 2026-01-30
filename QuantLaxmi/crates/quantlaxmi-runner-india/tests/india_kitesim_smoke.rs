@@ -242,8 +242,7 @@ fn test_no_lookahead_bias() {
     // Read pnl.json
     let pnl_json =
         std::fs::read_to_string(out_path.join("pnl.json")).expect("Failed to read pnl.json");
-    let pnl: serde_json::Value =
-        serde_json::from_str(&pnl_json).expect("Failed to parse pnl.json");
+    let pnl: serde_json::Value = serde_json::from_str(&pnl_json).expect("Failed to parse pnl.json");
 
     // Read equity_curve.jsonl and parse each line
     let equity_curve = std::fs::read_to_string(out_path.join("equity_curve.jsonl"))

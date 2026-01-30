@@ -272,7 +272,7 @@ pub mod simulator {
     use quantlaxmi_wal::{CorrelationContext, MarketPayload, WalMarketRecord};
     use rand::Rng;
     use std::sync::Arc;
-    use tokio::time::{sleep, Duration as TokioDuration};
+    use tokio::time::{Duration as TokioDuration, sleep};
 
     pub async fn run_simulated_feed(
         bus: Arc<EventBus>,

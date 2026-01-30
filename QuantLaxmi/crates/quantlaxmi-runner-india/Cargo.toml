@@ -54,6 +54,9 @@ quantlaxmi-executor = { path = "../quantlaxmi-executor" }
 quantlaxmi-risk = { path = "../quantlaxmi-risk" }
 quantlaxmi-options = { path = "../quantlaxmi-options" }
 
+# Regime detection (Phase 28 - Grassmann manifolds)
+quantlaxmi-regime = { path = "../quantlaxmi-regime" }
+
 # LP solver for SANOS (via quantlaxmi-options)
 good_lp = { workspace = true }
 

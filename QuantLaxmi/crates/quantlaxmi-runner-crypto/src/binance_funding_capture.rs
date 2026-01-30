@@ -18,13 +18,19 @@
 //! - No API key required for public streams
 //! - Funding settles every 8h: 00:00, 08:00, 16:00 UTC
 //! - Rate updates every ~3 seconds
+//! - Uses ResilientWs for auto-reconnect on disconnect
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use futures_util::StreamExt;
+use quantlaxmi_models::parse_to_mantissa_pure;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+use tokio::time::Instant;
+use tracing::{error, warn};
+
+use crate::ws_resilient::{ConnectionGap, ResilientWs, ResilientWsConfig};
 
 // =============================================================================
 // Deterministic FundingEvent (no f64 persistence)
@@ -124,64 +130,9 @@ impl FundingEvent {
 }
 
 /// Parse decimal string to mantissa without f64 intermediate (deterministic).
-/// Reuses the same algorithm as depth capture.
+/// Delegates to canonical implementation in quantlaxmi_models.
 fn parse_to_mantissa(s: &str, exponent: i8) -> Result<i64> {
-    let s = s.trim();
-    if s.is_empty() {
-        bail!("empty string");
-    }
-
-    // Handle negative numbers
-    let (is_negative, s) = if let Some(stripped) = s.strip_prefix('-') {
-        (true, stripped)
-    } else {
-        (false, s)
-    };
-
-    // Split on decimal point
-    let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() > 2 {
-        bail!("invalid decimal format: {}", s);
-    }
-
-    let int_part = parts[0];
-    let frac_part = if parts.len() == 2 { parts[1] } else { "" };
-
-    // Target decimal places = -exponent (e.g., exponent=-8 means 8 decimals)
-    let target_decimals = (-exponent) as usize;
-
-    // Build the mantissa string: integer part + fractional part padded/truncated
-    let mut mantissa_str = String::with_capacity(int_part.len() + target_decimals);
-    mantissa_str.push_str(int_part);
-
-    if frac_part.len() >= target_decimals {
-        // Truncate fractional part (with rounding check)
-        mantissa_str.push_str(&frac_part[..target_decimals]);
-        // Check if we need to round up
-        if frac_part.len() > target_decimals {
-            let next_digit = frac_part.chars().nth(target_decimals).unwrap_or('0');
-            if next_digit >= '5' {
-                // Round up by adding 1 to the mantissa
-                let mut mantissa: i64 = mantissa_str
-                    .parse()
-                    .with_context(|| format!("parse mantissa: {}", mantissa_str))?;
-                mantissa += 1;
-                return Ok(if is_negative { -mantissa } else { mantissa });
-            }
-        }
-    } else {
-        // Pad with zeros
-        mantissa_str.push_str(frac_part);
-        for _ in 0..(target_decimals - frac_part.len()) {
-            mantissa_str.push('0');
-        }
-    }
-
-    let mantissa: i64 = mantissa_str
-        .parse()
-        .with_context(|| format!("parse mantissa: {}", mantissa_str))?;
-
-    Ok(if is_negative { -mantissa } else { mantissa })
+    parse_to_mantissa_pure(s, exponent).map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 /// Raw markPrice WebSocket event from Binance Futures.
@@ -271,20 +222,51 @@ impl std::fmt::Display for FundingCaptureStats {
     }
 }
 
+/// Result from funding capture including connection gap info.
+#[derive(Debug, Default)]
+pub struct FundingCaptureResult {
+    pub stats: FundingCaptureStats,
+    pub connection_gaps: Vec<ConnectionGap>,
+    pub total_reconnects: u32,
+}
+
+impl std::fmt::Display for FundingCaptureResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.stats)?;
+        if self.total_reconnects > 0 {
+            write!(
+                f,
+                ", reconnects={}, gaps={}",
+                self.total_reconnects,
+                self.connection_gaps.len()
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// Capture funding rate stream to JSONL (deterministic, fixed-point).
+/// Uses ResilientWs for auto-reconnect on disconnect.
 pub async fn capture_funding_jsonl(
     symbol: &str,
     out_path: &Path,
     duration_secs: u64,
-) -> Result<FundingCaptureStats> {
+) -> Result<FundingCaptureResult> {
     let sym_lower = symbol.to_lowercase();
     let url = format!("wss://fstream.binance.com/ws/{}@markPrice", sym_lower);
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
+    let config = ResilientWsConfig {
+        liveness_timeout: Duration::from_secs(60), // Funding updates every ~3s, 60s is conservative
+        read_timeout: Duration::from_secs(10),
+        initial_backoff: Duration::from_secs(1),
+        max_backoff: Duration::from_secs(30),
+        max_reconnect_attempts: 100,
+        ..Default::default()
+    };
+
+    let mut ws = ResilientWs::connect(&url, config)
         .await
         .with_context(|| format!("connect websocket: {}", url))?;
-
-    let (_write, mut read) = ws_stream.split();
 
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
@@ -294,7 +276,7 @@ pub async fn capture_funding_jsonl(
         .await
         .with_context(|| format!("open output: {:?}", out_path))?;
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
+    let deadline = Instant::now() + Duration::from_secs(duration_secs);
     let mut stats = FundingCaptureStats {
         min_funding_rate_mantissa: i64::MAX,
         max_funding_rate_mantissa: i64::MIN,
@@ -302,19 +284,25 @@ pub async fn capture_funding_jsonl(
     };
     let mut last_funding_time_ms: i64 = 0;
 
-    while tokio::time::Instant::now() < deadline {
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(10), read.next()).await;
-        let item = match msg {
-            Ok(Some(v)) => v,
-            Ok(None) => break,
-            Err(_) => continue, // Timeout, keep waiting
+    while Instant::now() < deadline {
+        let msg = match ws.next_message().await? {
+            Some(m) => m,
+            None => {
+                error!("WebSocket reconnection exhausted for funding {}", symbol);
+                break;
+            }
         };
 
-        let msg = item?;
         if !msg.is_text() {
             continue;
         }
-        let txt = msg.into_text()?;
+        let txt = match msg.into_text() {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("Failed to get text from message: {}", e);
+                continue;
+            }
+        };
 
         // Parse markPrice event
         let ev: MarkPriceEvent = match serde_json::from_str::<MarkPriceEvent>(&txt) {
@@ -373,7 +361,11 @@ pub async fn capture_funding_jsonl(
         stats.max_funding_rate_mantissa = 0;
     }
 
-    Ok(stats)
+    Ok(FundingCaptureResult {
+        stats,
+        connection_gaps: ws.connection_gaps().to_vec(),
+        total_reconnects: ws.total_reconnects(),
+    })
 }
 
 /// Capture funding for multiple symbols in parallel.
@@ -381,7 +373,7 @@ pub async fn capture_multi_funding_jsonl(
     symbols: &[String],
     out_dir: &Path,
     duration_secs: u64,
-) -> Result<Vec<(String, FundingCaptureStats)>> {
+) -> Result<Vec<(String, FundingCaptureResult)>> {
     use futures::future::join_all;
 
     let tasks: Vec<_> = symbols

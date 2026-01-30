@@ -13,9 +13,12 @@
 //! It is exclusively for cryptocurrency markets.
 
 pub mod binance;
-pub mod sbe;
+
+// Re-export SBE types from canonical quantlaxmi-sbe crate (no duplication)
+pub use quantlaxmi_sbe::{
+    AggTrade, BinanceSbeDecoder, DepthUpdate, SBE_HEADER_SIZE, SbeHeader, TradeEntry,
+};
 
 pub use binance::{
     BinanceConnector, ConnectorStats, DepthResponse, depth_to_snapshot, fetch_depth_snapshot,
 };
-pub use sbe::{AggTrade, BinanceSbeDecoder, DepthUpdate, SBE_HEADER_SIZE, SbeHeader, TradeEntry};

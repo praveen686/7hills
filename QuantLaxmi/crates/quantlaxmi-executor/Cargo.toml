@@ -1,7 +1,7 @@
 [package]
 name = "quantlaxmi-executor"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Order execution engine for QuantLaxmi (simulation and live trading)"
 publish = false
 

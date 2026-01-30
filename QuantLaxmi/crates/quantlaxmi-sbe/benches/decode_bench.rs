@@ -1,6 +1,6 @@
 use byteorder::{ByteOrder, LittleEndian};
 use chrono::Utc;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use quantlaxmi_sbe::{BinanceSbeDecoder, SbeHeader};
 
 fn bench_sbe_decode(c: &mut Criterion) {
