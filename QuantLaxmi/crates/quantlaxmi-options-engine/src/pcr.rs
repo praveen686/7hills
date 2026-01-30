@@ -306,9 +306,9 @@ impl PCRTracker {
         let trend = self.pcr_trend();
 
         // Strength based on percentile extremity
-        let strength = if percentile > 90.0 || percentile < 10.0 {
+        let strength = if !(10.0..=90.0).contains(&percentile) {
             SignalStrength::Strong
-        } else if percentile > 80.0 || percentile < 20.0 {
+        } else if !(20.0..=80.0).contains(&percentile) {
             SignalStrength::Moderate
         } else {
             SignalStrength::Weak
@@ -370,9 +370,9 @@ pub struct CompositeSignal {
 /// Max Pain is the strike at which option writers have minimum payout,
 /// based on the theory that price gravitates to max pain at expiry.
 pub fn calculate_max_pain(options: &[OptionData], spot: f64) -> Option<f64> {
-    // Get unique strikes
+    // Get unique strikes (NaN-safe using total_cmp)
     let mut strikes: Vec<f64> = options.iter().map(|o| o.strike).collect();
-    strikes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    strikes.sort_by(|a, b| a.total_cmp(b));
     strikes.dedup();
 
     if strikes.is_empty() {

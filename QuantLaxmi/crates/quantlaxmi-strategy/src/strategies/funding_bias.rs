@@ -272,6 +272,7 @@ impl FundingBiasStrategy {
         self.position_qty_mantissa < 0
     }
 
+    #[allow(dead_code)]
     fn is_flat(&self) -> bool {
         self.position_qty_mantissa == 0
     }
@@ -293,33 +294,32 @@ impl Strategy for FundingBiasStrategy {
     fn on_event(&mut self, event: &ReplayEvent, ctx: &StrategyContext) -> Vec<DecisionOutput> {
         // Update funding rate from Funding events
         // Data format: funding_rate_mantissa + rate_exponent (canonical integer format)
-        if event.kind == EventKind::Funding {
-            if let Some(rate_mantissa) = event
+        if event.kind == EventKind::Funding
+            && let Some(rate_mantissa) = event
                 .payload
                 .get("funding_rate_mantissa")
                 .and_then(|v| v.as_i64())
-            {
-                let rate_exponent = event
-                    .payload
-                    .get("rate_exponent")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(-8) as i8;
+        {
+            let rate_exponent = event
+                .payload
+                .get("rate_exponent")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-8) as i8;
 
-                // Convert to our threshold exponent for comparison
-                let exp_diff = rate_exponent as i32 - self.config.threshold_exponent as i32;
-                self.current_funding_rate_mantissa = if exp_diff >= 0 {
-                    rate_mantissa * 10i64.pow(exp_diff as u32)
-                } else {
-                    rate_mantissa / 10i64.pow((-exp_diff) as u32)
-                };
-            }
+            // Convert to our threshold exponent for comparison
+            let exp_diff = rate_exponent as i32 - self.config.threshold_exponent as i32;
+            self.current_funding_rate_mantissa = if exp_diff >= 0 {
+                rate_mantissa * 10i64.pow(exp_diff as u32)
+            } else {
+                rate_mantissa / 10i64.pow((-exp_diff) as u32)
+            };
         }
 
         // Only trade on price updates (need prices for execution)
         // Accept perp events always; accept spot events if configured
         let is_perp_event = matches!(event.kind, EventKind::PerpQuote | EventKind::PerpDepth);
         let is_spot_event = matches!(event.kind, EventKind::SpotQuote);
-        if !is_perp_event && !(is_spot_event && self.config.trade_on_spot_quotes) {
+        if !(is_perp_event || is_spot_event && self.config.trade_on_spot_quotes) {
             return vec![];
         }
 

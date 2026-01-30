@@ -9,7 +9,7 @@
 //!
 //! Each strategy includes optimal entry conditions and Greeks targets.
 
-use crate::greeks::{Greeks, OptionParams, OptionType, PortfolioGreeks};
+use crate::greeks::{Greeks, OptionType, PortfolioGreeks};
 use crate::vol_surface::VolRegime;
 use serde::{Deserialize, Serialize};
 

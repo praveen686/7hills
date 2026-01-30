@@ -749,7 +749,7 @@ mod tests {
             BucketId::new(id),
             venue,
             Currency::USDT,
-            FixedPoint::new(10_000_000_00, -2), // $100,000.00
+            FixedPoint::new(1_000_000_000, -2), // $100,000.00
             BucketConstraints::new(RiskClass::Moderate),
         )
     }
@@ -986,7 +986,7 @@ mod tests {
             BucketId::new("limited_bucket"),
             Venue::BinancePerp,
             Currency::USDT,
-            FixedPoint::new(10_000_000_00, -2),
+            FixedPoint::new(1_000_000_000, -2),
             BucketConstraints::new(RiskClass::Moderate).with_max_strategies(2),
         );
         registry.create_bucket(bucket).unwrap();
@@ -1104,15 +1104,15 @@ mod tests {
     // =========================================================================
     #[test]
     fn test_fixed_point_arithmetic() {
-        let a = FixedPoint::new(100_00, -2); // 100.00
-        let b = FixedPoint::new(25_00, -2); // 25.00
+        let a = FixedPoint::new(10_000, -2); // 100.00
+        let b = FixedPoint::new(2_500, -2); // 25.00
 
         let sum = a.checked_add(&b).unwrap();
-        assert_eq!(sum.mantissa, 125_00);
+        assert_eq!(sum.mantissa, 12_500);
         assert_eq!(sum.exponent, -2);
 
         let diff = a.checked_sub(&b).unwrap();
-        assert_eq!(diff.mantissa, 75_00);
+        assert_eq!(diff.mantissa, 7_500);
         assert_eq!(diff.exponent, -2);
 
         // Mismatched exponents fail
@@ -1131,7 +1131,7 @@ mod tests {
         assert_eq!(bucket.utilization_bps(), 0);
 
         // Simulate 50% used
-        bucket.available_capital = FixedPoint::new(5_000_000_00, -2);
+        bucket.available_capital = FixedPoint::new(500_000_000, -2);
         assert_eq!(bucket.utilization_bps(), 5000); // 50%
 
         // 100% used

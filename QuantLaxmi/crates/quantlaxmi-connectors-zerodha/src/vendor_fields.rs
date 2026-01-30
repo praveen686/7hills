@@ -361,7 +361,7 @@ mod tests {
 
             // Verify result is within valid range (clamp should never have activated)
             assert!(
-                mantissa >= IMBALANCE_MIN && mantissa <= IMBALANCE_MAX,
+                (IMBALANCE_MIN..=IMBALANCE_MAX).contains(&mantissa),
                 "case '{}': mantissa {} out of range [{}, {}]",
                 desc,
                 mantissa,

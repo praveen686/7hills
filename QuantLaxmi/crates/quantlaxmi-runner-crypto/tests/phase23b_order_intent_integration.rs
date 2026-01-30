@@ -86,7 +86,7 @@ impl Strategy for MixedOrderStrategy {
         };
 
         // Alternate between market (refused) and limit (permitted) orders
-        let intent = if count % 2 == 0 {
+        let intent = if count.is_multiple_of(2) {
             // Market order → will be refused by passive spec
             OrderIntent::market(decision.decision_id, ctx.symbol, Side::Buy, 1, -4)
         } else {

@@ -1251,7 +1251,7 @@ mod tests {
         // combined exp = -8 + -8 = -16
         // target exp = -2 (cents)
         // shift = -16 - (-2) = -14, divide by 10^14
-        // result = 5_000_000_000_000_000_000 / 100_000_000_000_000 = 50_000_00 = 5000000
+        // result = 5_000_000_000_000_000_000 / 100_000_000_000_000 = 5_000_000 = 5000000
         let notional = compute_notional(100_000_000, -8, 50000_00000000, -8, -2);
         assert_eq!(notional, 5_000_000); // 50,000.00 USDT
     }
@@ -1437,7 +1437,7 @@ mod tests {
             let key = PositionKey::new(
                 "strategy_001",
                 "bucket_001",
-                &format!("SYMBOL{}", i),
+                format!("SYMBOL{}", i),
                 PositionVenue::BinancePerp,
             );
             let state = PositionState::new(
@@ -1475,9 +1475,9 @@ mod tests {
         // Add 7 positions for same bucket (conservative limit is 5)
         for i in 0..7 {
             let key = PositionKey::new(
-                &format!("strategy_{}", i),
+                format!("strategy_{}", i),
                 "bucket_001",
-                &format!("SYMBOL{}", i),
+                format!("SYMBOL{}", i),
                 PositionVenue::BinancePerp,
             );
             let state = PositionState::new(
@@ -1515,9 +1515,9 @@ mod tests {
         // Add 12 positions (conservative limit is 10)
         for i in 0..12 {
             let key = PositionKey::new(
-                &format!("strategy_{}", i),
-                &format!("bucket_{}", i),
-                &format!("SYMBOL{}", i),
+                format!("strategy_{}", i),
+                format!("bucket_{}", i),
+                format!("SYMBOL{}", i),
                 PositionVenue::BinancePerp,
             );
             let state = PositionState::new(

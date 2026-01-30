@@ -613,6 +613,7 @@ struct SignalState {
 }
 
 /// Phase 28: Per-symbol regime detection state.
+#[allow(dead_code)]
 struct RegimeState {
     /// Geometric lift engine (features → subspace)
     lift: RegimeLift,
@@ -762,12 +763,11 @@ impl RegimeState {
         }
 
         // Phase 29: Block on HFT activity detected by Ramanujan periodicity
-        if block_on_hft {
-            if let Some(ref features) = self.periodicity_features {
-                if features.hft_likely() {
-                    return false; // Block: periodic HFT activity detected
-                }
-            }
+        if block_on_hft
+            && let Some(ref features) = self.periodicity_features
+            && features.hft_likely()
+        {
+            return false; // Block: periodic HFT activity detected
         }
 
         if allowed_labels.is_empty() {
@@ -1027,33 +1027,34 @@ fn generate_micro_mm_orders(
         }
 
         // Phase 28/29: Regime + Ramanujan gating check
-        if config.regime_gating_enabled || config.ramanujan_enabled {
-            if let Some(regime_state) = regime_states.get(symbol) {
-                let block_on_hft = config.ramanujan_enabled && config.ramanujan_block_on_hft;
-                if !regime_state.allows_trading(&config.regime_allowed_labels, block_on_hft) {
-                    // Determine block reason for stats
-                    if let Some(ref features) = regime_state.periodicity_features {
-                        if features.hft_likely() && block_on_hft {
-                            regime_stats.hft_blocked += 1;
-                            tracing::trace!(
-                                symbol = %symbol,
-                                periodicity = %regime_state.periodicity_summary(),
-                                "Signal blocked by Ramanujan HFT detection"
-                            );
-                            continue;
-                        }
-                    }
-                    regime_stats.regime_blocked += 1;
+        if (config.regime_gating_enabled || config.ramanujan_enabled)
+            && let Some(regime_state) = regime_states.get(symbol)
+        {
+            let block_on_hft = config.ramanujan_enabled && config.ramanujan_block_on_hft;
+            if !regime_state.allows_trading(&config.regime_allowed_labels, block_on_hft) {
+                // Determine block reason for stats
+                if let Some(ref features) = regime_state.periodicity_features
+                    && features.hft_likely()
+                    && block_on_hft
+                {
+                    regime_stats.hft_blocked += 1;
                     tracing::trace!(
                         symbol = %symbol,
-                        regime = ?regime_state.current_regime,
                         periodicity = %regime_state.periodicity_summary(),
-                        "Signal blocked by regime gating"
+                        "Signal blocked by Ramanujan HFT detection"
                     );
-                    continue; // Skip this signal due to unfavorable regime
+                    continue;
                 }
-                regime_stats.regime_allowed += 1;
+                regime_stats.regime_blocked += 1;
+                tracing::trace!(
+                    symbol = %symbol,
+                    regime = ?regime_state.current_regime,
+                    periodicity = %regime_state.periodicity_summary(),
+                    "Signal blocked by regime gating"
+                );
+                continue; // Skip this signal due to unfavorable regime
             }
+            regime_stats.regime_allowed += 1;
         }
 
         // Gate B1: Compute signal strength (distance beyond threshold; >= 0)

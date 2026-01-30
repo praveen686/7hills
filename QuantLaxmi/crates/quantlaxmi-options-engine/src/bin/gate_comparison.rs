@@ -124,6 +124,7 @@ struct Position {
 
 /// Trade record.
 #[derive(Clone)]
+#[allow(dead_code)]
 struct Trade {
     strategy: StrategyType,
     action: String,
@@ -155,7 +156,7 @@ fn main() -> Result<()> {
     println!("Loaded {} quotes\n", quotes.len());
 
     // Define gate configurations to test
-    let configs = vec![
+    let configs = [
         GateConfig {
             name: "1. Baseline (No Gates)",
             ramanujan_enabled: false,
@@ -340,40 +341,35 @@ fn run_backtest(quotes: &[QuoteEvent], args: &Args, config: GateConfig) -> Resul
             && !regime_blocked
             && (config.min_score == 0.0 || decision.confidence * 100.0 >= config.min_score);
 
-        if should_trade {
-            match decision.action {
-                TradingAction::Enter => {
-                    if let Some(rec) = &decision.strategy {
-                        let has_position = positions.contains_key(&quote.tradingsymbol);
-                        if !has_position && positions.len() < args.max_positions as usize {
-                            let entry_price = quote.mid();
+        if should_trade && decision.action == TradingAction::Enter {
+            if let Some(rec) = &decision.strategy {
+                let has_position = positions.contains_key(&quote.tradingsymbol);
+                if !has_position && positions.len() < args.max_positions as usize {
+                    let entry_price = quote.mid();
 
-                            positions.insert(
-                                quote.tradingsymbol.clone(),
-                                Position {
-                                    symbol: quote.tradingsymbol.clone(),
-                                    strategy: rec.strategy,
-                                    entry_price,
-                                    quantity: 50,
-                                    current_price: entry_price,
-                                    pnl: 0.0,
-                                },
-                            );
+                    positions.insert(
+                        quote.tradingsymbol.clone(),
+                        Position {
+                            symbol: quote.tradingsymbol.clone(),
+                            strategy: rec.strategy,
+                            entry_price,
+                            quantity: 50,
+                            current_price: entry_price,
+                            pnl: 0.0,
+                        },
+                    );
 
-                            trades.push(Trade {
-                                strategy: rec.strategy,
-                                action: "ENTER".into(),
-                                pnl: 0.0,
-                                regime: regime_str.clone(),
-                            });
+                    trades.push(Trade {
+                        strategy: rec.strategy,
+                        action: "ENTER".into(),
+                        pnl: 0.0,
+                        regime: regime_str.clone(),
+                    });
 
-                            *strategies_used
-                                .entry(format!("{:?}", rec.strategy))
-                                .or_default() += 1;
-                        }
-                    }
+                    *strategies_used
+                        .entry(format!("{:?}", rec.strategy))
+                        .or_default() += 1;
                 }
-                _ => {}
             }
         }
 
@@ -652,11 +648,11 @@ fn print_gate_analysis(results: &[BacktestResult]) {
         println!("    Effect:  Only allows high-confidence signals (>{})", 55); // TODO: pass actual min_score
     }
 
-    // Best configuration
+    // Best configuration (NaN-safe comparison)
     let best = results
         .iter()
-        .max_by(|a, b| a.total_pnl.partial_cmp(&b.total_pnl).unwrap())
-        .unwrap();
+        .max_by(|a, b| a.total_pnl.total_cmp(&b.total_pnl))
+        .expect("results should not be empty");
 
     println!();
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

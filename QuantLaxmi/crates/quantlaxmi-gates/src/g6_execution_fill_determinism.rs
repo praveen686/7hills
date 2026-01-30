@@ -1306,7 +1306,7 @@ mod tests {
         // Write with blank line
         let mut live_file = NamedTempFile::new().unwrap();
         writeln!(live_file, "{}", serde_json::to_string(&fill).unwrap()).unwrap();
-        writeln!(live_file, "").unwrap(); // Blank line
+        writeln!(live_file).unwrap(); // Blank line
         writeln!(
             live_file,
             "{}",

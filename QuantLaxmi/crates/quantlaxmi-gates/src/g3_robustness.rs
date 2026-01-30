@@ -403,8 +403,10 @@ mod tests {
         assert!(result.passed);
 
         // Bad config - reconnect disabled
-        let mut bad = SystemConfig::default();
-        bad.ws_reconnect_enabled = false;
+        let bad = SystemConfig {
+            ws_reconnect_enabled: false,
+            ..Default::default()
+        };
         let result = g3.check_connection_loss(&bad);
         assert!(!result.passed);
     }
@@ -419,8 +421,10 @@ mod tests {
         assert!(result.passed);
 
         // Bad config - circuit breaker disabled
-        let mut bad = SystemConfig::default();
-        bad.circuit_breaker_enabled = false;
+        let bad = SystemConfig {
+            circuit_breaker_enabled: false,
+            ..Default::default()
+        };
         let result = g3.check_data_gaps(&bad);
         assert!(!result.passed);
     }
@@ -435,8 +439,10 @@ mod tests {
         assert!(result.passed);
 
         // Bad config - zero limit
-        let mut bad = SystemConfig::default();
-        bad.price_deviation_limit_pct = 0.0;
+        let bad = SystemConfig {
+            price_deviation_limit_pct: 0.0,
+            ..Default::default()
+        };
         let result = g3.check_extreme_prices(&bad);
         assert!(!result.passed);
     }
@@ -451,8 +457,10 @@ mod tests {
         assert!(result.passed);
 
         // Bad config - zero timeout
-        let mut bad = SystemConfig::default();
-        bad.order_timeout_ms = 0;
+        let bad = SystemConfig {
+            order_timeout_ms: 0,
+            ..Default::default()
+        };
         let result = g3.check_high_latency(&bad);
         assert!(!result.passed);
     }
@@ -467,14 +475,18 @@ mod tests {
         assert!(result.passed);
 
         // Warning config - no limit
-        let mut warn = SystemConfig::default();
-        warn.memory_limit_mb = None;
+        let warn = SystemConfig {
+            memory_limit_mb: None,
+            ..Default::default()
+        };
         let result = g3.check_memory_pressure(&warn);
         assert!(result.passed); // Warning still passes
 
         // Bad config - zero limit
-        let mut bad = SystemConfig::default();
-        bad.memory_limit_mb = Some(0);
+        let bad = SystemConfig {
+            memory_limit_mb: Some(0),
+            ..Default::default()
+        };
         let result = g3.check_memory_pressure(&bad);
         assert!(!result.passed);
     }

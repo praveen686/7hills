@@ -9,9 +9,10 @@ use quantlaxmi_regime::FeatureVector;
 use std::collections::HashMap;
 
 /// Warmup state for the regime detector
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WarmupState {
     /// Fetching historical data
+    #[default]
     Fetching,
     /// Processing historical data through detector
     Processing,
@@ -19,12 +20,6 @@ pub enum WarmupState {
     Ready,
     /// Warmup failed (will trade cautiously)
     Failed,
-}
-
-impl Default for WarmupState {
-    fn default() -> Self {
-        Self::Fetching
-    }
 }
 
 impl std::fmt::Display for WarmupState {

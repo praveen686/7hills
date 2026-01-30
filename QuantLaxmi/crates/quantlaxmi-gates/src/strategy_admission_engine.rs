@@ -619,7 +619,7 @@ mod tests {
 
         assert!(verdict.is_refused());
         // Should have multiple reasons: signal not in manifest AND not bound to strategy
-        assert!(verdict.decision.refuse_reasons.len() >= 1);
+        assert!(!verdict.decision.refuse_reasons.is_empty());
     }
 
     #[test]

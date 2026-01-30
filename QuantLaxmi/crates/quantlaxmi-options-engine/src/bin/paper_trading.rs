@@ -11,7 +11,6 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -338,6 +337,7 @@ fn run_from_file(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_from_stdin(
     engine: &mut OptionsEngine,
     session: &mut PaperSession,
@@ -450,60 +450,55 @@ fn process_quote(
     }
 
     // Process decision
-    if !status.hft_detected {
-        match decision.action {
-            TradingAction::Enter => {
-                if let Some(rec) = &decision.strategy {
-                    let has_position = session.positions.contains_key(&quote.symbol);
-                    if !has_position && session.positions.len() < args.max_positions as usize {
-                        // Paper entry
-                        let entry_price = quote.mid();
-                        let quantity = 50; // 1 lot
+    if !status.hft_detected && decision.action == TradingAction::Enter {
+        if let Some(rec) = &decision.strategy {
+            let has_position = session.positions.contains_key(&quote.symbol);
+            if !has_position && session.positions.len() < args.max_positions as usize {
+                // Paper entry
+                let entry_price = quote.mid();
+                let quantity = 50; // 1 lot
 
-                        session.positions.insert(
-                            quote.symbol.clone(),
-                            PaperPosition {
-                                symbol: quote.symbol.clone(),
-                                strategy: rec.strategy,
-                                entry_ts: quote.ts,
-                                entry_price,
-                                quantity,
-                                current_price: entry_price,
-                                unrealized_pnl: 0.0,
-                            },
-                        );
+                session.positions.insert(
+                    quote.symbol.clone(),
+                    PaperPosition {
+                        symbol: quote.symbol.clone(),
+                        strategy: rec.strategy,
+                        entry_ts: quote.ts,
+                        entry_price,
+                        quantity,
+                        current_price: entry_price,
+                        unrealized_pnl: 0.0,
+                    },
+                );
 
-                        let trade = PaperTrade {
-                            ts: quote.ts,
-                            symbol: quote.symbol.clone(),
-                            strategy: rec.strategy,
-                            action: "ENTER".into(),
-                            price: entry_price,
-                            quantity,
-                            pnl: 0.0,
-                            score: rec.score,
-                            regime: format!("{:?}", status.regime),
-                            hft_detected: status.hft_detected,
-                            reasoning: rec.reasoning.clone(),
-                        };
+                let trade = PaperTrade {
+                    ts: quote.ts,
+                    symbol: quote.symbol.clone(),
+                    strategy: rec.strategy,
+                    action: "ENTER".into(),
+                    price: entry_price,
+                    quantity,
+                    pnl: 0.0,
+                    score: rec.score,
+                    regime: format!("{:?}", status.regime),
+                    hft_detected: status.hft_detected,
+                    reasoning: rec.reasoning.clone(),
+                };
 
-                        // Log to file
-                        writeln!(trade_log, "{}", serde_json::to_string(&trade)?)?;
-                        session.trades.push(trade);
+                // Log to file
+                writeln!(trade_log, "{}", serde_json::to_string(&trade)?)?;
+                session.trades.push(trade);
 
-                        println!(
-                            "\x1b[32m[{}] PAPER ENTER {:?} on {} @ ₹{:.2} | Score: {:.1} | Regime: {:?}\x1b[0m",
-                            quote.ts.format("%H:%M:%S"),
-                            rec.strategy,
-                            quote.symbol,
-                            entry_price,
-                            rec.score,
-                            status.regime
-                        );
-                    }
-                }
+                println!(
+                    "\x1b[32m[{}] PAPER ENTER {:?} on {} @ ₹{:.2} | Score: {:.1} | Regime: {:?}\x1b[0m",
+                    quote.ts.format("%H:%M:%S"),
+                    rec.strategy,
+                    quote.symbol,
+                    entry_price,
+                    rec.score,
+                    status.regime
+                );
             }
-            _ => {}
         }
     }
 
@@ -584,7 +579,7 @@ fn process_quote(
     }
 
     // Periodic status update
-    if session.decisions_made % 1000 == 0 {
+    if session.decisions_made.is_multiple_of(1000) {
         print!(
             "\r[{}] Decisions: {} | Signals: {} (blocked: {}) | Positions: {} | Equity: ₹{:.2}     ",
             quote.ts.format("%H:%M:%S"),
@@ -726,14 +721,13 @@ fn print_session_summary(session: &PaperSession, args: &Args) {
                 "\x1b[31m"
             };
             println!(
-                "  {} {:?} {} @ ₹{:.2} → ₹{:.2} | P&L: {:+.2}{}\x1b[0m",
+                "  {} {:?} {} @ ₹{:.2} → ₹{:.2} | P&L: {:+.2}\x1b[0m",
                 color,
                 pos.strategy,
                 pos.symbol,
                 pos.entry_price,
                 pos.current_price,
-                pos.unrealized_pnl,
-                ""
+                pos.unrealized_pnl
             );
         }
         println!();

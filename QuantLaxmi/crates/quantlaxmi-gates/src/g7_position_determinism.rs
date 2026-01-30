@@ -527,6 +527,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     /// Helper: Create a position update record with builder
+    #[allow(clippy::too_many_arguments)]
     fn make_record(
         session_id: &str,
         seq: u64,
@@ -896,7 +897,7 @@ mod tests {
         writeln!(live_file, "{}", serde_json::to_string(&record2).unwrap()).unwrap();
         live_file.flush().unwrap();
 
-        let replay_file = write_wal(&[record1.clone()]);
+        let replay_file = write_wal(std::slice::from_ref(&record1));
 
         let result = G7PositionDeterminismGate::compare(live_file.path(), replay_file.path());
         assert!(result.is_err());

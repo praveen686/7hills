@@ -675,7 +675,7 @@ mod tests {
             .order_type(OrderIntentType::Limit)
             .qty(100000000, -8)
             .limit_price(5000000, -2)
-            .correlation_id(&format!("corr_{}", seq))
+            .correlation_id(format!("corr_{}", seq))
             .parent_admission_digest("test_digest")
             .build_permit()
     }
@@ -694,7 +694,7 @@ mod tests {
             .order_type(OrderIntentType::Market)
             .qty(100000000, -8)
             .price_exponent(-2)
-            .correlation_id(&format!("corr_{}", seq))
+            .correlation_id(format!("corr_{}", seq))
             .parent_admission_digest("test_digest")
             .build_refuse(reason)
     }

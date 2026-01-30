@@ -35,6 +35,7 @@ impl FeatureValue {
     }
 
     /// Convert to f64 for computation (internal use only).
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn to_f64(&self) -> Option<f64> {
         if self.present {
             Some(self.mantissa as f64 * 10f64.powi(self.exponent as i32))
@@ -147,7 +148,8 @@ impl FeatureVector {
 pub struct MicrostructureFeatures {
     /// Previous mid price for return calculation
     prev_mid: Option<i64>,
-    /// Price exponent
+    /// Price exponent (stored for potential future IV-based scaling)
+    #[allow(dead_code)]
     price_exponent: i8,
     /// Rolling window for volatility
     return_window: Vec<i64>,
@@ -228,7 +230,7 @@ impl MicrostructureFeatures {
         // Pressure ratio: bid_qty / ask_qty * 10000 (capped at 30000)
         let pressure = if ask_qty > 0 {
             let ratio = (bid_qty * 10000) / ask_qty;
-            ratio.min(30000).max(-30000)
+            ratio.clamp(-30000, 30000)
         } else if bid_qty > 0 {
             30000 // Max ratio
         } else {

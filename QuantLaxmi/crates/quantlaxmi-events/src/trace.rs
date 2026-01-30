@@ -61,7 +61,6 @@ use quantlaxmi_models::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
 
 /// Current encoding version for canonical bytes.
 /// Increment this when encoding format changes.
@@ -605,6 +604,7 @@ fn encode_correlation_context(buf: &mut Vec<u8>, ctx: &CorrelationContext) {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use uuid::Uuid;
 
     /// Create a deterministic test decision for testing (using V2 MarketSnapshot).
     fn make_test_decision(id: u8, direction: i8) -> DecisionEvent {

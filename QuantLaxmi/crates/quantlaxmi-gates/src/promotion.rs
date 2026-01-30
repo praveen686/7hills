@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn test_promotion_rejected_short_paper_session() {
         let validator = PromotionValidator::new(PromotionPolicy {
-            min_paper_duration_ns: 7200_000_000_000, // 2 hours
+            min_paper_duration_ns: 7_200_000_000_000, // 2 hours
             require_g2_pass: false,
             require_g3_pass: false,
             ..PromotionPolicy::default()

@@ -237,14 +237,14 @@ impl StrategyCircuitBreaker {
     /// # Returns
     /// `true` if the state was successfully reset to Closed.
     pub fn check_reset(&mut self) -> bool {
-        if let Some(opened_at) = self.opened_at {
-            if opened_at.elapsed().as_secs() >= self.cooldown_secs {
-                self.is_open = false;
-                self.consecutive_losses = 0;
-                self.opened_at = None;
-                info!("Circuit breaker RESET for strategy {}", self.strategy_id);
-                return true;
-            }
+        if let Some(opened_at) = self.opened_at
+            && opened_at.elapsed().as_secs() >= self.cooldown_secs
+        {
+            self.is_open = false;
+            self.consecutive_losses = 0;
+            self.opened_at = None;
+            info!("Circuit breaker RESET for strategy {}", self.strategy_id);
+            return true;
         }
         false
     }

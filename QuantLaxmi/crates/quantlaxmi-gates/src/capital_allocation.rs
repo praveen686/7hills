@@ -1172,7 +1172,7 @@ mod tests {
 
     #[test]
     fn test_allocation_digest_deterministic() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00); // 1,000,000.00
+        let bucket = create_test_bucket("bucket_1", 100_000_000); // 1,000,000.00
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b"]);
         let policy = AllocationPolicy::default();
@@ -1201,7 +1201,7 @@ mod tests {
 
     #[test]
     fn test_respects_bucket_max_concurrent_strategies() {
-        let mut bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let mut bucket = create_test_bucket("bucket_1", 100_000_000);
         bucket.constraints = BucketConstraints::new(RiskClass::Moderate).with_max_strategies(2);
 
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
@@ -1227,7 +1227,7 @@ mod tests {
 
     #[test]
     fn test_respects_caps_bucket_and_eligibility() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b"]);
 
@@ -1235,7 +1235,7 @@ mod tests {
         // Cap strat_a at 100,000.00
         caps.insert(
             StrategyId::new("strat_a"),
-            Some(FixedPoint::new(100_000_00, -2)),
+            Some(FixedPoint::new(10_000_000, -2)),
         );
 
         let policy = AllocationPolicy::default();
@@ -1248,13 +1248,13 @@ mod tests {
             .iter()
             .find(|a| a.strategy_id.0 == "strat_a")
             .unwrap();
-        assert!(alloc_a.assigned_capital.mantissa <= 100_000_00);
+        assert!(alloc_a.assigned_capital.mantissa <= 10_000_000);
         assert!(alloc_a.reasons.iter().any(|r| r.contains("capped")));
     }
 
     #[test]
     fn test_ordering_no_skip_when_disallowed() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b", "strat_c"]);
 
@@ -1265,8 +1265,10 @@ mod tests {
             Some(FixedPoint::new(50, -2)), // 0.50 - below default min of 100.00
         );
 
-        let mut policy = AllocationPolicy::default();
-        policy.allow_skip = false;
+        let policy = AllocationPolicy {
+            allow_skip: false,
+            ..Default::default()
+        };
 
         let allocator = Allocator::new(policy);
         let plan = allocator.allocate(&snapshot, &intent, &caps).unwrap();
@@ -1297,7 +1299,7 @@ mod tests {
 
     #[test]
     fn test_skip_allowed_records_reason() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b"]);
 
@@ -1307,8 +1309,10 @@ mod tests {
             Some(FixedPoint::new(50, -2)), // Below minimum
         );
 
-        let mut policy = AllocationPolicy::default();
-        policy.allow_skip = true;
+        let policy = AllocationPolicy {
+            allow_skip: true,
+            ..Default::default()
+        };
 
         let allocator = Allocator::new(policy);
         let plan = allocator.allocate(&snapshot, &intent, &caps).unwrap();
@@ -1334,7 +1338,7 @@ mod tests {
 
     #[test]
     fn test_equal_split_basic() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b"]);
         let policy = AllocationPolicy::default();
@@ -1356,13 +1360,13 @@ mod tests {
             .find(|a| a.strategy_id.0 == "strat_b")
             .unwrap();
 
-        assert_eq!(alloc_a.assigned_capital.mantissa, 450_000_00);
-        assert_eq!(alloc_b.assigned_capital.mantissa, 450_000_00);
+        assert_eq!(alloc_a.assigned_capital.mantissa, 45_000_000);
+        assert_eq!(alloc_b.assigned_capital.mantissa, 45_000_000);
     }
 
     #[test]
     fn test_min_allocation_threshold() {
-        let bucket = create_test_bucket("bucket_1", 150_00); // 150.00
+        let bucket = create_test_bucket("bucket_1", 15_000); // 150.00
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b", "strat_c"]);
         let policy = AllocationPolicy::default(); // min = 100.00
@@ -1381,7 +1385,7 @@ mod tests {
 
     #[test]
     fn test_reserve_ratio_applied() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a"]);
         let policy = AllocationPolicy::default(); // 10% reserve
@@ -1391,7 +1395,7 @@ mod tests {
         let plan = allocator.allocate(&snapshot, &intent, &caps).unwrap();
 
         // Reserve should be 10% of 1,000,000 = 100,000.00
-        assert_eq!(plan.reserved.mantissa, 100_000_00);
+        assert_eq!(plan.reserved.mantissa, 10_000_000);
 
         // Validate reserve is correct
         let decision = validate_plan(&snapshot, &intent, &policy, &plan);
@@ -1405,7 +1409,7 @@ mod tests {
 
     #[test]
     fn test_unallocated_computed_correctly() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b"]);
 
@@ -1413,11 +1417,11 @@ mod tests {
         // Cap both strategies low
         caps.insert(
             StrategyId::new("strat_a"),
-            Some(FixedPoint::new(200_000_00, -2)), // 200,000.00
+            Some(FixedPoint::new(20_000_000, -2)), // 200,000.00
         );
         caps.insert(
             StrategyId::new("strat_b"),
-            Some(FixedPoint::new(200_000_00, -2)), // 200,000.00
+            Some(FixedPoint::new(20_000_000, -2)), // 200,000.00
         );
 
         let policy = AllocationPolicy::default();
@@ -1439,18 +1443,20 @@ mod tests {
 
     #[test]
     fn test_priority_fill_mode() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b"]);
 
-        let mut policy = AllocationPolicy::default();
-        policy.mode = AllocationMode::PriorityFill;
+        let policy = AllocationPolicy {
+            mode: AllocationMode::PriorityFill,
+            ..Default::default()
+        };
 
         let mut caps = BTreeMap::new();
         // Cap strat_a at 600,000
         caps.insert(
             StrategyId::new("strat_a"),
-            Some(FixedPoint::new(600_000_00, -2)),
+            Some(FixedPoint::new(60_000_000, -2)),
         );
 
         let allocator = Allocator::new(policy);
@@ -1470,13 +1476,13 @@ mod tests {
             .find(|a| a.strategy_id.0 == "strat_b")
             .unwrap();
 
-        assert_eq!(alloc_a.assigned_capital.mantissa, 600_000_00);
-        assert_eq!(alloc_b.assigned_capital.mantissa, 300_000_00);
+        assert_eq!(alloc_a.assigned_capital.mantissa, 60_000_000);
+        assert_eq!(alloc_b.assigned_capital.mantissa, 30_000_000);
     }
 
     #[test]
     fn test_validation_all_checks_pass() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec!["strat_a", "strat_b"]);
         let policy = AllocationPolicy::default();
@@ -1499,7 +1505,7 @@ mod tests {
 
     #[test]
     fn test_empty_intent_handled() {
-        let bucket = create_test_bucket("bucket_1", 1_000_000_00);
+        let bucket = create_test_bucket("bucket_1", 100_000_000);
         let snapshot = create_test_snapshot(vec![bucket.clone()]);
         let intent = create_test_intent(&bucket.bucket_id, vec![]);
         let policy = AllocationPolicy::default();

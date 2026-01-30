@@ -12,12 +12,10 @@
 use quantlaxmi_regime::RegimeLabel;
 use serde::{Deserialize, Serialize};
 
-use crate::greeks::{Greeks, OptionParams, OptionType, PortfolioGreeks};
-use crate::pcr::{CompositeSignal as PCRComposite, PCRSignal, SignalStrength, TradingBias};
-use crate::strategies::{
-    DeltaProfile, ExpirySelection, GreeksProfile, StrategyParams, StrategyType,
-};
-use crate::vol_surface::{StrategyBias, VolRegime, VolSurface};
+use crate::greeks::PortfolioGreeks;
+use crate::pcr::{PCRSignal, TradingBias};
+use crate::strategies::{DeltaProfile, ExpirySelection, StrategyParams, StrategyType};
+use crate::vol_surface::{StrategyBias, VolRegime};
 
 /// Market state snapshot for strategy selection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,8 +195,15 @@ impl StrategySelector {
             self.score_strategy(StrategyType::BearPutSpread, state),
         ];
 
-        // Sort by score descending
-        candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        // Sort by score descending (NaN-safe: NaN scores treated as worst)
+        candidates.sort_by(|a, b| {
+            match (a.score.is_nan(), b.score.is_nan()) {
+                (true, true) => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Greater, // a (NaN) goes after b
+                (false, true) => std::cmp::Ordering::Less,    // a goes before b (NaN)
+                (false, false) => b.score.total_cmp(&a.score), // descending order
+            }
+        });
 
         // Filter by constraints and return top N
         candidates
@@ -474,7 +479,7 @@ impl StrategySelector {
     }
 
     /// Build strategy parameters.
-    fn build_params(&self, strategy: StrategyType, state: &MarketState) -> StrategyParams {
+    fn build_params(&self, _strategy: StrategyType, state: &MarketState) -> StrategyParams {
         let expiry = if state.nearest_dte <= 14 {
             ExpirySelection::Weekly
         } else if state.nearest_dte <= 45 {

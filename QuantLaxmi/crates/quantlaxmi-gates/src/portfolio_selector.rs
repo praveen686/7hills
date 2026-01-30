@@ -594,7 +594,7 @@ mod tests {
             BucketId::new(id),
             Venue::BinancePerp,
             Currency::USDT,
-            FixedPoint::new(10_000_000_00, -2),
+            FixedPoint::new(1_000_000_000, -2),
             BucketConstraints::new(RiskClass::Moderate),
         )
     }
@@ -648,7 +648,7 @@ mod tests {
             BucketId::new("limited_bucket"),
             Venue::BinancePerp,
             Currency::USDT,
-            FixedPoint::new(10_000_000_00, -2),
+            FixedPoint::new(1_000_000_000, -2),
             BucketConstraints::new(RiskClass::Moderate).with_max_strategies(2),
         );
 
@@ -954,7 +954,7 @@ mod tests {
             BucketId::new("bucket_001"),
             Venue::BinancePerp,
             Currency::USDT,
-            FixedPoint::new(10_000_000_00, -2),
+            FixedPoint::new(1_000_000_000, -2),
             BucketConstraints::new(RiskClass::Moderate).with_max_strategies(10), // Bucket allows 10
         );
 

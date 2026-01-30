@@ -142,12 +142,12 @@ impl CanonicalSubspace {
         let mut hasher = Sha256::new();
 
         // Include dimensions
-        hasher.update(&(n as u32).to_le_bytes());
-        hasher.update(&(k as u32).to_le_bytes());
+        hasher.update((n as u32).to_le_bytes());
+        hasher.update((k as u32).to_le_bytes());
 
         // Include quantized basis
         for &val in basis {
-            hasher.update(&val.to_le_bytes());
+            hasher.update(val.to_le_bytes());
         }
 
         SubspaceDigest(hex::encode(hasher.finalize()))

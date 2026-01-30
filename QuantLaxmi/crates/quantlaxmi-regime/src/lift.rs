@@ -61,12 +61,12 @@ impl RegimeLift {
         let x = features.to_dense();
 
         // Add to rolling sums
-        for i in 0..6 {
-            self.sum[i] += x[i];
+        for (i, xi) in x.iter().enumerate() {
+            self.sum[i] += xi;
         }
-        for i in 0..6 {
-            for j in 0..6 {
-                self.sum_sq[i * 6 + j] += x[i] * x[j];
+        for (i, xi) in x.iter().enumerate() {
+            for (j, xj) in x.iter().enumerate() {
+                self.sum_sq[i * 6 + j] += xi * xj;
             }
         }
 
@@ -75,12 +75,12 @@ impl RegimeLift {
         // If window is full, remove oldest and update sums
         if self.window.len() > self.config.window_size {
             if let Some(old) = self.window.pop_front() {
-                for i in 0..6 {
-                    self.sum[i] -= old[i];
+                for (i, oi) in old.iter().enumerate() {
+                    self.sum[i] -= oi;
                 }
-                for i in 0..6 {
-                    for j in 0..6 {
-                        self.sum_sq[i * 6 + j] -= old[i] * old[j];
+                for (i, oi) in old.iter().enumerate() {
+                    for (j, oj) in old.iter().enumerate() {
+                        self.sum_sq[i * 6 + j] -= oi * oj;
                     }
                 }
             }

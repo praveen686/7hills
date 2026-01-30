@@ -664,7 +664,7 @@ fn create_test_g2_report(passed: bool) -> G2Report {
     let base_score = 5000i128;
     G2Report {
         version: G2Report::VERSION.to_string(),
-        generated_ts_ns: 1706180400_000_000_000,
+        generated_ts_ns: 1_706_180_400_000_000_000,
         strategy_id: "funding_bias:2.0.0:abc123".to_string(),
         run_id: "run_001".to_string(),
         base_summary_sha256: "base_summary_hash".to_string(),
@@ -704,7 +704,7 @@ fn create_test_g3_report(passed: bool) -> G3Report {
 
     G3Report {
         version: G3Report::VERSION.to_string(),
-        generated_ts_ns: 1706180400_000_000_000,
+        generated_ts_ns: 1_706_180_400_000_000_000,
         strategy_id: "funding_bias:2.0.0:abc123".to_string(),
         run_id: "run_001".to_string(),
         segment_start_ts_ns: 1_000_000_000,

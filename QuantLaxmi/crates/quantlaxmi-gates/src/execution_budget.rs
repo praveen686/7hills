@@ -1334,7 +1334,7 @@ mod tests {
 
     #[test]
     fn test_budget_from_allocation_plan() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
+        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 10_000_000)]);
         let mut manager = BudgetManager::with_default_policy();
 
         let deltas = manager.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
@@ -1346,8 +1346,8 @@ mod tests {
             .get_budget(&StrategyId::new("strat_a"), &BucketId::new("bucket_1"))
             .unwrap();
 
-        assert_eq!(budget.allocated_capital.mantissa, 100_000_00);
-        assert_eq!(budget.available_capital.mantissa, 100_000_00);
+        assert_eq!(budget.allocated_capital.mantissa, 10_000_000);
+        assert_eq!(budget.available_capital.mantissa, 10_000_000);
         assert_eq!(budget.reserved_capital.mantissa, 0);
         assert_eq!(budget.committed_capital.mantissa, 0);
         assert_eq!(budget.status, BudgetStatus::Active);
@@ -1355,7 +1355,7 @@ mod tests {
 
     #[test]
     fn test_order_check_respects_constraints() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
+        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 10_000_000)]);
         let mut manager = BudgetManager::with_default_policy();
         manager.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
 
@@ -1366,7 +1366,7 @@ mod tests {
         let result = manager.check_order(
             &strat,
             &bucket,
-            &FixedPoint::new(5_000_00, -2),
+            &FixedPoint::new(500_000, -2),
             1_000_000_000,
         );
         assert!(result.allowed);
@@ -1375,7 +1375,7 @@ mod tests {
         let result = manager.check_order(
             &strat,
             &bucket,
-            &FixedPoint::new(15_000_00, -2),
+            &FixedPoint::new(1_500_000, -2),
             1_000_000_000,
         );
         assert!(!result.allowed);
@@ -1390,7 +1390,7 @@ mod tests {
         let result = manager.check_order(
             &strat,
             &bucket,
-            &FixedPoint::new(200_000_00, -2),
+            &FixedPoint::new(20_000_000, -2),
             1_000_000_000,
         );
         assert!(!result.allowed);
@@ -1399,7 +1399,7 @@ mod tests {
 
     #[test]
     fn test_reserve_reduces_available() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
+        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 10_000_000)]);
         let mut manager = BudgetManager::with_default_policy();
         manager.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
 
@@ -1412,22 +1412,22 @@ mod tests {
                 &strat,
                 &bucket,
                 "order_1",
-                &FixedPoint::new(10_000_00, -2),
+                &FixedPoint::new(1_000_000, -2),
                 2_000_000_000,
             )
             .unwrap();
 
         assert_eq!(delta.delta_type, DeltaType::OrderOpen);
-        assert_eq!(delta.amount.mantissa, 10_000_00);
+        assert_eq!(delta.amount.mantissa, 1_000_000);
 
         let budget = manager.get_budget(&strat, &bucket).unwrap();
-        assert_eq!(budget.reserved_capital.mantissa, 10_000_00);
-        assert_eq!(budget.available_capital.mantissa, 90_000_00);
+        assert_eq!(budget.reserved_capital.mantissa, 1_000_000);
+        assert_eq!(budget.available_capital.mantissa, 9_000_000);
     }
 
     #[test]
     fn test_release_restores_available() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
+        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 10_000_000)]);
         let mut manager = BudgetManager::with_default_policy();
         manager.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
 
@@ -1440,7 +1440,7 @@ mod tests {
                 &strat,
                 &bucket,
                 "order_1",
-                &FixedPoint::new(10_000_00, -2),
+                &FixedPoint::new(1_000_000, -2),
                 2_000_000_000,
             )
             .unwrap();
@@ -1453,12 +1453,12 @@ mod tests {
 
         let budget = manager.get_budget(&strat, &bucket).unwrap();
         assert_eq!(budget.reserved_capital.mantissa, 0);
-        assert_eq!(budget.available_capital.mantissa, 100_000_00);
+        assert_eq!(budget.available_capital.mantissa, 10_000_000);
     }
 
     #[test]
     fn test_budget_exhausted_rejects_orders() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 20_000_00)]); // Small allocation
+        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 2_000_000)]); // Small allocation
         let mut manager = BudgetManager::with_default_policy();
         manager.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
 
@@ -1471,7 +1471,7 @@ mod tests {
                 &strat,
                 &bucket,
                 "order_1",
-                &FixedPoint::new(2_000_00, -2),
+                &FixedPoint::new(200_000, -2),
                 2_000_000_000,
             )
             .unwrap();
@@ -1480,7 +1480,7 @@ mod tests {
                 &strat,
                 &bucket,
                 "order_2",
-                &FixedPoint::new(2_000_00, -2),
+                &FixedPoint::new(200_000, -2),
                 3_000_000_000,
             )
             .unwrap();
@@ -1489,7 +1489,7 @@ mod tests {
         let result = manager.check_order(
             &strat,
             &bucket,
-            &FixedPoint::new(20_000_00, -2),
+            &FixedPoint::new(2_000_000, -2),
             4_000_000_000,
         );
         assert!(!result.allowed);
@@ -1498,14 +1498,14 @@ mod tests {
 
     #[test]
     fn test_rebalance_updates_budgets() {
-        let plan1 = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
+        let plan1 = create_test_allocation_plan("bucket_1", &[("strat_a", 10_000_000)]);
         let mut manager = BudgetManager::with_default_policy();
         manager
             .apply_allocation_plan(&plan1, 1_000_000_000)
             .unwrap();
 
         // Create a new plan with different digest (different allocation)
-        let plan2 = create_test_allocation_plan("bucket_1", &[("strat_a", 150_000_00)]);
+        let plan2 = create_test_allocation_plan("bucket_1", &[("strat_a", 15_000_000)]);
         let deltas = manager
             .apply_allocation_plan(&plan2, 2_000_000_000)
             .unwrap();
@@ -1518,12 +1518,12 @@ mod tests {
         let budget = manager
             .get_budget(&StrategyId::new("strat_a"), &BucketId::new("bucket_1"))
             .unwrap();
-        assert_eq!(budget.allocated_capital.mantissa, 150_000_00);
+        assert_eq!(budget.allocated_capital.mantissa, 15_000_000);
     }
 
     #[test]
     fn test_budget_digest_deterministic() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
+        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 10_000_000)]);
 
         let mut manager1 = BudgetManager::with_default_policy();
         let mut manager2 = BudgetManager::with_default_policy();
@@ -1549,7 +1549,7 @@ mod tests {
     fn test_snapshot_digest_deterministic() {
         let plan = create_test_allocation_plan(
             "bucket_1",
-            &[("strat_a", 100_000_00), ("strat_b", 50_000_00)],
+            &[("strat_a", 10_000_000), ("strat_b", 5_000_000)],
         );
 
         let mut manager1 = BudgetManager::with_default_policy();
@@ -1609,7 +1609,7 @@ mod tests {
 
     #[test]
     fn test_fill_moves_reserved_to_committed() {
-        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 100_000_00)]);
+        let plan = create_test_allocation_plan("bucket_1", &[("strat_a", 10_000_000)]);
         let mut manager = BudgetManager::with_default_policy();
         manager.apply_allocation_plan(&plan, 1_000_000_000).unwrap();
 
@@ -1622,7 +1622,7 @@ mod tests {
                 &strat,
                 &bucket,
                 "order_1",
-                &FixedPoint::new(10_000_00, -2),
+                &FixedPoint::new(1_000_000, -2),
                 2_000_000_000,
             )
             .unwrap();
@@ -1633,7 +1633,7 @@ mod tests {
                 &strat,
                 &bucket,
                 "order_1",
-                &FixedPoint::new(10_000_00, -2),
+                &FixedPoint::new(1_000_000, -2),
                 3_000_000_000,
             )
             .unwrap();
@@ -1642,7 +1642,7 @@ mod tests {
 
         let budget = manager.get_budget(&strat, &bucket).unwrap();
         assert_eq!(budget.reserved_capital.mantissa, 0);
-        assert_eq!(budget.committed_capital.mantissa, 10_000_00);
-        assert_eq!(budget.available_capital.mantissa, 90_000_00);
+        assert_eq!(budget.committed_capital.mantissa, 1_000_000);
+        assert_eq!(budget.available_capital.mantissa, 9_000_000);
     }
 }

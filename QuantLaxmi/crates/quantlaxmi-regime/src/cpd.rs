@@ -156,7 +156,7 @@ mod tests {
         let ts = Utc::now();
 
         // Small deviations should not trigger
-        for i in 0..10 {
+        for _i in 0..10 {
             let result = detector.update(ts, "TEST", 150); // Slightly above drift
             assert!(result.is_none());
         }

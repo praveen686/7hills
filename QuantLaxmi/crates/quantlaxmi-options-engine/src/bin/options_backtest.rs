@@ -8,18 +8,14 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-use quantlaxmi_options_engine::{
-    EngineConfig, EngineStatus, Greeks, OptionData, OptionDataType, OptionParams, OptionType,
-    OptionsEngine, PCRMetrics, PortfolioGreeks, StrategyType, TradingAction, TradingDecision,
-};
-use quantlaxmi_regime::{FeatureVector, RegimeLabel};
+use quantlaxmi_options_engine::{EngineConfig, OptionsEngine, StrategyType, TradingAction};
+use quantlaxmi_regime::FeatureVector;
 
 #[derive(Parser)]
 #[command(name = "options-backtest")]

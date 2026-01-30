@@ -39,12 +39,12 @@ impl RegimeSubspaceEvent {
         // Include all fields in canonical order
         hasher.update(self.ts.timestamp_nanos_opt().unwrap_or(0).to_le_bytes());
         hasher.update(self.symbol.as_bytes());
-        hasher.update(&(self.window_len as u32).to_le_bytes());
-        hasher.update(&(self.k as u32).to_le_bytes());
-        hasher.update(&(self.n as u32).to_le_bytes());
+        hasher.update((self.window_len as u32).to_le_bytes());
+        hasher.update((self.k as u32).to_le_bytes());
+        hasher.update((self.n as u32).to_le_bytes());
         hasher.update(self.subspace_digest.as_str().as_bytes());
-        hasher.update(&self.distance_to_prev_mantissa.to_le_bytes());
-        hasher.update(&[self.distance_exponent as u8]);
+        hasher.update(self.distance_to_prev_mantissa.to_le_bytes());
+        hasher.update([self.distance_exponent as u8]);
 
         hex::encode(hasher.finalize())
     }
@@ -81,12 +81,12 @@ impl RegimeShiftEvent {
 
         hasher.update(self.ts.timestamp_nanos_opt().unwrap_or(0).to_le_bytes());
         hasher.update(self.symbol.as_bytes());
-        hasher.update(&self.distance_mantissa.to_le_bytes());
-        hasher.update(&[self.distance_exponent as u8]);
-        hasher.update(&self.cusum_stat_mantissa.to_le_bytes());
-        hasher.update(&self.threshold_mantissa.to_le_bytes());
-        hasher.update(&(self.observations_since_last as u32).to_le_bytes());
-        hasher.update(&[match self.direction {
+        hasher.update(self.distance_mantissa.to_le_bytes());
+        hasher.update([self.distance_exponent as u8]);
+        hasher.update(self.cusum_stat_mantissa.to_le_bytes());
+        hasher.update(self.threshold_mantissa.to_le_bytes());
+        hasher.update((self.observations_since_last as u32).to_le_bytes());
+        hasher.update([match self.direction {
             ShiftDirection::Increasing => 1u8,
             ShiftDirection::Decreasing => 0u8,
         }]);
@@ -141,11 +141,11 @@ impl RegimeLabelEvent {
         hasher.update(self.ts.timestamp_nanos_opt().unwrap_or(0).to_le_bytes());
         hasher.update(self.symbol.as_bytes());
         hasher.update(self.regime_id.as_bytes());
-        hasher.update(&self.confidence_mantissa.to_le_bytes());
-        hasher.update(&self.distance_best_mantissa.to_le_bytes());
-        hasher.update(&self.distance_second_mantissa.to_le_bytes());
-        hasher.update(&[self.distance_exponent as u8]);
-        hasher.update(&[match self.method {
+        hasher.update(self.confidence_mantissa.to_le_bytes());
+        hasher.update(self.distance_best_mantissa.to_le_bytes());
+        hasher.update(self.distance_second_mantissa.to_le_bytes());
+        hasher.update([self.distance_exponent as u8]);
+        hasher.update([match self.method {
             ClassificationMethod::Prototype => 0u8,
             ClassificationMethod::Cpd => 1u8,
             ClassificationMethod::Hybrid => 2u8,

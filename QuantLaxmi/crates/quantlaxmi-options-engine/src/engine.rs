@@ -37,14 +37,14 @@ use quantlaxmi_regime::{
     MicrostructurePeriodicity, PeriodicityFeatures, RegimeEngine, RegimeEngineConfig, RegimeLabel,
 };
 
-use crate::greeks::{Greeks, OptionParams, OptionType, PortfolioGreeks};
+use crate::greeks::{OptionType, PortfolioGreeks};
 use crate::pcr::{calculate_max_pain, OptionData, PCRMetrics, PCRSignal, PCRTracker};
-use crate::strategies::{ConstructedStrategy, ResolvedLeg, StrategyParams, StrategyType};
+use crate::strategies::StrategyType;
 use crate::strategy_selector::{
     MarketState, RiskConstraints, StrategyRecommendation, StrategySelector, TradingAction,
     TradingDecision,
 };
-use crate::vol_surface::{VolRegime, VolSmile, VolSurface};
+use crate::vol_surface::{VolRegime, VolSurface};
 
 /// Configuration for the Options Engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,7 +279,7 @@ impl OptionsEngine {
         }
 
         // Update regime detector
-        let (_subspace_event, shift_event, label_event) =
+        let (_subspace_event, _shift_event, label_event) =
             self.regime_engine
                 .process(ts, &self.config.symbol, features);
 
@@ -484,7 +484,7 @@ impl OptionsEngine {
 
         MarketState {
             spot: self.spot,
-            regime: self.last_regime.clone(),
+            regime: self.last_regime,
             vol_regime: VolRegime::from_percentile(iv_percentile),
             iv_percentile,
             atm_iv,
@@ -511,7 +511,7 @@ impl OptionsEngine {
             action,
             strategy: Some(rec.strategy),
             score: rec.score,
-            regime: state.regime.clone(),
+            regime: state.regime,
             vol_regime: state.vol_regime,
             iv_percentile: state.iv_percentile,
             pcr: state.pcr_value,
@@ -541,7 +541,7 @@ impl OptionsEngine {
 
         EngineStatus {
             spot: self.spot,
-            regime: self.last_regime.clone(),
+            regime: self.last_regime,
             vol_regime: VolRegime::from_percentile(self.vol_surface.iv_percentile),
             iv_percentile: self.vol_surface.iv_percentile,
             atm_iv: self.vol_surface.current_atm_iv,

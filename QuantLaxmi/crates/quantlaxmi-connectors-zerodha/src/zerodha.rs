@@ -1666,18 +1666,28 @@ impl ZerodhaAutoDiscovery {
                     )
                     .send()
                     .await
+                    && let Ok(text) = response.text().await
                 {
-                    if let Ok(text) = response.text().await {
-                        for line in text.lines().skip(1) {
-                            let parts: Vec<&str> = line.split(',').collect();
-                            if parts.len() >= 3 {
-                                let token: u32 = parts[0].parse().unwrap_or(0);
-                                let tradingsymbol = parts[2];
-                                for sym in &nfo_symbols {
-                                    if tradingsymbol == sym {
-                                        info!("[RESOLVE] NFO {} -> token {}", sym, token);
-                                        result.push((sym.clone(), token));
-                                    }
+                    for line in text.lines().skip(1) {
+                        let parts: Vec<&str> = line.split(',').collect();
+                        if parts.len() >= 3 {
+                            // Strict parse: skip rows with invalid tokens (no fabrication)
+                            let token: u32 = match parts[0].parse() {
+                                Ok(t) if t > 0 => t,
+                                Ok(_) => {
+                                    warn!(raw=%parts[0], "NFO instrument token is 0; skipping");
+                                    continue;
+                                }
+                                Err(e) => {
+                                    warn!(error=?e, raw=%parts[0], "Bad NFO instrument_token; skipping row");
+                                    continue;
+                                }
+                            };
+                            let tradingsymbol = parts[2];
+                            for sym in &nfo_symbols {
+                                if tradingsymbol == sym {
+                                    info!("[RESOLVE] NFO {} -> token {}", sym, token);
+                                    result.push((sym.clone(), token));
                                 }
                             }
                         }
@@ -1699,18 +1709,28 @@ impl ZerodhaAutoDiscovery {
                     )
                     .send()
                     .await
+                    && let Ok(text) = response.text().await
                 {
-                    if let Ok(text) = response.text().await {
-                        for line in text.lines().skip(1) {
-                            let parts: Vec<&str> = line.split(',').collect();
-                            if parts.len() >= 3 {
-                                let token: u32 = parts[0].parse().unwrap_or(0);
-                                let tradingsymbol = parts[2];
-                                for sym in &nse_symbols {
-                                    if tradingsymbol == sym {
-                                        info!("[RESOLVE] NSE {} -> token {}", sym, token);
-                                        result.push((sym.clone(), token));
-                                    }
+                    for line in text.lines().skip(1) {
+                        let parts: Vec<&str> = line.split(',').collect();
+                        if parts.len() >= 3 {
+                            // Strict parse: skip rows with invalid tokens (no fabrication)
+                            let token: u32 = match parts[0].parse() {
+                                Ok(t) if t > 0 => t,
+                                Ok(_) => {
+                                    warn!(raw=%parts[0], "NSE instrument token is 0; skipping");
+                                    continue;
+                                }
+                                Err(e) => {
+                                    warn!(error=?e, raw=%parts[0], "Bad NSE instrument_token; skipping row");
+                                    continue;
+                                }
+                            };
+                            let tradingsymbol = parts[2];
+                            for sym in &nse_symbols {
+                                if tradingsymbol == sym {
+                                    info!("[RESOLVE] NSE {} -> token {}", sym, token);
+                                    result.push((sym.clone(), token));
                                 }
                             }
                         }

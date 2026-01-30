@@ -40,7 +40,7 @@ impl RegimeLabel {
     }
 
     /// Parse from string.
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "quiet" => Self::Quiet,
             "trend_impulse" | "trend" => Self::TrendImpulse,
@@ -242,16 +242,17 @@ impl PrototypeBuilder {
     /// For Grassmann manifolds, we use Karcher mean (iterative).
     /// For simplicity, we use the observation with minimum total distance
     /// to all others (medoid).
-    pub fn build(self, source: impl Into<String>) -> Option<RegimePrototype> {
+    pub fn build(mut self, source: impl Into<String>) -> Option<RegimePrototype> {
         if self.subspaces.is_empty() {
             return None;
         }
 
         if self.subspaces.len() == 1 {
+            // Safe: just checked len() == 1, so pop() will succeed
             return Some(RegimePrototype::new(
                 self.label,
                 self.id,
-                self.subspaces.into_iter().next().unwrap(),
+                self.subspaces.pop().expect("len checked == 1"),
                 self.description,
                 source,
             ));
@@ -276,10 +277,11 @@ impl PrototypeBuilder {
             }
         }
 
+        // Safe: best_idx was computed from valid indices via enumerate()
         Some(RegimePrototype::new(
             self.label,
             self.id,
-            self.subspaces.into_iter().nth(best_idx).unwrap(),
+            self.subspaces.swap_remove(best_idx),
             self.description,
             source,
         ))
@@ -359,9 +361,9 @@ mod tests {
 
     #[test]
     fn test_regime_label_parsing() {
-        assert_eq!(RegimeLabel::from_str("quiet"), RegimeLabel::Quiet);
-        assert_eq!(RegimeLabel::from_str("QUIET"), RegimeLabel::Quiet);
-        assert_eq!(RegimeLabel::from_str("trend"), RegimeLabel::TrendImpulse);
-        assert_eq!(RegimeLabel::from_str("unknown_xyz"), RegimeLabel::Unknown);
+        assert_eq!(RegimeLabel::parse("quiet"), RegimeLabel::Quiet);
+        assert_eq!(RegimeLabel::parse("QUIET"), RegimeLabel::Quiet);
+        assert_eq!(RegimeLabel::parse("trend"), RegimeLabel::TrendImpulse);
+        assert_eq!(RegimeLabel::parse("unknown_xyz"), RegimeLabel::Unknown);
     }
 }

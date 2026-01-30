@@ -81,7 +81,7 @@ impl G2BacktestCorrectness {
         if !backtest_dir.exists() {
             result.add_check(CheckResult::fail(
                 "directory_exists",
-                &format!("Backtest directory not found: {}", backtest_dir.display()),
+                format!("Backtest directory not found: {}", backtest_dir.display()),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
             return Ok(result);
@@ -200,7 +200,7 @@ impl G2BacktestCorrectness {
         if violations > 0 {
             CheckResult::fail(
                 "no_lookahead",
-                &format!(
+                format!(
                     "Lookahead bias detected in {}/{} decisions",
                     violations, checked
                 ),
@@ -208,7 +208,7 @@ impl G2BacktestCorrectness {
         } else {
             CheckResult::pass(
                 "no_lookahead",
-                &format!("No lookahead bias in {} decisions", checked),
+                format!("No lookahead bias in {} decisions", checked),
             )
         }
     }
@@ -253,7 +253,7 @@ impl G2BacktestCorrectness {
         if invalid_fills > 0 {
             CheckResult::fail(
                 "fill_realism",
-                &format!(
+                format!(
                     "Invalid fills detected: {}/{} have issues",
                     invalid_fills, checked
                 ),
@@ -261,7 +261,7 @@ impl G2BacktestCorrectness {
         } else {
             CheckResult::pass(
                 "fill_realism",
-                &format!("All {} fills have valid prices and quantities", checked),
+                format!("All {} fills have valid prices and quantities", checked),
             )
         }
     }
@@ -296,7 +296,7 @@ impl G2BacktestCorrectness {
             // More than 50% have zero commission
             CheckResult::fail(
                 "transaction_costs",
-                &format!(
+                format!(
                     "Too many zero-commission fills: {}/{} (>50%)",
                     zero_commission, checked
                 ),
@@ -304,7 +304,7 @@ impl G2BacktestCorrectness {
         } else if zero_commission > 0 {
             CheckResult::warn(
                 "transaction_costs",
-                &format!(
+                format!(
                     "Some fills have zero commission: {}/{}",
                     zero_commission, checked
                 ),
@@ -312,7 +312,7 @@ impl G2BacktestCorrectness {
         } else {
             CheckResult::pass(
                 "transaction_costs",
-                &format!("All {} fills have non-zero commission", checked),
+                format!("All {} fills have non-zero commission", checked),
             )
         }
     }
@@ -361,7 +361,7 @@ impl G2BacktestCorrectness {
         if invalid_snapshots > 0 {
             CheckResult::fail(
                 "data_quality",
-                &format!(
+                format!(
                     "Data quality issues in {}/{} snapshots",
                     invalid_snapshots, checked
                 ),
@@ -369,7 +369,7 @@ impl G2BacktestCorrectness {
         } else {
             CheckResult::pass(
                 "data_quality",
-                &format!("All {} market snapshots have valid data", checked),
+                format!("All {} market snapshots have valid data", checked),
             )
         }
     }
@@ -398,7 +398,7 @@ impl G2BacktestCorrectness {
         } else {
             CheckResult::warn(
                 "market_impact",
-                &format!(
+                format!(
                     "{} large orders detected - verify market impact modeling",
                     large_orders.len()
                 ),
@@ -516,8 +516,10 @@ mod tests {
 
     #[test]
     fn test_transaction_costs() {
-        let mut config = G2Config::default();
-        config.require_transaction_costs = true;
+        let config = G2Config {
+            require_transaction_costs: true,
+            ..Default::default()
+        };
         let g2 = G2BacktestCorrectness::new(config);
 
         // All have commission

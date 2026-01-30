@@ -1550,7 +1550,7 @@ mod tests {
             strategy_id: "funding_bias:2.0.0:abc123def".to_string(),
             run_id: "run_001".to_string(),
             symbols: vec!["BTCUSDT".to_string()],
-            generated_ts_ns: 1706180400_000_000_000,
+            generated_ts_ns: 1_706_180_400_000_000_000,
             total_decisions: 100,
             total_fills: 200,
             winning_decisions: 60,

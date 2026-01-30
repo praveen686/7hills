@@ -1064,7 +1064,7 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
@@ -1092,12 +1092,12 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, None, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1_234_567_891_000_000_000)
             .unwrap();
 
         assert_eq!(submit.intent_id, intent.intent_id);
@@ -1127,20 +1127,20 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, None, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1_234_567_891_000_000_000)
             .unwrap();
 
         let ack = engine
             .process_ack(
                 &submit.client_order_id,
                 ExchangeOrderId::new("EX_ORDER_001"),
-                1234567892_000_000_000,
-                1234567892_000_000_000,
+                1_234_567_892_000_000_000,
+                1_234_567_892_000_000_000,
             )
             .unwrap();
 
@@ -1169,20 +1169,20 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, None, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1_234_567_891_000_000_000)
             .unwrap();
 
         engine
             .process_ack(
                 &submit.client_order_id,
                 ExchangeOrderId::new("EX_ORDER_001"),
-                1234567892_000_000_000,
-                1234567892_000_000_000,
+                1_234_567_892_000_000_000,
+                1_234_567_892_000_000_000,
             )
             .unwrap();
 
@@ -1198,7 +1198,7 @@ mod tests {
                 25_000_000, // Commission
                 -8,
                 "BNB",
-                1234567893_000_000_000,
+                1_234_567_893_000_000_000,
             )
             .unwrap();
 
@@ -1217,7 +1217,7 @@ mod tests {
                 25_000_000,
                 -8,
                 "BNB",
-                1234567894_000_000_000,
+                1_234_567_894_000_000_000,
             )
             .unwrap();
 
@@ -1242,12 +1242,12 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, None, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1_234_567_891_000_000_000)
             .unwrap();
 
         let reject = engine
@@ -1256,7 +1256,7 @@ mod tests {
                 Some(ExchangeOrderId::new("EX_ORDER_001")),
                 "Insufficient margin",
                 Some(-2010),
-                1234567892_000_000_000,
+                1_234_567_892_000_000_000,
             )
             .unwrap();
 
@@ -1286,20 +1286,20 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, None, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1_234_567_891_000_000_000)
             .unwrap();
 
         engine
             .process_ack(
                 &submit.client_order_id,
                 ExchangeOrderId::new("EX_ORDER_001"),
-                1234567892_000_000_000,
-                1234567892_000_000_000,
+                1_234_567_892_000_000_000,
+                1_234_567_892_000_000_000,
             )
             .unwrap();
 
@@ -1309,7 +1309,7 @@ mod tests {
                 &ExchangeOrderId::new("EX_ORDER_001"),
                 CancelSource::User,
                 "User requested cancel",
-                1234567893_000_000_000,
+                1_234_567_893_000_000_000,
             )
             .unwrap();
 
@@ -1335,12 +1335,12 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
         let submit = engine
-            .submit_order(&intent, None, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1_234_567_891_000_000_000)
             .unwrap();
 
         // First ack succeeds
@@ -1348,8 +1348,8 @@ mod tests {
             .process_ack(
                 &submit.client_order_id,
                 ExchangeOrderId::new("EX_ORDER_001"),
-                1234567892_000_000_000,
-                1234567892_000_000_000,
+                1_234_567_892_000_000_000,
+                1_234_567_892_000_000_000,
             )
             .unwrap();
 
@@ -1357,8 +1357,8 @@ mod tests {
         let result = engine.process_ack(
             &submit.client_order_id,
             ExchangeOrderId::new("EX_ORDER_001"),
-            1234567893_000_000_000,
-            1234567893_000_000_000,
+            1_234_567_893_000_000_000,
+            1_234_567_893_000_000_000,
         );
 
         assert!(matches!(result, Err(ExecutionError::IdempotencyViolation)));
@@ -1393,12 +1393,12 @@ mod tests {
                 -8,
                 50000_00000000,
                 "decision_001",
-                1234567890_000_000_000,
+                1_234_567_890_000_000_000,
             )
             .unwrap();
 
         engine
-            .submit_order(&intent, None, 1234567891_000_000_000)
+            .submit_order(&intent, None, 1_234_567_891_000_000_000)
             .unwrap();
 
         assert_eq!(engine.active_order_count(), 1);

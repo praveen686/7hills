@@ -393,7 +393,7 @@ pub async fn run_kitesim_backtest_cli(cfg: KiteSimCliConfig) -> Result<()> {
             all_results.push((intent.order.clone(), res));
         }
     } else {
-        for (_order_idx, order) in order_file.orders.iter().enumerate() {
+        for order in order_file.orders.iter() {
             let mut coord = MultiLegCoordinator::new(&mut sim, policy.clone());
             let res = coord.execute_with_feed(order, &mut feed).await?;
 

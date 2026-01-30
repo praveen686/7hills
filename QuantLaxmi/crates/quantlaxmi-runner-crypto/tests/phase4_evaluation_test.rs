@@ -183,7 +183,7 @@ fn test_attribution_summary_manifest_binding() {
         strategy_id: "funding_bias:2.0.0:abc123".to_string(),
         run_id: "backtest_001".to_string(),
         symbols: vec!["BTCUSDT".to_string()],
-        generated_ts_ns: 1706270400_000_000_000,
+        generated_ts_ns: 1_706_270_400_000_000_000,
         total_decisions: 50,
         total_fills: 100,
         winning_decisions: 30,

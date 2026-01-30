@@ -24,10 +24,7 @@ use serde::Serialize;
 
 use quantlaxmi_connectors_zerodha::{ZerodhaAutoDiscovery, ZerodhaConnector};
 use quantlaxmi_core::{EventBus, MarketPayload};
-use quantlaxmi_options_engine::{
-    pcr::{OptionData, OptionDataType},
-    EngineConfig, OptionsEngine, StrategyType, TradingAction,
-};
+use quantlaxmi_options_engine::{EngineConfig, OptionsEngine, StrategyType, TradingAction};
 use quantlaxmi_regime::FeatureVector;
 
 #[derive(Parser)]
@@ -140,7 +137,7 @@ async fn main() -> Result<()> {
     }
 
     let symbols: Vec<String> = resolved_symbols.iter().map(|(s, _)| s.clone()).collect();
-    let tokens: Vec<u32> = resolved_symbols.iter().map(|(_, t)| *t).collect();
+    let _tokens: Vec<u32> = resolved_symbols.iter().map(|(_, t)| *t).collect();
 
     println!("\nResolved {} symbols:", symbols.len());
     for (sym, tok) in &resolved_symbols {
@@ -445,7 +442,7 @@ async fn main() -> Result<()> {
                 prev_prices.insert(symbol, price);
 
                 // Periodic status
-                if stats.decisions % 100 == 0 {
+                if stats.decisions.is_multiple_of(100) {
                     print!(
                         "\r[{}] Ticks: {} | Signals: {} | HFT Blocks: {} | Positions: {} | Equity: ₹{:.2}    ",
                         ts.format("%H:%M:%S"),

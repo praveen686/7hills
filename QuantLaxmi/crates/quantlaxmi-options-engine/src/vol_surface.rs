@@ -9,7 +9,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::f64::consts::E;
 
 use crate::greeks::{Greeks, OptionParams, OptionType};
 
@@ -47,7 +46,7 @@ pub fn calculate_iv(
     const MAX_IV: f64 = 5.0;
 
     // Initial guess based on price/spot ratio
-    let mut iv = (market_price / spot * 2.5).max(0.15).min(1.0);
+    let mut iv = (market_price / spot * 2.5).clamp(0.15, 1.0);
 
     for i in 0..MAX_ITERATIONS {
         let params = OptionParams::new(
@@ -73,7 +72,7 @@ pub fn calculate_iv(
         iv -= iv_adjustment;
 
         // Clamp to valid range
-        iv = iv.max(MIN_IV).min(MAX_IV);
+        iv = iv.clamp(MIN_IV, MAX_IV);
 
         if price_diff.abs() < TOLERANCE {
             return Some(IVResult {
@@ -166,8 +165,8 @@ impl VolSmile {
             }
         }
 
-        // Sort by strike
-        points.sort_by(|a, b| a.strike.partial_cmp(&b.strike).unwrap());
+        // Sort by strike (NaN-safe using total_cmp)
+        points.sort_by(|a, b| a.strike.total_cmp(&b.strike));
 
         // Calculate ATM IV (interpolate to spot)
         let atm_iv = Self::interpolate_iv_at_strike(&points, spot);

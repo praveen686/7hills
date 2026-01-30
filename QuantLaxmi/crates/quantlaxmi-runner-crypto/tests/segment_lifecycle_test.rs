@@ -268,7 +268,7 @@ fn test_encoding_version_import_consistency() {
     // This test validates that the ENCODING_VERSION constant is correctly
     // re-exported and accessible from this crate. The literal value assertion
     // lives in the canonical location (quantlaxmi_events::trace).
-    assert!(ENCODING_VERSION > 0, "ENCODING_VERSION should be positive");
+    const { assert!(ENCODING_VERSION > 0, "ENCODING_VERSION should be positive") };
 }
 
 /// Test PnlAccumulatorFixed determinism

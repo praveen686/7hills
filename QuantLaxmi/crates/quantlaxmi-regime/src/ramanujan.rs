@@ -335,7 +335,8 @@ pub struct MicrostructurePeriodicity {
     imbalance_detector: RamanujanPeriodicityDetector,
     /// Detector for spread
     spread_detector: RamanujanPeriodicityDetector,
-    /// Price quantization scale (for converting f64 to i64)
+    /// Price quantization scale (for converting f64 to i64, reserved for future use)
+    #[allow(dead_code)]
     price_scale: i64,
 }
 
@@ -522,15 +523,15 @@ impl PeriodicityFeatures {
     /// Market makers often create periodic patterns in imbalance and spread
     /// at moderate frequencies (6-16 ticks).
     pub fn market_maker_likely(&self) -> bool {
-        self.common_periods.iter().any(|&p| p >= 6 && p <= 16)
+        self.common_periods.iter().any(|&p| (6..=16).contains(&p))
             || (self
                 .imbalance_periods
                 .iter()
-                .any(|&(p, s)| p >= 6 && p <= 16 && s > 0.2)
+                .any(|&(p, s)| (6..=16).contains(&p) && s > 0.2)
                 && self
                     .spread_periods
                     .iter()
-                    .any(|&(p, s)| p >= 6 && p <= 16 && s > 0.2))
+                    .any(|&(p, s)| (6..=16).contains(&p) && s > 0.2))
     }
 
     /// Get dominant periods (union of common periods and strongest individual)
@@ -592,7 +593,7 @@ mod tests {
     fn test_ramanujan_sum_periodicity() {
         // c_q(n) should have period exactly q
         for q in 2..=15 {
-            let period = ramanujan_sum_period(q);
+            let _period = ramanujan_sum_period(q);
             for n in 0..q {
                 assert_eq!(
                     ramanujan_sum(q, n as i64),

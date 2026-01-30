@@ -77,6 +77,7 @@ struct Args {
 
 /// Paper position
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct Position {
     symbol: String,
     strategy: StrategyType,
@@ -89,6 +90,7 @@ struct Position {
 
 /// Trade record for activity log
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TradeRecord {
     ts: DateTime<Utc>,
     symbol: String,
@@ -107,6 +109,7 @@ struct Quote {
 
 /// Session statistics
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 struct Stats {
     initial_capital: f64,
     capital: f64,
@@ -123,6 +126,7 @@ struct Stats {
 
 /// Gate status for display
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 struct GateStatus {
     ramanujan_active: bool,
     hft_detected: bool,
@@ -814,7 +818,7 @@ async fn run_trading_loop(
                         s.gates.vol_regime = format!("{:?}", status.vol_regime);
 
                         // Log chain update results periodically
-                        if s.stats.ticks % 100 == 0 {
+                        if s.stats.ticks.is_multiple_of(100) {
                             s.add_log(format!(
                                 "Chain: {} opts ({} ATM), IV={:.1}%, PCR={:.2}",
                                 options.len(),
