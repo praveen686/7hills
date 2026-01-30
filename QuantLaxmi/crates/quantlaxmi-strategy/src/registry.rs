@@ -4,6 +4,9 @@
 //! Each factory loads its concrete config type and returns a boxed strategy.
 
 use crate::Strategy;
+use crate::strategies::funding_aligned_momentum::{
+    FUNDING_ALIGNED_MOMENTUM_NAME, funding_aligned_momentum_factory,
+};
 use crate::strategies::funding_bias::{FUNDING_BIAS_NAME, funding_bias_factory};
 use crate::strategies::micro_breakout::{MICRO_BREAKOUT_NAME, micro_breakout_factory};
 use crate::strategies::spread_mean_revert::{SPREAD_MEAN_REVERT_NAME, spread_mean_revert_factory};
@@ -52,6 +55,10 @@ impl StrategyRegistry {
         let mut registry = Self::new();
 
         // Register built-in strategies
+        registry.register(
+            FUNDING_ALIGNED_MOMENTUM_NAME,
+            funding_aligned_momentum_factory,
+        );
         registry.register(FUNDING_BIAS_NAME, funding_bias_factory);
         registry.register(MICRO_BREAKOUT_NAME, micro_breakout_factory);
         registry.register(SPREAD_MEAN_REVERT_NAME, spread_mean_revert_factory);
