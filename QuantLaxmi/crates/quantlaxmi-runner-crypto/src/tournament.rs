@@ -1042,6 +1042,9 @@ pub struct GridTournamentManifest {
 }
 
 /// Parse grid TOML and expand to parameter combinations.
+///
+/// Supports nested tables via `[params.subtable]` which become dot-notated keys
+/// (e.g., `[params.grassmann]` with `enabled = [true]` becomes `grassmann.enabled`).
 fn parse_and_expand_grid(grid_path: &Path) -> Result<Vec<BTreeMap<String, ParamValue>>> {
     let content = std::fs::read_to_string(grid_path)
         .with_context(|| format!("Failed to read grid file: {:?}", grid_path))?;
@@ -1054,31 +1057,12 @@ fn parse_and_expand_grid(grid_path: &Path) -> Result<Vec<BTreeMap<String, ParamV
         .and_then(|v| v.as_table())
         .ok_or_else(|| anyhow::anyhow!("Grid TOML must have [params] table"))?;
 
-    // Collect parameter names sorted for determinism
-    let mut param_names: Vec<&str> = params_table.keys().map(|s| s.as_str()).collect();
-    param_names.sort();
+    // Recursively collect all parameters (handles nested tables)
+    let mut param_values: Vec<(String, Vec<ParamValue>)> = Vec::new();
+    collect_params_recursive(params_table, "", &mut param_values)?;
 
-    // Parse each parameter's values
-    let mut param_values: Vec<(&str, Vec<ParamValue>)> = Vec::new();
-    for name in &param_names {
-        let values = params_table
-            .get(*name)
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| anyhow::anyhow!("Parameter '{}' must be an array", name))?;
-
-        let parsed_values: Vec<ParamValue> = values
-            .iter()
-            .map(|v| match v {
-                toml::Value::Integer(i) => ParamValue::Int(*i),
-                toml::Value::Float(f) => ParamValue::Float(*f),
-                toml::Value::Boolean(b) => ParamValue::Bool(*b),
-                toml::Value::String(s) => ParamValue::String(s.clone()),
-                _ => ParamValue::String(v.to_string()),
-            })
-            .collect();
-
-        param_values.push((name, parsed_values));
-    }
+    // Sort for determinism
+    param_values.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Cartesian product expansion
     let mut combinations: Vec<BTreeMap<String, ParamValue>> = vec![BTreeMap::new()];
@@ -1088,7 +1072,7 @@ fn parse_and_expand_grid(grid_path: &Path) -> Result<Vec<BTreeMap<String, ParamV
         for combo in &combinations {
             for value in &values {
                 let mut new_combo = combo.clone();
-                new_combo.insert(name.to_string(), value.clone());
+                new_combo.insert(name.clone(), value.clone());
                 new_combinations.push(new_combo);
             }
         }
@@ -1096,6 +1080,50 @@ fn parse_and_expand_grid(grid_path: &Path) -> Result<Vec<BTreeMap<String, ParamV
     }
 
     Ok(combinations)
+}
+
+/// Recursively collect parameters from a TOML table, handling nested tables.
+fn collect_params_recursive(
+    table: &toml::map::Map<String, toml::Value>,
+    prefix: &str,
+    out: &mut Vec<(String, Vec<ParamValue>)>,
+) -> Result<()> {
+    for (name, value) in table {
+        let full_key = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{}.{}", prefix, name)
+        };
+
+        match value {
+            toml::Value::Array(arr) => {
+                // This is a parameter with values to sweep
+                let parsed_values: Vec<ParamValue> = arr
+                    .iter()
+                    .map(|v| match v {
+                        toml::Value::Integer(i) => ParamValue::Int(*i),
+                        toml::Value::Float(f) => ParamValue::Float(*f),
+                        toml::Value::Boolean(b) => ParamValue::Bool(*b),
+                        toml::Value::String(s) => ParamValue::String(s.clone()),
+                        _ => ParamValue::String(v.to_string()),
+                    })
+                    .collect();
+                out.push((full_key, parsed_values));
+            }
+            toml::Value::Table(subtable) => {
+                // Recurse into nested table
+                collect_params_recursive(subtable, &full_key, out)?;
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Parameter '{}' must be an array or table, found: {:?}",
+                    full_key,
+                    value.type_str()
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Compute SHA256 hash for parameter set (deterministic).
@@ -1150,8 +1178,9 @@ fn discover_segments(segments_root: &Path, patterns: &[String]) -> Result<Vec<Pa
 }
 
 /// Write strategy config TOML for a parameter set.
-/// Note: Config fields are written at root level (not under [params])
-/// because strategies expect their config struct directly.
+///
+/// Supports nested config via dot notation (e.g., `grassmann.enabled` becomes `[grassmann]\nenabled = ...`).
+/// Fields without dots are written at root level.
 fn write_param_config(
     config_dir: &Path,
     param_hash: &str,
@@ -1161,19 +1190,51 @@ fn write_param_config(
 
     let config_path = config_dir.join(format!("{}.toml", param_hash));
 
-    // Build TOML content - fields at root level for strategy config deserialization
-    let mut content = String::new();
+    // Separate root-level and nested keys
+    let mut root_params: BTreeMap<String, &ParamValue> = BTreeMap::new();
+    let mut nested_params: BTreeMap<String, BTreeMap<String, &ParamValue>> = BTreeMap::new();
+
     for (key, value) in params {
-        match value {
-            ParamValue::Int(v) => content.push_str(&format!("{} = {}\n", key, v)),
-            ParamValue::Float(v) => content.push_str(&format!("{} = {}\n", key, v)),
-            ParamValue::Bool(v) => content.push_str(&format!("{} = {}\n", key, v)),
-            ParamValue::String(v) => content.push_str(&format!("{} = \"{}\"\n", key, v)),
+        if let Some(dot_pos) = key.find('.') {
+            let table_name = &key[..dot_pos];
+            let field_name = &key[dot_pos + 1..];
+            nested_params
+                .entry(table_name.to_string())
+                .or_default()
+                .insert(field_name.to_string(), value);
+        } else {
+            root_params.insert(key.clone(), value);
+        }
+    }
+
+    // Build TOML content
+    let mut content = String::new();
+
+    // Write root-level fields first
+    for (key, value) in &root_params {
+        write_toml_value(&mut content, key, value);
+    }
+
+    // Write nested tables
+    for (table_name, fields) in &nested_params {
+        content.push_str(&format!("\n[{}]\n", table_name));
+        for (key, value) in fields {
+            write_toml_value(&mut content, key, value);
         }
     }
 
     std::fs::write(&config_path, content)?;
     Ok(config_path)
+}
+
+/// Write a single TOML key = value line.
+fn write_toml_value(content: &mut String, key: &str, value: &ParamValue) {
+    match value {
+        ParamValue::Int(v) => content.push_str(&format!("{} = {}\n", key, v)),
+        ParamValue::Float(v) => content.push_str(&format!("{} = {}\n", key, v)),
+        ParamValue::Bool(v) => content.push_str(&format!("{} = {}\n", key, v)),
+        ParamValue::String(v) => content.push_str(&format!("{} = \"{}\"\n", key, v)),
+    }
 }
 
 /// Run grid-based tournament CLI.

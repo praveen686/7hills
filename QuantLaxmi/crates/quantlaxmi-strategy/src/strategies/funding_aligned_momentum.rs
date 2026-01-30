@@ -158,9 +158,48 @@ pub struct FundingAlignedMomentumConfig {
     #[serde(default)]
     pub trade_on_spot_quotes: bool,
 
+    // ===== Anti-churn constraints (Fix Set A) =====
+    /// Minimum hold time in seconds after entry before allowing funding-based exits.
+    /// Does NOT block stop-loss or take-profit exits.
+    /// Default: 300 (5 minutes)
+    #[serde(default = "default_min_hold_secs")]
+    pub min_hold_secs: u32,
+
+    /// Cooldown in seconds after any exit before allowing new entries.
+    /// Default: 120 (2 minutes)
+    #[serde(default = "default_cooldown_secs")]
+    pub cooldown_secs: u32,
+
+    // ===== Price-based risk controls (Fix Set B) =====
+    /// Stop-loss in basis points from entry price.
+    /// 0 = disabled. Default: 30 bps
+    #[serde(default = "default_stop_loss_bps")]
+    pub stop_loss_bps: i64,
+
+    /// Take-profit in basis points from entry price.
+    /// 0 = disabled. Default: 15 bps
+    #[serde(default = "default_take_profit_bps")]
+    pub take_profit_bps: i64,
+
     /// Grassmann / geometric-lifting gate.
     #[serde(default)]
     pub grassmann: GrassmannGateConfig,
+}
+
+fn default_min_hold_secs() -> u32 {
+    300
+}
+
+fn default_cooldown_secs() -> u32 {
+    120
+}
+
+fn default_stop_loss_bps() -> i64 {
+    30
+}
+
+fn default_take_profit_bps() -> i64 {
+    15
 }
 
 impl Default for FundingAlignedMomentumConfig {
@@ -180,6 +219,15 @@ impl Default for FundingAlignedMomentumConfig {
             price_exponent: -2,
 
             trade_on_spot_quotes: false,
+
+            // Anti-churn (Fix Set A)
+            min_hold_secs: 300, // 5 minutes
+            cooldown_secs: 120, // 2 minutes
+
+            // Risk controls (Fix Set B)
+            stop_loss_bps: 30,
+            take_profit_bps: 15,
+
             grassmann: GrassmannGateConfig::default(),
         }
     }
@@ -219,6 +267,14 @@ impl CanonicalBytes for FundingAlignedMomentumConfig {
 
         // Event source
         buf.push(if self.trade_on_spot_quotes { 1 } else { 0 });
+
+        // Anti-churn constraints (Fix Set A)
+        encode_i64(&mut buf, self.min_hold_secs as i64);
+        encode_i64(&mut buf, self.cooldown_secs as i64);
+
+        // Risk controls (Fix Set B)
+        encode_i64(&mut buf, self.stop_loss_bps);
+        encode_i64(&mut buf, self.take_profit_bps);
 
         // Grassmann gate (fixed order)
         let g = &self.grassmann;
@@ -300,6 +356,14 @@ pub struct FundingAlignedMomentumStrategy {
     // Position state
     position_qty_mantissa: i64,
 
+    // Anti-churn state tracking
+    /// Timestamp (ms) when position was entered. None if flat.
+    position_entry_ts_ms: Option<i64>,
+    /// Entry price mantissa for SL/TP calculations. None if flat.
+    position_entry_price_mantissa: Option<i64>,
+    /// Timestamp (ms) of last exit. Used for cooldown enforcement.
+    last_exit_ts_ms: Option<i64>,
+
     // Price sampling for momentum
     // Store mid prices with timestamps (ms) to compute ret over N secs.
     mid_ts_ms: Vec<i64>,
@@ -319,9 +383,76 @@ impl FundingAlignedMomentumStrategy {
             config_hash,
             current_funding_rate_mantissa: 0,
             position_qty_mantissa: 0,
+            position_entry_ts_ms: None,
+            position_entry_price_mantissa: None,
+            last_exit_ts_ms: None,
             mid_ts_ms: Vec::with_capacity(512),
             mid_mantissa: Vec::with_capacity(512),
             gate: GrassmannGateState::new(wl),
+        }
+    }
+
+    /// Check if we're within the minimum hold period (cannot do funding-based exits).
+    fn within_min_hold(&self, now_ms: i64) -> bool {
+        if let Some(entry_ts) = self.position_entry_ts_ms {
+            let hold_ms = self.config.min_hold_secs as i64 * 1000;
+            now_ms - entry_ts < hold_ms
+        } else {
+            false
+        }
+    }
+
+    /// Check if we're within cooldown period (cannot enter new positions).
+    fn within_cooldown(&self, now_ms: i64) -> bool {
+        if let Some(exit_ts) = self.last_exit_ts_ms {
+            let cooldown_ms = self.config.cooldown_secs as i64 * 1000;
+            now_ms - exit_ts < cooldown_ms
+        } else {
+            false
+        }
+    }
+
+    /// Check if stop-loss is triggered. Returns true if SL hit.
+    /// For LONG: SL hit if current price <= entry - SL_bps
+    /// For SHORT: SL hit if current price >= entry + SL_bps
+    fn check_stop_loss(&self, current_mid: i64) -> bool {
+        if self.config.stop_loss_bps == 0 {
+            return false;
+        }
+        let Some(entry_price) = self.position_entry_price_mantissa else {
+            return false;
+        };
+        // SL distance in price units: entry_price * sl_bps / 10000
+        let sl_distance = entry_price * self.config.stop_loss_bps / 10000;
+
+        if self.is_long() {
+            current_mid <= entry_price - sl_distance
+        } else if self.is_short() {
+            current_mid >= entry_price + sl_distance
+        } else {
+            false
+        }
+    }
+
+    /// Check if take-profit is triggered. Returns true if TP hit.
+    /// For LONG: TP hit if current price >= entry + TP_bps
+    /// For SHORT: TP hit if current price <= entry - TP_bps
+    fn check_take_profit(&self, current_mid: i64) -> bool {
+        if self.config.take_profit_bps == 0 {
+            return false;
+        }
+        let Some(entry_price) = self.position_entry_price_mantissa else {
+            return false;
+        };
+        // TP distance in price units: entry_price * tp_bps / 10000
+        let tp_distance = entry_price * self.config.take_profit_bps / 10000;
+
+        if self.is_long() {
+            current_mid >= entry_price + tp_distance
+        } else if self.is_short() {
+            current_mid <= entry_price - tp_distance
+        } else {
+            false
         }
     }
 
@@ -638,10 +769,85 @@ impl Strategy for FundingAlignedMomentumStrategy {
 
         let mut outputs = vec![];
 
-        // Optional exit-on-chop
+        // =====================================================================
+        // PRIORITY 1: Stop-Loss / Take-Profit (always checked, ignores min_hold)
+        // =====================================================================
+        let sl_hit = self.check_stop_loss(mid);
+        let tp_hit = self.check_take_profit(mid);
+
+        if self.is_long() && sl_hit {
+            let d = self.create_decision(
+                ctx,
+                0,
+                "exit",
+                "exit_long_stop_loss",
+                serde_json::json!({"entry_price": self.position_entry_price_mantissa, "exit_price": mid}),
+            );
+            let intent = self.create_intent(d.decision_id, ctx, Side::Sell, "exit_long_stop_loss");
+            outputs.push(DecisionOutput::new(d, intent));
+            self.last_exit_ts_ms = Some(ts_ms);
+            self.position_entry_ts_ms = None;
+            self.position_entry_price_mantissa = None;
+            return outputs;
+        }
+        if self.is_long() && tp_hit {
+            let d = self.create_decision(
+                ctx,
+                0,
+                "exit",
+                "exit_long_take_profit",
+                serde_json::json!({"entry_price": self.position_entry_price_mantissa, "exit_price": mid}),
+            );
+            let intent =
+                self.create_intent(d.decision_id, ctx, Side::Sell, "exit_long_take_profit");
+            outputs.push(DecisionOutput::new(d, intent));
+            self.last_exit_ts_ms = Some(ts_ms);
+            self.position_entry_ts_ms = None;
+            self.position_entry_price_mantissa = None;
+            return outputs;
+        }
+        if self.is_short() && sl_hit {
+            let d = self.create_decision(
+                ctx,
+                0,
+                "exit",
+                "exit_short_stop_loss",
+                serde_json::json!({"entry_price": self.position_entry_price_mantissa, "exit_price": mid}),
+            );
+            let intent = self.create_intent(d.decision_id, ctx, Side::Buy, "exit_short_stop_loss");
+            outputs.push(DecisionOutput::new(d, intent));
+            self.last_exit_ts_ms = Some(ts_ms);
+            self.position_entry_ts_ms = None;
+            self.position_entry_price_mantissa = None;
+            return outputs;
+        }
+        if self.is_short() && tp_hit {
+            let d = self.create_decision(
+                ctx,
+                0,
+                "exit",
+                "exit_short_take_profit",
+                serde_json::json!({"entry_price": self.position_entry_price_mantissa, "exit_price": mid}),
+            );
+            let intent =
+                self.create_intent(d.decision_id, ctx, Side::Buy, "exit_short_take_profit");
+            outputs.push(DecisionOutput::new(d, intent));
+            self.last_exit_ts_ms = Some(ts_ms);
+            self.position_entry_ts_ms = None;
+            self.position_entry_price_mantissa = None;
+            return outputs;
+        }
+
+        // =====================================================================
+        // PRIORITY 2: Regime-exit on chop (respects min_hold unless disabled)
+        // =====================================================================
+        let in_min_hold = self.within_min_hold(ts_ms);
+
         if self.config.grassmann.enabled
             && self.config.grassmann.regime_exit_on_chop
             && self.gate.regime == RegimeLabel::Chop
+            && !in_min_hold
+        // Respect min_hold for regime exits
         {
             if self.is_long() {
                 let d = self.create_decision(
@@ -654,6 +860,9 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 let intent =
                     self.create_intent(d.decision_id, ctx, Side::Sell, "exit_long_regime_chop");
                 outputs.push(DecisionOutput::new(d, intent));
+                self.last_exit_ts_ms = Some(ts_ms);
+                self.position_entry_ts_ms = None;
+                self.position_entry_price_mantissa = None;
                 return outputs;
             }
             if self.is_short() {
@@ -667,26 +876,35 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 let intent =
                     self.create_intent(d.decision_id, ctx, Side::Buy, "exit_short_regime_chop");
                 outputs.push(DecisionOutput::new(d, intent));
+                self.last_exit_ts_ms = Some(ts_ms);
+                self.position_entry_ts_ms = None;
+                self.position_entry_price_mantissa = None;
                 return outputs;
             }
         }
 
-        // 5) Exit/flip/entry rules
+        // =====================================================================
+        // PRIORITY 3: Entry/Exit/Flip rules (with min_hold + cooldown)
+        // =====================================================================
         let bias = self.funding_bias();
         let m = self.config.momentum_threshold_bps;
 
-        // Entry conditions require gate allow + momentum agree with funding bias.
+        // Entry conditions require: gate allow + momentum agree + NOT in cooldown
         let gate_ok = self.gate_allows_entries();
+        let in_cooldown = self.within_cooldown(ts_ms);
 
-        let can_enter_long = gate_ok && bias == 1 && ret_bps.is_some() && ret_bps.unwrap() >= m;
-        let can_enter_short = gate_ok && bias == -1 && ret_bps.is_some() && ret_bps.unwrap() <= -m;
+        let can_enter_long =
+            gate_ok && !in_cooldown && bias == 1 && ret_bps.is_some() && ret_bps.unwrap() >= m;
+        let can_enter_short =
+            gate_ok && !in_cooldown && bias == -1 && ret_bps.is_some() && ret_bps.unwrap() <= -m;
 
-        // Exits (funding hysteresis)
-        let exit_long = self.is_long() && self.should_exit_long_by_funding();
-        let exit_short = self.is_short() && self.should_exit_short_by_funding();
+        // Funding-based exits only allowed OUTSIDE min_hold period
+        let exit_long = self.is_long() && !in_min_hold && self.should_exit_long_by_funding();
+        let exit_short = self.is_short() && !in_min_hold && self.should_exit_short_by_funding();
 
         if self.is_long() {
-            if can_enter_short {
+            // Flip requires: can_enter_short AND not in min_hold (flip = exit + entry)
+            if can_enter_short && !in_min_hold {
                 // FLIP: exit long then enter short (stable order)
                 let exit = self.create_decision(
                     ctx,
@@ -698,6 +916,8 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 let exit_intent =
                     self.create_intent(exit.decision_id, ctx, Side::Sell, "exit_long");
                 outputs.push(DecisionOutput::new(exit, exit_intent));
+                // Track exit for cooldown (though flip bypasses cooldown)
+                self.last_exit_ts_ms = Some(ts_ms);
 
                 let entry = self.create_decision(
                     ctx,
@@ -709,6 +929,9 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 let entry_intent =
                     self.create_intent(entry.decision_id, ctx, Side::Sell, "entry_short");
                 outputs.push(DecisionOutput::new(entry, entry_intent));
+                // Set entry timestamp NOW for the new position
+                self.position_entry_ts_ms = Some(ts_ms);
+                self.position_entry_price_mantissa = Some(mid);
             } else if exit_long {
                 let d = self.create_decision(
                     ctx,
@@ -719,9 +942,14 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 );
                 let intent = self.create_intent(d.decision_id, ctx, Side::Sell, "exit_long");
                 outputs.push(DecisionOutput::new(d, intent));
+                // Track exit for cooldown
+                self.last_exit_ts_ms = Some(ts_ms);
+                self.position_entry_ts_ms = None;
+                self.position_entry_price_mantissa = None;
             }
         } else if self.is_short() {
-            if can_enter_long {
+            // Flip requires: can_enter_long AND not in min_hold
+            if can_enter_long && !in_min_hold {
                 // FLIP: exit short then enter long (stable order)
                 let exit = self.create_decision(
                     ctx,
@@ -733,6 +961,8 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 let exit_intent =
                     self.create_intent(exit.decision_id, ctx, Side::Buy, "exit_short");
                 outputs.push(DecisionOutput::new(exit, exit_intent));
+                // Track exit for cooldown (though flip bypasses cooldown)
+                self.last_exit_ts_ms = Some(ts_ms);
 
                 let entry = self.create_decision(
                     ctx,
@@ -744,6 +974,9 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 let entry_intent =
                     self.create_intent(entry.decision_id, ctx, Side::Buy, "entry_long");
                 outputs.push(DecisionOutput::new(entry, entry_intent));
+                // Set entry timestamp NOW for the new position
+                self.position_entry_ts_ms = Some(ts_ms);
+                self.position_entry_price_mantissa = Some(mid);
             } else if exit_short {
                 let d = self.create_decision(
                     ctx,
@@ -754,6 +987,10 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 );
                 let intent = self.create_intent(d.decision_id, ctx, Side::Buy, "exit_short");
                 outputs.push(DecisionOutput::new(d, intent));
+                // Track exit for cooldown
+                self.last_exit_ts_ms = Some(ts_ms);
+                self.position_entry_ts_ms = None;
+                self.position_entry_price_mantissa = None;
             }
         } else {
             // flat
@@ -767,6 +1004,9 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 );
                 let intent = self.create_intent(d.decision_id, ctx, Side::Sell, "entry_short");
                 outputs.push(DecisionOutput::new(d, intent));
+                // Set entry timestamp NOW (on signal generation) so min_hold works immediately
+                self.position_entry_ts_ms = Some(ts_ms);
+                self.position_entry_price_mantissa = Some(mid);
             } else if can_enter_long {
                 let d = self.create_decision(
                     ctx,
@@ -777,6 +1017,9 @@ impl Strategy for FundingAlignedMomentumStrategy {
                 );
                 let intent = self.create_intent(d.decision_id, ctx, Side::Buy, "entry_long");
                 outputs.push(DecisionOutput::new(d, intent));
+                // Set entry timestamp NOW (on signal generation) so min_hold works immediately
+                self.position_entry_ts_ms = Some(ts_ms);
+                self.position_entry_price_mantissa = Some(mid);
             }
             // else: no output; diagnostics handled in tournament layer.
         }
@@ -785,6 +1028,7 @@ impl Strategy for FundingAlignedMomentumStrategy {
     }
 
     fn on_fill(&mut self, fill: &FillNotification, _ctx: &StrategyContext) {
+        // Update position quantity only. Timestamps are tracked on signal generation.
         match fill.side {
             Side::Buy => self.position_qty_mantissa += fill.qty_mantissa,
             Side::Sell => self.position_qty_mantissa -= fill.qty_mantissa,

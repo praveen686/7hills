@@ -1,26 +1,22 @@
 # FAM-1 grid: funding bias + momentum + grassmann-lite gate
 #
 # Strategy: funding_aligned_momentum
-# - Funding bias provides directional context (who's crowded)
-# - Momentum timing ensures price agrees before entry
-# - Grassmann gate blocks entries during chop regimes
+# v0.2.0 with anti-churn (min_hold, cooldown) + SL/TP
+#
+# Uses [params.grassmann] nested table which becomes dot-notation keys
+# in the expanded config (e.g., grassmann.enabled).
 
+[params]
 # Funding threshold (mantissa; exp -6)
 # 50 @ -6 = 0.00005, 100 @ -6 = 0.0001
 funding_threshold_mantissa = [50, 100]
 funding_threshold_exponent = [-6]
 
-# Hysteresis exit band (optional). If omitted, defaults to threshold/2
-# exit_band_mantissa = [25, 50]
-
 # Momentum timing
-# Window: how far back to measure price return
-# Threshold: minimum return (bps) to confirm entry
-momentum_window_secs = [30, 60, 120]
-momentum_threshold_bps = [5, 10, 20]
+momentum_window_secs = [60, 120]
+momentum_threshold_bps = [10, 20]
 
-# Position size (keep fixed to avoid confounding)
-# 1000000 @ -8 = 0.01 BTC
+# Position size (keep fixed)
 position_size_mantissa = [1000000]
 qty_exponent = [-8]
 price_exponent = [-2]
@@ -28,17 +24,24 @@ price_exponent = [-2]
 # Event source
 trade_on_spot_quotes = [false]
 
+# Anti-churn (Fix Set A)
+min_hold_secs = [300]     # 5 min minimum hold
+cooldown_secs = [120]     # 2 min cooldown after exit
+
+# Risk controls (Fix Set B)
+stop_loss_bps = [30]      # 0.30% stop loss
+take_profit_bps = [15]    # 0.15% take profit
+
 # Grassmann gate configuration
-[grassmann]
+[params.grassmann]
 enabled = [true]
 sample_interval_ms = [1000]
-window_len = [60, 120]
+window_len = [60]
 feature_dim = [4]
 subspace_k = [2]
 
-# Efficiency threshold (mantissa @ exp -2)
-# 30 @ -2 = 0.30, 35 @ -2 = 0.35, 45 @ -2 = 0.45
-distance_threshold_mantissa = [30, 35, 45]
+# Efficiency threshold - testing tighter values
+distance_threshold_mantissa = [35, 45]
 distance_threshold_exponent = [-2]
 
 unknown_is_chop = [true]
