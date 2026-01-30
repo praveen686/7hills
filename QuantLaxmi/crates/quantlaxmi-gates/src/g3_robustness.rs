@@ -170,7 +170,7 @@ impl G3Robustness {
         if !config_path.exists() {
             result.add_check(CheckResult::fail(
                 "config_exists",
-                &format!("Configuration file not found: {}", config_path.display()),
+                format!("Configuration file not found: {}", config_path.display()),
             ));
             result.duration_ms = start.elapsed().as_millis() as u64;
             return Ok(result);
@@ -191,13 +191,13 @@ impl G3Robustness {
         for key in &required_keys {
             if content.contains(key) {
                 result.add_check(CheckResult::pass(
-                    &format!("has_{}", key),
-                    &format!("Config has '{}' settings", key),
+                    format!("has_{}", key),
+                    format!("Config has '{}' settings", key),
                 ));
             } else {
                 result.add_check(CheckResult::warn(
-                    &format!("has_{}", key),
-                    &format!("Config missing '{}' settings", key),
+                    format!("has_{}", key),
+                    format!("Config missing '{}' settings", key),
                 ));
             }
         }
@@ -230,7 +230,7 @@ impl G3Robustness {
             );
             return CheckResult::warn(
                 "connection_loss",
-                &format!(
+                format!(
                     "Reconnect max delay {}ms exceeds threshold {}ms",
                     config.ws_reconnect_max_delay_ms, self.config.max_reconnect_ms
                 ),
@@ -246,7 +246,7 @@ impl G3Robustness {
 
         CheckResult::pass(
             "connection_loss",
-            &format!(
+            format!(
                 "Reconnect enabled (max {}ms), liveness timeout {}ms",
                 config.ws_reconnect_max_delay_ms, config.ws_liveness_timeout_ms
             ),
@@ -270,7 +270,7 @@ impl G3Robustness {
             );
             return CheckResult::warn(
                 "data_gaps",
-                &format!(
+                format!(
                     "Gap threshold {}ms exceeds recommended {}ms",
                     config.circuit_breaker_gap_ms, self.config.max_data_gap_ms
                 ),
@@ -279,7 +279,7 @@ impl G3Robustness {
 
         CheckResult::pass(
             "data_gaps",
-            &format!(
+            format!(
                 "Circuit breaker enabled with {}ms gap threshold",
                 config.circuit_breaker_gap_ms
             ),
@@ -303,7 +303,7 @@ impl G3Robustness {
             );
             return CheckResult::warn(
                 "extreme_prices",
-                &format!(
+                format!(
                     "Price limit {}% exceeds recommended {}%",
                     config.price_deviation_limit_pct, self.config.price_limit_pct
                 ),
@@ -312,7 +312,7 @@ impl G3Robustness {
 
         CheckResult::pass(
             "extreme_prices",
-            &format!(
+            format!(
                 "Price deviation limit set to {}%",
                 config.price_deviation_limit_pct
             ),
@@ -336,7 +336,7 @@ impl G3Robustness {
             );
             return CheckResult::warn(
                 "high_latency",
-                &format!(
+                format!(
                     "Order timeout {}ms exceeds recommended {}ms",
                     config.order_timeout_ms, self.config.max_order_timeout_ms
                 ),
@@ -345,7 +345,7 @@ impl G3Robustness {
 
         CheckResult::pass(
             "high_latency",
-            &format!("Order timeout set to {}ms", config.order_timeout_ms),
+            format!("Order timeout set to {}ms", config.order_timeout_ms),
         )
     }
 
@@ -372,11 +372,11 @@ impl G3Robustness {
             ),
             Some(limit) if limit < 512 => CheckResult::warn(
                 "memory_pressure",
-                &format!("Memory limit {}MB may be too low for production", limit),
+                format!("Memory limit {}MB may be too low for production", limit),
             ),
             Some(limit) => CheckResult::pass(
                 "memory_pressure",
-                &format!("Memory limit set to {}MB", limit),
+                format!("Memory limit set to {}MB", limit),
             ),
         }
     }
