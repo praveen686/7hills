@@ -64,4 +64,4 @@ pub use sanos::{
     ExpirySlice, NormalizedSlice, OptionQuote, SanosCalibrator, SanosDiagnostics, SanosSlice,
 };
 pub use signals::{OptionsSignal, OptionsSignalGenerator, SignalType};
-pub use strategy::{build_iron_condor, build_straddle, OptionsStrategy, StrategyLeg, StrategyType};
+pub use strategy::{OptionsStrategy, StrategyLeg, StrategyType, build_iron_condor, build_straddle};

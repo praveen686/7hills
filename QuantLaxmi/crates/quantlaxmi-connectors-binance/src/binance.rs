@@ -6,12 +6,12 @@
 //! Uses a per-symbol actor model where each instrument is managed by its
 //! own isolated task and WebSocket connection to minimize "head-of-line" blocking.
 
-use crate::sbe::{BinanceSbeDecoder, SbeHeader};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::{SinkExt, StreamExt};
 use quantlaxmi_core::EventBus;
 use quantlaxmi_models::{L2Level, L2Snapshot, L2Update};
+use quantlaxmi_sbe::{BinanceSbeDecoder, SbeHeader};
 use quantlaxmi_wal::{CorrelationContext, DepthLevel, MarketPayload, WalMarketRecord};
 use serde::Deserialize;
 use std::collections::VecDeque;

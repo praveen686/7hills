@@ -2,15 +2,18 @@
   "strategy_name": "lookahead_test",
   "orders": [
     {
+      "strategy_name": "Placeholder",
       "legs": [
         {
           "tradingsymbol": "NIFTY26FEB22000CE",
+          "exchange": "NFO",
           "side": "Buy",
           "quantity": 1,
           "order_type": "Market",
           "price": null
         }
-      ]
+      ],
+      "total_margin_required": 0.0
     }
   ]
 }

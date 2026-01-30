@@ -1,0 +1,40 @@
+● India FNO Capture Active:
+
+  Session:  fno_20260130
+  PID:      940275
+  Started:  2026-01-30 09:40 IST (04:10 UTC)
+  Expected: 2026-01-30 15:40 IST (6 hours)
+
+  Underlyings:
+  - NIFTY (50 Index)
+  - BANKNIFTY (Bank Index)
+
+  Configuration:
+  - Strike band: ±20 strikes around ATM
+  - Expiry policy: t1t2t3 (nearest + next + front monthly)
+  - Instruments: 410 options
+  - Mode: Full (L2 depth data)
+
+  Feed Status (after 30 seconds):
+  ┌─────────────┬────────────┬───────────┐
+  │ Metric      │ Value      │ Status    │
+  ├─────────────┼────────────┼───────────┤
+  │ Instruments │ 410        │ ✓ Active  │
+  ├─────────────┼────────────┼───────────┤
+  │ Total ticks │ 32,657+    │ ✓ Flowing │
+  └─────────────┴────────────┴───────────┘
+
+  Monitoring:
+  tail -f logs/quantlaxmi-india.log.2026-01-30
+
+  Check progress:
+  find data/india_sessions/fno_20260130 -name "ticks.jsonl" -exec wc -l {} + | tail -1
+
+  Session directory:
+  data/india_sessions/fno_20260130/
+
+─────────────────────────────────────────────────────────────────────
+  Running concurrently with crypto capture:
+
+  Crypto Session: perp_20260130_034709 (BTCUSDT, PID 936603)
+─────────────────────────────────────────────────────────────────────

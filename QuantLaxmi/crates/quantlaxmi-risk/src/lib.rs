@@ -23,8 +23,8 @@
 
 use quantlaxmi_models::{OrderEvent, OrderPayload, Side};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info, warn};
 
 /// Pre-trade risk management engine.

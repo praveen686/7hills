@@ -15,6 +15,11 @@
 
 use sha2::{Digest, Sha256};
 
+// Re-export encoding primitives from quantlaxmi-models for convenience
+pub use quantlaxmi_models::{
+    encode_i8, encode_i32, encode_i64, encode_i128, encode_option, encode_string, encode_u32,
+};
+
 /// Config encoding version. Bump when encoding rules change.
 pub const CONFIG_ENCODING_VERSION: u8 = 0x01;
 
@@ -34,58 +39,6 @@ pub fn canonical_hash<T: CanonicalBytes>(value: &T) -> String {
     let bytes = value.canonical_bytes();
     let hash = Sha256::digest(&bytes);
     hex::encode(hash)
-}
-
-/// Helper: encode i8 as single byte (little-endian).
-#[inline]
-pub fn encode_i8(buf: &mut Vec<u8>, value: i8) {
-    buf.extend_from_slice(&value.to_le_bytes());
-}
-
-/// Helper: encode i64 as 8 bytes (little-endian).
-#[inline]
-pub fn encode_i64(buf: &mut Vec<u8>, value: i64) {
-    buf.extend_from_slice(&value.to_le_bytes());
-}
-
-/// Helper: encode i32 as 4 bytes (little-endian).
-#[inline]
-pub fn encode_i32(buf: &mut Vec<u8>, value: i32) {
-    buf.extend_from_slice(&value.to_le_bytes());
-}
-
-/// Helper: encode i128 as 16 bytes (little-endian).
-#[inline]
-pub fn encode_i128(buf: &mut Vec<u8>, value: i128) {
-    buf.extend_from_slice(&value.to_le_bytes());
-}
-
-/// Helper: encode u32 as 4 bytes (little-endian).
-#[inline]
-pub fn encode_u32(buf: &mut Vec<u8>, value: u32) {
-    buf.extend_from_slice(&value.to_le_bytes());
-}
-
-/// Helper: encode string as length-prefixed UTF-8.
-#[inline]
-pub fn encode_string(buf: &mut Vec<u8>, value: &str) {
-    encode_u32(buf, value.len() as u32);
-    buf.extend_from_slice(value.as_bytes());
-}
-
-/// Helper: encode Option<T> with presence marker.
-#[inline]
-pub fn encode_option<T, F>(buf: &mut Vec<u8>, value: &Option<T>, encode_fn: F)
-where
-    F: FnOnce(&mut Vec<u8>, &T),
-{
-    match value {
-        None => buf.push(0x00),
-        Some(v) => {
-            buf.push(0x01);
-            encode_fn(buf, v);
-        }
-    }
 }
 
 #[cfg(test)]

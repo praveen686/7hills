@@ -86,7 +86,7 @@ pub use execution_session::{
 pub use g0_data_truth::{G0Config, G0DataTruth};
 pub use g1_replay_parity::{G1Config, G1ReplayParity};
 pub use g2_backtest_correctness::{G2BacktestCorrectness, G2Config};
-pub use g3_robustness::{G3Config, G3Robustness};
+pub use g3_robustness::{G3Config, G3Robustness, SystemConfig};
 pub use g4_admission_determinism::{
     G4AdmissionDeterminismGate, G4DecisionKey, G4Mismatch, G4MismatchKind, G4Result,
 };
@@ -254,6 +254,17 @@ impl CheckResult {
         }
     }
 
+    /// Create a warning check (passes but with warning message).
+    /// Warnings are treated as passing but should be reviewed.
+    pub fn warn(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            passed: true, // Warnings pass but message indicates concern
+            message: format!("WARNING: {}", message.into()),
+            metrics: None,
+        }
+    }
+
     /// Add metrics to the check.
     pub fn with_metrics(mut self, metrics: serde_json::Value) -> Self {
         self.metrics = Some(metrics);
@@ -266,6 +277,9 @@ impl CheckResult {
 pub enum GateError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("IO error: {0}")]
+    IoError(String),
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),

@@ -6,13 +6,17 @@
 //! Notes:
 //! - Public stream (no API keys required)
 //! - Deterministic fixed-point parsing (no float intermediates)
+//! - Uses ResilientWs for auto-reconnect on disconnect
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use futures_util::StreamExt;
 use std::path::Path;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+use tokio::time::Instant;
+use tracing::{error, warn};
 
+use crate::ws_resilient::{ConnectionGap, ResilientWs, ResilientWsConfig};
 use quantlaxmi_models::events::{CorrelationContext, QuoteEvent, parse_to_mantissa_pure};
 
 #[derive(Debug, serde::Deserialize)]
@@ -55,19 +59,51 @@ impl std::fmt::Display for CaptureStats {
     }
 }
 
+/// Result from capture including connection gap info.
+#[derive(Debug, Default)]
+pub struct CaptureResult {
+    pub stats: CaptureStats,
+    pub connection_gaps: Vec<ConnectionGap>,
+    pub total_reconnects: u32,
+}
+
+impl std::fmt::Display for CaptureResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.stats)?;
+        if self.total_reconnects > 0 {
+            write!(
+                f,
+                ", reconnects={}, gaps={}",
+                self.total_reconnects,
+                self.connection_gaps.len()
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Capture spot bookTicker stream to canonical QuoteEvent JSONL.
+/// Uses ResilientWs for auto-reconnect on disconnect.
 pub async fn capture_book_ticker_jsonl(
     symbol: &str,
     out_path: &Path,
     duration_secs: u64,
-) -> Result<CaptureStats> {
+) -> Result<CaptureResult> {
     let sym = symbol.to_lowercase();
     let url = format!("wss://stream.binance.com:9443/ws/{}@bookTicker", sym);
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
+    let config = ResilientWsConfig {
+        liveness_timeout: Duration::from_secs(30),
+        read_timeout: Duration::from_secs(5),
+        initial_backoff: Duration::from_secs(1),
+        max_backoff: Duration::from_secs(30),
+        max_reconnect_attempts: 100,
+        ..Default::default()
+    };
+
+    let mut ws = ResilientWs::connect(&url, config)
         .await
         .with_context(|| format!("connect websocket: {}", url))?;
-
-    let (_write, mut read) = ws_stream.split();
 
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
@@ -77,25 +113,31 @@ pub async fn capture_book_ticker_jsonl(
         .await
         .with_context(|| format!("open output: {:?}", out_path))?;
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
+    let deadline = Instant::now() + Duration::from_secs(duration_secs);
     let mut stats = CaptureStats::default();
 
     const BINANCE_PRICE_EXP: i8 = -2; // cents
     const BINANCE_QTY_EXP: i8 = -8; // base size precision (sufficient for BTC/ETH; canonical)
 
-    while tokio::time::Instant::now() < deadline {
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), read.next()).await;
-        let item = match msg {
-            Ok(Some(v)) => v,
-            Ok(None) => break,
-            Err(_) => continue,
+    while Instant::now() < deadline {
+        let msg = match ws.next_message().await? {
+            Some(m) => m,
+            None => {
+                error!("WebSocket reconnection exhausted for spot {}", symbol);
+                break;
+            }
         };
 
-        let msg = item?;
         if !msg.is_text() {
             continue;
         }
-        let txt = msg.into_text()?;
+        let txt = match msg.into_text() {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("Failed to get text from message: {}", e);
+                continue;
+            }
+        };
 
         // Skip non-bookTicker payloads
         let ev: BookTickerEvent = match serde_json::from_str(&txt) {
@@ -128,5 +170,10 @@ pub async fn capture_book_ticker_jsonl(
     }
 
     file.flush().await?;
-    Ok(stats)
+
+    Ok(CaptureResult {
+        stats,
+        connection_gaps: ws.connection_gaps().to_vec(),
+        total_reconnects: ws.total_reconnects(),
+    })
 }

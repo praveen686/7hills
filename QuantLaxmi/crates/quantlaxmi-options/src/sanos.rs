@@ -16,9 +16,9 @@
 //! - Background variance V = σ_ATM² * T with smoothness factor η
 
 use crate::pricing::implied_volatility;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
-use good_lp::{constraint, variable, Expression, ProblemVariables, Solution, SolverModel};
+use good_lp::{Expression, ProblemVariables, Solution, SolverModel, constraint, variable};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

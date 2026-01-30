@@ -13,14 +13,18 @@
 //! - No API key required for public streams
 //! - Perp trades 24/7 (no market hours)
 //! - Different from spot: uses fstream.binance.com instead of stream.binance.com
+//! - Uses ResilientWs for auto-reconnect on disconnect
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+use tokio::time::Instant;
+use tracing::{error, warn};
 
+use crate::ws_resilient::{ConnectionGap, ResilientWs, ResilientWsConfig};
 use quantlaxmi_models::events::{CorrelationContext, QuoteEvent, parse_to_mantissa_pure};
 
 /// Perp depth event (L2 order book update).
@@ -163,21 +167,52 @@ impl std::fmt::Display for PerpCaptureStats {
     }
 }
 
+/// Result from perp capture including connection gap info.
+#[derive(Debug, Default)]
+pub struct PerpCaptureResult {
+    pub stats: PerpCaptureStats,
+    pub connection_gaps: Vec<ConnectionGap>,
+    pub total_reconnects: u32,
+}
+
+impl std::fmt::Display for PerpCaptureResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.stats)?;
+        if self.total_reconnects > 0 {
+            write!(
+                f,
+                ", reconnects={}, gaps={}",
+                self.total_reconnects,
+                self.connection_gaps.len()
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// Capture perp bookTicker stream to canonical QuoteEvent JSONL.
 /// This is the simplest capture mode - just best bid/ask.
+/// Uses ResilientWs for auto-reconnect on disconnect.
 pub async fn capture_perp_bookticker_jsonl(
     symbol: &str,
     out_path: &Path,
     duration_secs: u64,
-) -> Result<PerpCaptureStats> {
+) -> Result<PerpCaptureResult> {
     let sym_lower = symbol.to_lowercase();
     let url = format!("wss://fstream.binance.com/ws/{}@bookTicker", sym_lower);
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
+    let config = ResilientWsConfig {
+        liveness_timeout: Duration::from_secs(30),
+        read_timeout: Duration::from_secs(5),
+        initial_backoff: Duration::from_secs(1),
+        max_backoff: Duration::from_secs(30),
+        max_reconnect_attempts: 100,
+        ..Default::default()
+    };
+
+    let mut ws = ResilientWs::connect(&url, config)
         .await
         .with_context(|| format!("connect websocket: {}", url))?;
-
-    let (_write, mut read) = ws_stream.split();
 
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
@@ -187,25 +222,31 @@ pub async fn capture_perp_bookticker_jsonl(
         .await
         .with_context(|| format!("open output: {:?}", out_path))?;
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
+    let deadline = Instant::now() + Duration::from_secs(duration_secs);
     let mut stats = PerpCaptureStats::default();
 
     const BINANCE_PRICE_EXP: i8 = -2; // cents
     const BINANCE_QTY_EXP: i8 = -8; // base size precision
 
-    while tokio::time::Instant::now() < deadline {
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), read.next()).await;
-        let item = match msg {
-            Ok(Some(v)) => v,
-            Ok(None) => break,
-            Err(_) => continue,
+    while Instant::now() < deadline {
+        let msg = match ws.next_message().await? {
+            Some(m) => m,
+            None => {
+                error!("WebSocket reconnection exhausted for {}", symbol);
+                break;
+            }
         };
 
-        let msg = item?;
         if !msg.is_text() {
             continue;
         }
-        let txt = msg.into_text()?;
+        let txt = match msg.into_text() {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("Failed to get text from message: {}", e);
+                continue;
+            }
+        };
 
         let ev: FuturesBookTicker = match serde_json::from_str::<FuturesBookTicker>(&txt) {
             Ok(e) if e.event_type == "bookTicker" => e,
@@ -240,40 +281,20 @@ pub async fn capture_perp_bookticker_jsonl(
     }
 
     file.flush().await?;
-    Ok(stats)
+
+    Ok(PerpCaptureResult {
+        stats,
+        connection_gaps: ws.connection_gaps().to_vec(),
+        total_reconnects: ws.total_reconnects(),
+    })
 }
 
-/// Capture perp depth stream to PerpDepthEvent JSONL.
-/// This captures full L2 order book updates.
-pub async fn capture_perp_depth_jsonl(
+/// Fetch depth snapshot from REST API.
+async fn fetch_depth_snapshot(
     symbol: &str,
-    out_path: &Path,
-    duration_secs: u64,
     price_exponent: i8,
     qty_exponent: i8,
-) -> Result<PerpCaptureStats> {
-    let sym_lower = symbol.to_lowercase();
-    // Use 100ms update speed for depth
-    let url = format!("wss://fstream.binance.com/ws/{}@depth@100ms", sym_lower);
-
-    let (ws_stream, _) = tokio_tungstenite::connect_async(&url)
-        .await
-        .with_context(|| format!("connect websocket: {}", url))?;
-
-    let (_write, mut read) = ws_stream.split();
-
-    let mut file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(out_path)
-        .await
-        .with_context(|| format!("open output: {:?}", out_path))?;
-
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(duration_secs);
-    let mut stats = PerpCaptureStats::default();
-
-    // First, fetch REST snapshot for bootstrap
+) -> Result<(u64, PerpDepthEvent)> {
     let snapshot_url = format!(
         "https://fapi.binance.com/fapi/v1/depth?symbol={}&limit=1000",
         symbol.to_uppercase()
@@ -287,7 +308,6 @@ pub async fn capture_perp_depth_jsonl(
 
     let snapshot_last_id = snapshot_resp["lastUpdateId"].as_u64().unwrap_or(0);
 
-    // Parse and write snapshot
     let snapshot_bids: Vec<DepthLevel> = snapshot_resp["bids"]
         .as_array()
         .unwrap_or(&vec![])
@@ -324,29 +344,107 @@ pub async fn capture_perp_depth_jsonl(
         source: Some("binance_perp_depth_capture".to_string()),
     };
 
+    Ok((snapshot_last_id, snapshot_event))
+}
+
+/// Capture perp depth stream to PerpDepthEvent JSONL.
+/// This captures full L2 order book updates.
+/// Uses ResilientWs for auto-reconnect, with automatic re-sync on reconnect.
+pub async fn capture_perp_depth_jsonl(
+    symbol: &str,
+    out_path: &Path,
+    duration_secs: u64,
+    price_exponent: i8,
+    qty_exponent: i8,
+) -> Result<PerpCaptureResult> {
+    let sym_lower = symbol.to_lowercase();
+    let url = format!("wss://fstream.binance.com/ws/{}@depth@100ms", sym_lower);
+
+    let config = ResilientWsConfig {
+        liveness_timeout: Duration::from_secs(30),
+        read_timeout: Duration::from_secs(5),
+        initial_backoff: Duration::from_secs(1),
+        max_backoff: Duration::from_secs(30),
+        max_reconnect_attempts: 100,
+        ..Default::default()
+    };
+
+    let mut ws = ResilientWs::connect(&url, config)
+        .await
+        .with_context(|| format!("connect websocket: {}", url))?;
+
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(out_path)
+        .await
+        .with_context(|| format!("open output: {:?}", out_path))?;
+
+    let deadline = Instant::now() + Duration::from_secs(duration_secs);
+    let mut stats = PerpCaptureStats::default();
+
+    // Fetch initial snapshot
+    let (mut snapshot_last_id, snapshot_event) =
+        fetch_depth_snapshot(symbol, price_exponent, qty_exponent).await?;
+
     let line = serde_json::to_string(&snapshot_event)?;
     file.write_all(line.as_bytes()).await?;
     file.write_all(b"\n").await?;
     stats.events_written += 1;
+
     let mut prev_last_update_id = snapshot_last_id;
-
-    // Buffer updates until we find sync point
-    let mut buffer: Vec<FuturesDepthUpdate> = Vec::new();
     let mut synced = false;
+    let mut last_reconnect_count = ws.total_reconnects();
 
-    while tokio::time::Instant::now() < deadline {
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), read.next()).await;
-        let item = match msg {
-            Ok(Some(v)) => v,
-            Ok(None) => break,
-            Err(_) => continue,
+    while Instant::now() < deadline {
+        // Check if a reconnect happened - if so, re-sync
+        let current_reconnects = ws.total_reconnects();
+        if current_reconnects > last_reconnect_count {
+            tracing::info!(
+                "Detected reconnect (count {} -> {}), re-fetching snapshot",
+                last_reconnect_count,
+                current_reconnects
+            );
+            last_reconnect_count = current_reconnects;
+
+            // Re-fetch snapshot and reset sync state
+            match fetch_depth_snapshot(symbol, price_exponent, qty_exponent).await {
+                Ok((new_snapshot_id, new_snapshot_event)) => {
+                    snapshot_last_id = new_snapshot_id;
+                    let line = serde_json::to_string(&new_snapshot_event)?;
+                    file.write_all(line.as_bytes()).await?;
+                    file.write_all(b"\n").await?;
+                    stats.events_written += 1;
+                    prev_last_update_id = snapshot_last_id;
+                    synced = false;
+                    tracing::info!("Re-syncing with new snapshot_id={}", snapshot_last_id);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch snapshot after reconnect: {}", e);
+                    // Continue trying - next reconnect will try again
+                }
+            }
+        }
+
+        let msg = match ws.next_message().await? {
+            Some(m) => m,
+            None => {
+                error!("WebSocket reconnection exhausted for depth {}", symbol);
+                break;
+            }
         };
 
-        let msg = item?;
         if !msg.is_text() {
             continue;
         }
-        let txt = msg.into_text()?;
+        let txt = match msg.into_text() {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("Failed to get text from message: {}", e);
+                continue;
+            }
+        };
 
         let ev: FuturesDepthUpdate = match serde_json::from_str::<FuturesDepthUpdate>(&txt) {
             Ok(e) if e.event_type == "depthUpdate" => e,
@@ -368,7 +466,6 @@ pub async fn capture_perp_depth_jsonl(
                     snapshot_last_id
                 );
             } else {
-                buffer.push(ev);
                 continue;
             }
         }
@@ -436,7 +533,12 @@ pub async fn capture_perp_depth_jsonl(
     }
 
     file.flush().await?;
-    Ok(stats)
+
+    Ok(PerpCaptureResult {
+        stats,
+        connection_gaps: ws.connection_gaps().to_vec(),
+        total_reconnects: ws.total_reconnects(),
+    })
 }
 
 #[cfg(test)]

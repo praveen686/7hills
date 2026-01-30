@@ -1,0 +1,39 @@
+● Capture Active (Resilient WebSocket v2):
+
+  Session:  perp_20260130_034709
+  PID:      936603
+  Started:  2026-01-30 03:47 UTC
+  Expected: 2026-02-01 03:47 UTC (48h)
+
+  Feed Status (after 3 minutes):
+  ┌─────────────┬────────┬───────────┐
+  │    Feed     │ Events │  Status   │
+  ├─────────────┼────────┼───────────┤
+  │ spot_quotes │ 28,103 │ ✓ Flowing │
+  ├─────────────┼────────┼───────────┤
+  │ perp_depth  │ 445    │ ✓ Flowing │
+  ├─────────────┼────────┼───────────┤
+  │ funding     │ 60     │ ✓ Flowing │
+  └─────────────┴────────┴───────────┘
+
+  Monitoring command:
+  tail -f /tmp/capture_resilient_v2.log
+
+  Check progress anytime:
+  wc -l data/perp_sessions/perp_20260130_034709/BTCUSDT/*.jsonl
+
+  NEW: Resilient WebSocket Features
+  - Auto-reconnect with exponential backoff (1s → 30s max)
+  - Liveness watchdog (30s timeout triggers reconnect)
+  - Depth re-sync: fetches new REST snapshot after reconnect
+  - Connection gap tracking for audit
+
+─────────────────────────────────────────────────────────────────────
+  Previous Session (STALLED - replaced):
+
+  Session:  perp_20260129_053328
+  Status:   INCOMPLETE - WebSocket dropped without auto-reconnect
+  Stalled:  2026-01-29 14:52 UTC (after ~9 hours)
+  Reason:   "Connection reset without closing handshake" - no recovery
+  Marked:   data/perp_sessions/perp_20260129_053328/_INCOMPLETE.txt
+─────────────────────────────────────────────────────────────────────

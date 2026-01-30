@@ -32,6 +32,7 @@ pub mod replay;
 pub mod segment_manifest;
 pub mod session_capture;
 pub mod tournament;
+pub mod ws_resilient;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -442,6 +443,20 @@ pub enum Commands {
         /// Override WAL output directory (default: segment_dir/wal)
         #[arg(long)]
         wal_dir: Option<String>,
+
+        // Phase 25A/25B: Cost model and latency
+        /// Path to cost model JSON file (Phase 25A)
+        #[arg(long)]
+        cost_model_path: Option<String>,
+
+        /// Latency in ticks (Phase 25B). 0 = immediate execution.
+        #[arg(long, default_value_t = 0)]
+        latency_ticks: u32,
+
+        /// Use spot prices for execution instead of perp prices.
+        /// Useful when perp depth data is incomplete but spot quotes are available.
+        #[arg(long, default_value_t = false)]
+        use_spot_prices: bool,
     },
 
     /// Verify replay parity between two decision traces
@@ -629,6 +644,9 @@ async fn async_main() -> anyhow::Result<()> {
             promotion_root,
             require_promotion,
             wal_dir,
+            cost_model_path,
+            latency_ticks,
+            use_spot_prices,
         } => {
             run_backtest(
                 &segment_dir,
@@ -651,6 +669,9 @@ async fn async_main() -> anyhow::Result<()> {
                 promotion_root.as_deref(),
                 require_promotion,
                 wal_dir.as_deref(),
+                cost_model_path.as_deref(),
+                latency_ticks,
+                use_spot_prices,
             )
             .await
         }
@@ -674,7 +695,7 @@ async fn run_capture_binance(symbol: &str, out: &str, duration_secs: u64) -> any
 
     // Emit RunManifest (Research profile - bookTicker is not the authoritative path)
     let manifest_dir = out_path.parent().unwrap_or(std::path::Path::new("."));
-    emit_bookticker_manifest(manifest_dir, out_path, symbol, &stats)?;
+    emit_bookticker_manifest(manifest_dir, out_path, symbol, &stats.stats)?;
 
     Ok(())
 }
@@ -1364,10 +1385,18 @@ async fn run_capture_perp_depth(
 
     tracing::info!("Capture complete: {} ({})", out, stats);
 
-    if stats.sequence_gaps > 0 {
+    if stats.stats.sequence_gaps > 0 {
         tracing::info!(
             "⚠️  Warning: {} sequence gaps detected. Replay may have issues.",
-            stats.sequence_gaps
+            stats.stats.sequence_gaps
+        );
+    }
+
+    if stats.total_reconnects > 0 {
+        tracing::info!(
+            "ℹ️  {} reconnections occurred, {} gaps recorded",
+            stats.total_reconnects,
+            stats.connection_gaps.len()
         );
     }
 
@@ -1975,6 +2004,10 @@ async fn run_backtest(
     promotion_root: Option<&str>,
     require_promotion: bool,
     wal_dir: Option<&str>,
+    // Phase 25A/25B: Cost model and latency
+    cost_model_path: Option<&str>,
+    latency_ticks: u32,
+    use_spot_prices: bool,
 ) -> anyhow::Result<()> {
     use backtest::{
         BacktestConfig, BacktestEngine, BasisCaptureStrategy, EnforcementConfig, ExchangeConfig,
@@ -2017,7 +2050,7 @@ async fn run_backtest(
         exchange: ExchangeConfig {
             fee_bps,
             initial_cash: initial_capital,
-            use_perp_prices: true,
+            use_perp_prices: !use_spot_prices,
         },
         log_interval: 500_000,
         pace: pace_mode,
@@ -2027,8 +2060,8 @@ async fn run_backtest(
         admission_mismatch_policy: admission_mismatch_policy.to_string(),
         strategy_spec: None, // Phase 22C: CLI doesn't set strategy_spec yet
         enforcement,
-        cost_model_path: None, // Phase 25A: CLI doesn't set cost_model yet
-        latency_ticks: 0,      // Phase 25B: CLI defaults to no latency (immediate execution)
+        cost_model_path: cost_model_path.map(std::path::PathBuf::from),
+        latency_ticks,
     };
 
     let engine = BacktestEngine::new(config);
@@ -2039,6 +2072,14 @@ async fn run_backtest(
     tracing::info!("Initial capital: ${:.2}", initial_capital);
     tracing::info!("Fee: {:.1} bps", fee_bps);
     tracing::info!("Pace: {}", pace);
+    tracing::info!("Latency ticks: {}", latency_ticks);
+    tracing::info!(
+        "Price source: {}",
+        if use_spot_prices { "spot" } else { "perp" }
+    );
+    if let Some(ref cm_path) = cost_model_path {
+        tracing::info!("Cost model: {}", cm_path);
+    }
 
     // Run backtest with either SDK strategy or legacy strategy
     let result = if use_sdk {

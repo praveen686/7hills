@@ -1,0 +1,15 @@
+# FundingBias Strategy Config - Phase 27.3
+# v2.1.0 with exit logic + hysteresis
+# Bands set from segment percentiles: p60=entry, p40=exit
+
+# Entry threshold: 51 with exp -6 = 51.29 bps (p60 of segment funding)
+threshold_mantissa = 51
+threshold_exponent = -6
+
+# Exit band: 45 with exp -6 = 45.37 bps (p40 of segment funding)
+exit_band_mantissa = 45
+
+# Position size: 0.01 BTC
+position_size_mantissa = 1_000_000
+qty_exponent = -8
+price_exponent = -2
