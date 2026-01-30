@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "Crypto trading runner for QuantLaxmi (Binance)"
 
-[[bin]]
-name = "quantlaxmi-crypto"
-path = "src/main.rs"
+# NOTE: Main CLI binary lives in apps/quantlaxmi-crypto (cargo run -p quantlaxmi-crypto)
+# This crate only provides the library + specialized binaries below.
 
 [[bin]]
 name = "run_funding_arb"
@@ -37,7 +36,6 @@ quantlaxmi-events = { path = "../quantlaxmi-events" }
 quantlaxmi-data = { path = "../quantlaxmi-data" }
 quantlaxmi-executor = { path = "../quantlaxmi-executor" }
 quantlaxmi-risk = { path = "../quantlaxmi-risk" }
-quantlaxmi-options = { path = "../quantlaxmi-options" }
 quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
 quantlaxmi-strategy = { path = "../quantlaxmi-strategy" }
 quantlaxmi-gates = { path = "../quantlaxmi-gates" }
@@ -100,6 +98,15 @@ hex = "0.4"
 
 # Directory walking (for tournament validation)
 walkdir = "2.4"
+
+# Glob pattern matching (for tournament segment discovery)
+glob = "0.3"
+
+# Parallel execution (for tournament speedup)
+rayon = "1.10"
+
+# CPU count detection
+num_cpus = "1.16"
 
 [dev-dependencies]
 tempfile = "3"

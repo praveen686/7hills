@@ -62,3 +62,6 @@ yarn-error.log*
 # Large research PDFs (keep out of git)
 research/*.pdf
 memorysummary.txt
+
+# Tournament output data
+data/tournaments/

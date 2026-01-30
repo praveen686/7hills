@@ -18,6 +18,7 @@
 
 pub mod backtest;
 pub mod binance_capture;
+// Phase 2 unified simulator (shared by backtest + paper trading)
 pub mod binance_exchange_info;
 pub mod binance_funding_capture;
 pub mod binance_perp_capture;
@@ -31,6 +32,7 @@ pub mod paper_trading;
 pub mod replay;
 pub mod segment_manifest;
 pub mod session_capture;
+pub mod sim;
 pub mod tournament;
 pub mod ws_resilient;
 
@@ -471,6 +473,50 @@ pub enum Commands {
         #[arg(long)]
         replay: String,
     },
+
+    /// Run parameter grid tournament across multiple segments (P1)
+    ///
+    /// Expands a TOML parameter grid into configs, runs backtests across
+    /// multiple segments, and produces results.jsonl, leaderboard.json,
+    /// and promotion_candidates.json.
+    Tournament {
+        /// Root directory containing segment directories
+        #[arg(long)]
+        segments_root: String,
+
+        /// Comma-separated list of glob patterns matched against segment dir names
+        /// Example: "perp_2026*,smoke_*"
+        #[arg(long)]
+        segments: String,
+
+        /// Strategy name (from registry)
+        #[arg(long)]
+        strategy: String,
+
+        /// Path to grid TOML file
+        #[arg(long)]
+        grid: String,
+
+        /// Output directory for tournament results
+        #[arg(long)]
+        out_dir: String,
+
+        /// Initial capital for every run
+        #[arg(long, default_value_t = 10000.0)]
+        initial_capital: f64,
+
+        /// If set, also emit P0 traces (fills/equity_curve) per run
+        #[arg(long, default_value_t = false)]
+        emit_traces: bool,
+
+        /// Max number of runs (safety)
+        #[arg(long, default_value_t = 5000)]
+        max_runs: usize,
+
+        /// Number of parallel workers (0 = auto-detect, uses half of CPU cores)
+        #[arg(long, default_value_t = 0)]
+        parallel: usize,
+    },
 }
 
 /// Main entry point for the Crypto runner
@@ -676,6 +722,30 @@ async fn async_main() -> anyhow::Result<()> {
             .await
         }
         Commands::VerifyTrace { original, replay } => run_verify_trace(&original, &replay).await,
+        Commands::Tournament {
+            segments_root,
+            segments,
+            strategy,
+            grid,
+            out_dir,
+            initial_capital,
+            emit_traces,
+            max_runs,
+            parallel,
+        } => {
+            tournament::run_tournament_grid_cli(
+                &segments_root,
+                &segments,
+                &strategy,
+                &grid,
+                &out_dir,
+                initial_capital,
+                emit_traces,
+                max_runs,
+                parallel,
+            )
+            .await
+        }
     }
 }
 
@@ -1100,8 +1170,7 @@ async fn run_paper_mode(
     headless: bool,
 ) -> anyhow::Result<()> {
     use futures_util::{SinkExt, StreamExt};
-    use quantlaxmi_models::IntegrityTier;
-    use quantlaxmi_options::replay::DepthEvent;
+    use quantlaxmi_models::{DepthEvent, DepthLevel, IntegrityTier};
     use quantlaxmi_sbe::{BinanceSbeDecoder, SBE_HEADER_SIZE, SbeHeader};
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::protocol::Message;
@@ -1167,7 +1236,7 @@ async fn run_paper_mode(
     info!("Snapshot lastUpdateId: {}", snapshot_last_id);
 
     // Create snapshot event
-    let snapshot_bids: Vec<quantlaxmi_options::replay::DepthLevel> = snapshot_resp["bids"]
+    let snapshot_bids: Vec<DepthLevel> = snapshot_resp["bids"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
@@ -1179,11 +1248,11 @@ async fn run_paper_mode(
                     .ok()?;
             let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent)
                 .ok()?;
-            Some(quantlaxmi_options::replay::DepthLevel { price, qty })
+            Some(DepthLevel { price, qty })
         })
         .collect();
 
-    let snapshot_asks: Vec<quantlaxmi_options::replay::DepthLevel> = snapshot_resp["asks"]
+    let snapshot_asks: Vec<DepthLevel> = snapshot_resp["asks"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
@@ -1195,7 +1264,7 @@ async fn run_paper_mode(
                     .ok()?;
             let qty = binance_sbe_depth_capture::parse_to_mantissa_from_str(qty_str, qty_exponent)
                 .ok()?;
-            Some(quantlaxmi_options::replay::DepthLevel { price, qty })
+            Some(DepthLevel { price, qty })
         })
         .collect();
 
@@ -1254,7 +1323,7 @@ async fn run_paper_mode(
 
                             for fill in fills {
                                 info!("FILL: {} {} @ {:.2}",
-                                    fill.side, fill.fill_qty, fill.fill_price);
+                                    fill.side, fill.qty, fill.price);
                             }
                         }
                     }
@@ -2324,4 +2393,107 @@ async fn run_verify_trace(original_path: &str, replay_path: &str) -> anyhow::Res
             ))
         }
     }
+}
+
+// =============================================================================
+// Public CLI API for External Callers
+// =============================================================================
+
+/// Run backtest from CLI arguments (Phase 2 unified entry point).
+///
+/// This provides a simple API for running backtests that can be called from
+/// external crates (e.g., quantlaxmi-crypto CLI binary).
+///
+/// # Arguments
+/// * `session_dir` - Path to a captured session directory (contains segment_manifest.json)
+/// * `strategy` - Strategy name registered in quantlaxmi-strategy
+/// * `config_path` - Path to backtest config (TOML/JSON)
+/// * `out_dir` - Output directory for run manifest + metrics
+///
+/// # Returns
+/// Result indicating success or failure with error details.
+pub fn run_backtest_cli(
+    session_dir: &str,
+    strategy: &str,
+    config_path: &str,
+    out_dir: &str,
+) -> anyhow::Result<()> {
+    // Create runtime for async backtest execution
+    let rt = create_runtime()?;
+
+    rt.block_on(async {
+        use backtest::{BacktestConfig, BacktestEngine, ExchangeConfig};
+        use quantlaxmi_strategy::StrategyRegistry;
+
+        // 1) Load config (if provided, otherwise use defaults)
+        let exchange_config = if std::path::Path::new(config_path).exists() {
+            let content =
+                std::fs::read_to_string(config_path).context("Failed to read backtest config")?;
+            toml::from_str(&content).unwrap_or_else(|_| ExchangeConfig::default())
+        } else {
+            ExchangeConfig::default()
+        };
+
+        let config = BacktestConfig {
+            exchange: exchange_config,
+            ..Default::default()
+        };
+
+        let engine = BacktestEngine::new(config);
+
+        // 2) Load strategy from registry
+        let registry = StrategyRegistry::with_builtins();
+        let strategy_config_path = if std::path::Path::new(config_path).exists() {
+            Some(std::path::Path::new(config_path))
+        } else {
+            None
+        };
+
+        let strategy_box = registry
+            .create(strategy, strategy_config_path)
+            .map_err(|e| anyhow::anyhow!("Failed to create strategy '{}': {}", strategy, e))?;
+
+        // 3) Run backtest
+        let segment_path = std::path::Path::new(session_dir);
+        let (result, _strategy_binding) = engine
+            .run_with_strategy(segment_path, strategy_box, strategy_config_path)
+            .await?;
+
+        // 4) Write outputs (using v1 schemas with deterministic serialization)
+        let out_path = std::path::Path::new(out_dir);
+        std::fs::create_dir_all(out_path)?;
+
+        // Write metrics.json (v1 schema)
+        let metrics_v1 = backtest::BacktestMetricsV1::from_metrics(&result.metrics);
+        let metrics_path = out_path.join("metrics.json");
+        let metrics_json = serde_json::to_string_pretty(&metrics_v1)?;
+        std::fs::write(&metrics_path, metrics_json)?;
+
+        // Write run_manifest.json (v1 schema)
+        let run_manifest_v1 = backtest::BacktestRunManifestV1::from_result(&result);
+        let run_manifest_path = out_path.join("run_manifest.json");
+        let manifest_json = serde_json::to_string_pretty(&run_manifest_v1)?;
+        std::fs::write(&run_manifest_path, manifest_json)?;
+
+        // Write equity_curve.jsonl (P0 audit-grade trace)
+        let equity_curve_path = out_path.join("equity_curve.jsonl");
+        backtest::write_equity_curve_jsonl(&equity_curve_path, &result.equity_curve)
+            .context("Failed to write equity_curve.jsonl")?;
+
+        // Write fills.jsonl (P0 audit-grade trace)
+        let fills_path = out_path.join("fills.jsonl");
+        backtest::write_fills_jsonl(&fills_path, &result.fills)
+            .context("Failed to write fills.jsonl")?;
+
+        info!(
+            "Backtest complete: {} events, {} fills, {:.2}% return",
+            result.total_events, result.total_fills, result.return_pct
+        );
+        info!("Metrics written to: {}", metrics_path.display());
+        info!("Manifest written to: {}", run_manifest_path.display());
+        info!("Equity curve written to: {}", equity_curve_path.display());
+        info!("Fills written to: {}", fills_path.display());
+
+        Ok(())
+    })
 }
