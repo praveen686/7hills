@@ -1,0 +1,32 @@
+[package]
+name = "quantlaxmi-connectors-binance"
+version = "0.1.0"
+edition = "2024"
+description = "Binance integration for QuantLaxmi Crypto (includes SBE decoder)"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+url = "2"
+byteorder = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# Internal dependencies - only Crypto-specific (via shims)
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
+quantlaxmi-wal = { path = "../quantlaxmi-wal" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

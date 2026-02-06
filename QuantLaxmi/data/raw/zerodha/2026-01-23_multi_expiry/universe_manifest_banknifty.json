@@ -1,0 +1,1539 @@
+{
+  "underlying": "BANKNIFTY",
+  "today": "2026-01-23",
+  "spot": 58950.55,
+  "atm": 59000.0,
+  "strike_step": 100.0,
+  "strike_band": 20,
+  "expiry_selection": {
+    "t1": "2026-01-27",
+    "t2": "2026-02-24",
+    "t3": "2026-02-24",
+    "selected": [
+      "2026-01-27",
+      "2026-02-24"
+    ]
+  },
+  "target_strikes": [
+    57000.0,
+    57100.0,
+    57200.0,
+    57300.0,
+    57400.0,
+    57500.0,
+    57600.0,
+    57700.0,
+    57800.0,
+    57900.0,
+    58000.0,
+    58100.0,
+    58200.0,
+    58300.0,
+    58400.0,
+    58500.0,
+    58600.0,
+    58700.0,
+    58800.0,
+    58900.0,
+    59000.0,
+    59100.0,
+    59200.0,
+    59300.0,
+    59400.0,
+    59500.0,
+    59600.0,
+    59700.0,
+    59800.0,
+    59900.0,
+    60000.0,
+    60100.0,
+    60200.0,
+    60300.0,
+    60400.0,
+    60500.0,
+    60600.0,
+    60700.0,
+    60800.0,
+    60900.0,
+    61000.0
+  ],
+  "instruments": [
+    {
+      "instrument_token": 13255170,
+      "tradingsymbol": "BANKNIFTY26JAN57000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13255426,
+      "tradingsymbol": "BANKNIFTY26JAN57000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13255682,
+      "tradingsymbol": "BANKNIFTY26JAN57100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13255938,
+      "tradingsymbol": "BANKNIFTY26JAN57100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13256194,
+      "tradingsymbol": "BANKNIFTY26JAN57200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13256450,
+      "tradingsymbol": "BANKNIFTY26JAN57200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13256706,
+      "tradingsymbol": "BANKNIFTY26JAN57300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13256962,
+      "tradingsymbol": "BANKNIFTY26JAN57300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13257218,
+      "tradingsymbol": "BANKNIFTY26JAN57400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13257474,
+      "tradingsymbol": "BANKNIFTY26JAN57400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13257730,
+      "tradingsymbol": "BANKNIFTY26JAN57500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13257986,
+      "tradingsymbol": "BANKNIFTY26JAN57500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13258242,
+      "tradingsymbol": "BANKNIFTY26JAN57600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13258498,
+      "tradingsymbol": "BANKNIFTY26JAN57600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13258754,
+      "tradingsymbol": "BANKNIFTY26JAN57700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13259010,
+      "tradingsymbol": "BANKNIFTY26JAN57700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13259266,
+      "tradingsymbol": "BANKNIFTY26JAN57800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13260034,
+      "tradingsymbol": "BANKNIFTY26JAN57800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13260290,
+      "tradingsymbol": "BANKNIFTY26JAN57900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13260546,
+      "tradingsymbol": "BANKNIFTY26JAN57900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 57900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13260802,
+      "tradingsymbol": "BANKNIFTY26JAN58000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13261058,
+      "tradingsymbol": "BANKNIFTY26JAN58000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13261314,
+      "tradingsymbol": "BANKNIFTY26JAN58100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13261570,
+      "tradingsymbol": "BANKNIFTY26JAN58100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13261826,
+      "tradingsymbol": "BANKNIFTY26JAN58200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13262082,
+      "tradingsymbol": "BANKNIFTY26JAN58200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13262338,
+      "tradingsymbol": "BANKNIFTY26JAN58300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13262594,
+      "tradingsymbol": "BANKNIFTY26JAN58300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13262850,
+      "tradingsymbol": "BANKNIFTY26JAN58400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13263106,
+      "tradingsymbol": "BANKNIFTY26JAN58400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13263362,
+      "tradingsymbol": "BANKNIFTY26JAN58500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13275394,
+      "tradingsymbol": "BANKNIFTY26JAN58500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13275650,
+      "tradingsymbol": "BANKNIFTY26JAN58600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13277954,
+      "tradingsymbol": "BANKNIFTY26JAN58600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13278210,
+      "tradingsymbol": "BANKNIFTY26JAN58700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13283074,
+      "tradingsymbol": "BANKNIFTY26JAN58700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13283330,
+      "tradingsymbol": "BANKNIFTY26JAN58800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13289218,
+      "tradingsymbol": "BANKNIFTY26JAN58800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13289986,
+      "tradingsymbol": "BANKNIFTY26JAN58900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13290242,
+      "tradingsymbol": "BANKNIFTY26JAN58900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 58900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13290498,
+      "tradingsymbol": "BANKNIFTY26JAN59000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13293314,
+      "tradingsymbol": "BANKNIFTY26JAN59000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13294082,
+      "tradingsymbol": "BANKNIFTY26JAN59100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13297410,
+      "tradingsymbol": "BANKNIFTY26JAN59100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13297666,
+      "tradingsymbol": "BANKNIFTY26JAN59200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13297922,
+      "tradingsymbol": "BANKNIFTY26JAN59200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13298178,
+      "tradingsymbol": "BANKNIFTY26JAN59300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13300482,
+      "tradingsymbol": "BANKNIFTY26JAN59300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13300738,
+      "tradingsymbol": "BANKNIFTY26JAN59400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13309698,
+      "tradingsymbol": "BANKNIFTY26JAN59400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13309954,
+      "tradingsymbol": "BANKNIFTY26JAN59500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13314306,
+      "tradingsymbol": "BANKNIFTY26JAN59500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13317634,
+      "tradingsymbol": "BANKNIFTY26JAN59600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13318402,
+      "tradingsymbol": "BANKNIFTY26JAN59600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13320194,
+      "tradingsymbol": "BANKNIFTY26JAN59700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13323010,
+      "tradingsymbol": "BANKNIFTY26JAN59700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13324290,
+      "tradingsymbol": "BANKNIFTY26JAN59800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13338882,
+      "tradingsymbol": "BANKNIFTY26JAN59800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13339138,
+      "tradingsymbol": "BANKNIFTY26JAN59900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13347586,
+      "tradingsymbol": "BANKNIFTY26JAN59900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 59900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13347842,
+      "tradingsymbol": "BANKNIFTY26JAN60000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13433858,
+      "tradingsymbol": "BANKNIFTY26JAN60000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13446146,
+      "tradingsymbol": "BANKNIFTY26JAN60100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13566722,
+      "tradingsymbol": "BANKNIFTY26JAN60100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13567234,
+      "tradingsymbol": "BANKNIFTY26JAN60200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13567490,
+      "tradingsymbol": "BANKNIFTY26JAN60200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13568258,
+      "tradingsymbol": "BANKNIFTY26JAN60300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13568514,
+      "tradingsymbol": "BANKNIFTY26JAN60300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13570818,
+      "tradingsymbol": "BANKNIFTY26JAN60400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13571074,
+      "tradingsymbol": "BANKNIFTY26JAN60400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13571330,
+      "tradingsymbol": "BANKNIFTY26JAN60500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13571586,
+      "tradingsymbol": "BANKNIFTY26JAN60500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13571842,
+      "tradingsymbol": "BANKNIFTY26JAN60600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13572098,
+      "tradingsymbol": "BANKNIFTY26JAN60600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13573122,
+      "tradingsymbol": "BANKNIFTY26JAN60700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13573378,
+      "tradingsymbol": "BANKNIFTY26JAN60700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13575938,
+      "tradingsymbol": "BANKNIFTY26JAN60800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13576194,
+      "tradingsymbol": "BANKNIFTY26JAN60800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13576450,
+      "tradingsymbol": "BANKNIFTY26JAN60900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13576706,
+      "tradingsymbol": "BANKNIFTY26JAN60900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 60900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13577218,
+      "tradingsymbol": "BANKNIFTY26JAN61000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 61000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 13577474,
+      "tradingsymbol": "BANKNIFTY26JAN61000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-01-27",
+      "strike": 61000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15368450,
+      "tradingsymbol": "BANKNIFTY26FEB57000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15368706,
+      "tradingsymbol": "BANKNIFTY26FEB57000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15369986,
+      "tradingsymbol": "BANKNIFTY26FEB57100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15370242,
+      "tradingsymbol": "BANKNIFTY26FEB57100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15370498,
+      "tradingsymbol": "BANKNIFTY26FEB57200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15370754,
+      "tradingsymbol": "BANKNIFTY26FEB57200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15371522,
+      "tradingsymbol": "BANKNIFTY26FEB57300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15371778,
+      "tradingsymbol": "BANKNIFTY26FEB57300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15372034,
+      "tradingsymbol": "BANKNIFTY26FEB57400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15372290,
+      "tradingsymbol": "BANKNIFTY26FEB57400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15373570,
+      "tradingsymbol": "BANKNIFTY26FEB57500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15373826,
+      "tradingsymbol": "BANKNIFTY26FEB57500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15374082,
+      "tradingsymbol": "BANKNIFTY26FEB57600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15374338,
+      "tradingsymbol": "BANKNIFTY26FEB57600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15374594,
+      "tradingsymbol": "BANKNIFTY26FEB57700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15374850,
+      "tradingsymbol": "BANKNIFTY26FEB57700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15375362,
+      "tradingsymbol": "BANKNIFTY26FEB57800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15375874,
+      "tradingsymbol": "BANKNIFTY26FEB57800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15376130,
+      "tradingsymbol": "BANKNIFTY26FEB57900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15376386,
+      "tradingsymbol": "BANKNIFTY26FEB57900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 57900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15376642,
+      "tradingsymbol": "BANKNIFTY26FEB58000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15376898,
+      "tradingsymbol": "BANKNIFTY26FEB58000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15378178,
+      "tradingsymbol": "BANKNIFTY26FEB58100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15378434,
+      "tradingsymbol": "BANKNIFTY26FEB58100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15378690,
+      "tradingsymbol": "BANKNIFTY26FEB58200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15378946,
+      "tradingsymbol": "BANKNIFTY26FEB58200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15380226,
+      "tradingsymbol": "BANKNIFTY26FEB58300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15380482,
+      "tradingsymbol": "BANKNIFTY26FEB58300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15380738,
+      "tradingsymbol": "BANKNIFTY26FEB58400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15380994,
+      "tradingsymbol": "BANKNIFTY26FEB58400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15381250,
+      "tradingsymbol": "BANKNIFTY26FEB58500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15381506,
+      "tradingsymbol": "BANKNIFTY26FEB58500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15383042,
+      "tradingsymbol": "BANKNIFTY26FEB58600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15383298,
+      "tradingsymbol": "BANKNIFTY26FEB58600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15383554,
+      "tradingsymbol": "BANKNIFTY26FEB58700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15383810,
+      "tradingsymbol": "BANKNIFTY26FEB58700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15384066,
+      "tradingsymbol": "BANKNIFTY26FEB58800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15408130,
+      "tradingsymbol": "BANKNIFTY26FEB58800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15411458,
+      "tradingsymbol": "BANKNIFTY26FEB58900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15412994,
+      "tradingsymbol": "BANKNIFTY26FEB58900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 58900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15413250,
+      "tradingsymbol": "BANKNIFTY26FEB59000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15413506,
+      "tradingsymbol": "BANKNIFTY26FEB59000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15413762,
+      "tradingsymbol": "BANKNIFTY26FEB59100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15414018,
+      "tradingsymbol": "BANKNIFTY26FEB59100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15414274,
+      "tradingsymbol": "BANKNIFTY26FEB59200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15414530,
+      "tradingsymbol": "BANKNIFTY26FEB59200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15415554,
+      "tradingsymbol": "BANKNIFTY26FEB59300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15417346,
+      "tradingsymbol": "BANKNIFTY26FEB59300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15417602,
+      "tradingsymbol": "BANKNIFTY26FEB59400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15418370,
+      "tradingsymbol": "BANKNIFTY26FEB59400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15418626,
+      "tradingsymbol": "BANKNIFTY26FEB59500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15418882,
+      "tradingsymbol": "BANKNIFTY26FEB59500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15419650,
+      "tradingsymbol": "BANKNIFTY26FEB59600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15419906,
+      "tradingsymbol": "BANKNIFTY26FEB59600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15420674,
+      "tradingsymbol": "BANKNIFTY26FEB59700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15420930,
+      "tradingsymbol": "BANKNIFTY26FEB59700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15421186,
+      "tradingsymbol": "BANKNIFTY26FEB59800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15421442,
+      "tradingsymbol": "BANKNIFTY26FEB59800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15421698,
+      "tradingsymbol": "BANKNIFTY26FEB59900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15421954,
+      "tradingsymbol": "BANKNIFTY26FEB59900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 59900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15422210,
+      "tradingsymbol": "BANKNIFTY26FEB60000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15422466,
+      "tradingsymbol": "BANKNIFTY26FEB60000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15422722,
+      "tradingsymbol": "BANKNIFTY26FEB60100CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60100.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15422978,
+      "tradingsymbol": "BANKNIFTY26FEB60100PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60100.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15423234,
+      "tradingsymbol": "BANKNIFTY26FEB60200CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60200.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15423490,
+      "tradingsymbol": "BANKNIFTY26FEB60200PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60200.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15423746,
+      "tradingsymbol": "BANKNIFTY26FEB60300CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60300.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15424002,
+      "tradingsymbol": "BANKNIFTY26FEB60300PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60300.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15424258,
+      "tradingsymbol": "BANKNIFTY26FEB60400CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60400.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15424514,
+      "tradingsymbol": "BANKNIFTY26FEB60400PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60400.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15424770,
+      "tradingsymbol": "BANKNIFTY26FEB60500CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60500.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15425026,
+      "tradingsymbol": "BANKNIFTY26FEB60500PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60500.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15425282,
+      "tradingsymbol": "BANKNIFTY26FEB60600CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60600.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15425538,
+      "tradingsymbol": "BANKNIFTY26FEB60600PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60600.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15425794,
+      "tradingsymbol": "BANKNIFTY26FEB60700CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60700.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15426050,
+      "tradingsymbol": "BANKNIFTY26FEB60700PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60700.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15427074,
+      "tradingsymbol": "BANKNIFTY26FEB60800CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60800.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15427330,
+      "tradingsymbol": "BANKNIFTY26FEB60800PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60800.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15427842,
+      "tradingsymbol": "BANKNIFTY26FEB60900CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60900.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15428354,
+      "tradingsymbol": "BANKNIFTY26FEB60900PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 60900.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15428610,
+      "tradingsymbol": "BANKNIFTY26FEB61000CE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 61000.0,
+      "instrument_type": "CE",
+      "lot_size": 30
+    },
+    {
+      "instrument_token": 15428866,
+      "tradingsymbol": "BANKNIFTY26FEB61000PE",
+      "underlying": "BANKNIFTY",
+      "expiry": "2026-02-24",
+      "strike": 61000.0,
+      "instrument_type": "PE",
+      "lot_size": 30
+    }
+  ],
+  "missing": {}
+}

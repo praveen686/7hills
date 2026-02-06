@@ -1,0 +1,35 @@
+[package]
+name = "quantlaxmi-india"
+version = "0.1.0"
+edition = "2024"
+description = "QuantLaxmi India - Indian F&O Trading (NSE/BSE via Zerodha)"
+
+[[bin]]
+name = "quantlaxmi-india"
+path = "src/main.rs"
+
+[[bin]]
+name = "paper-tui"
+path = "src/bin/paper_tui.rs"
+
+[[bin]]
+name = "sanos-tui"
+path = "src/bin/sanos_tui.rs"
+
+[dependencies]
+# India runner library (brings all India-specific deps)
+quantlaxmi-runner-india = { path = "../../crates/quantlaxmi-runner-india" }
+
+# Paper trading core (for PaperState)
+quantlaxmi-paper = { path = "../../crates/quantlaxmi-paper" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# TUI dependencies
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+chrono = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }

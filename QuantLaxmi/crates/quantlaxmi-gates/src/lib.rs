@@ -1,0 +1,295 @@
+//! # QuantLaxmi Gates
+//!
+//! Production gates for validating trading system integrity across the pipeline.
+//!
+//! ## Gate Hierarchy
+//! - **G0 DataTruth**: Validate capture data integrity
+//! - **G1 ReplayParity**: Ensure deterministic replay matches live
+//! - **G2 BacktestCorrectness**: Validate backtest assumptions
+//! - **G3 Robustness**: Stress testing and edge cases
+//! - **G4 Deployability**: Pre-production readiness checks
+//!
+//! ## Usage
+//! ```ignore
+//! use quantlaxmi_gates::{G0DataTruth, G4Deployability, GateResult};
+//!
+//! // Validate capture data
+//! let g0 = G0DataTruth::new(config);
+//! let result = g0.validate_session(&session_dir)?;
+//!
+//! // Pre-deployment checks
+//! let g4 = G4Deployability::new(config);
+//! let result = g4.validate(&deployment_config)?;
+//! ```
+
+pub mod admission;
+pub mod capital_allocation;
+pub mod capital_buckets;
+pub mod capital_eligibility;
+pub mod execution_budget;
+pub mod execution_session;
+pub mod g0_data_truth;
+pub mod g1_replay_parity;
+pub mod g2_backtest_correctness;
+pub mod g3_robustness;
+pub mod g4_admission_determinism;
+pub mod g4_deployability;
+pub mod g5_order_intent_determinism;
+pub mod g6_execution_fill_determinism;
+pub mod g7_position_determinism;
+pub mod intent_shaping;
+pub mod mtm_drawdown;
+pub mod order_permission;
+pub mod portfolio_selector;
+pub mod position_keeper;
+pub mod promotion;
+pub mod promotion_pipeline;
+pub mod promotion_resolver;
+pub mod risk_exposure;
+pub mod signal_gates;
+pub mod signals_manifest;
+pub mod strategies_manifest;
+pub mod strategy_admission_engine;
+
+pub use admission::{
+    AdmissionContext, InternalSnapshot, SignalAdmissionController, VendorSnapshot,
+};
+pub use capital_allocation::{
+    ALLOCATION_PLAN_SCHEMA, AllocationCheck, AllocationDecision, AllocationError, AllocationMode,
+    AllocationPlan, AllocationPolicy, Allocator, PlanId, RebalancePolicy, SkipReason,
+    StrategyAllocation, validate_plan,
+};
+pub use capital_buckets::{
+    BUCKET_SCHEMA_VERSION, BucketBindingDecision, BucketConstraints, BucketEligibilityBinding,
+    BucketError, BucketId, BucketRegistry, BucketSnapshot, CapitalBucket, Currency, FixedPoint,
+    RiskClass, SnapshotId, StrategyId, Symbol,
+};
+pub use capital_eligibility::{
+    CapitalConstraints as EligibilityConstraints, CapitalEligibility, ConditionType,
+    ELIGIBILITY_DECISION_SCHEMA, EligibilityCheck, EligibilityCondition, EligibilityDecision,
+    EligibilityPolicy, EligibilityStatus, EligibilityValidator, StrategyMetrics, TimeWindow, Venue,
+};
+pub use execution_budget::{
+    BudgetDelta, BudgetError, BudgetId, BudgetManager, BudgetPolicy, BudgetSnapshot, BudgetStatus,
+    DeltaId, DeltaType, EXECUTION_BUDGET_SCHEMA, ExecutionBudget, OrderCheckResult,
+    OrderConstraints, RateLimitTracker,
+};
+pub use execution_session::{
+    CircuitBreakerType, EMERGENCY_FLATTEN_SCHEMA_VERSION, EXECUTION_SESSION_SCHEMA_VERSION,
+    EmergencyFlattenRequest, EmergencyFlattenResult, FlattenOutcome, FlattenRequestId,
+    FlattenResultId, FlattenScope, KILL_SWITCH_SCHEMA_VERSION, KillSwitchEvent, KillSwitchEventId,
+    KillSwitchReason, KillSwitchRegistry, KillSwitchScope, MANUAL_OVERRIDE_SCHEMA_VERSION,
+    ManualOverrideEvent, OverrideError, OverrideId, OverridePolicy, OverrideType,
+    SessionController, SessionState, SessionStatusSummary, SessionTransitionEvent,
+    SessionTransitionReason, TransitionId,
+};
+pub use g0_data_truth::{G0Config, G0DataTruth};
+pub use g1_replay_parity::{G1Config, G1ReplayParity};
+pub use g2_backtest_correctness::{G2BacktestCorrectness, G2Config};
+pub use g3_robustness::{G3Config, G3Robustness, SystemConfig};
+pub use g4_admission_determinism::{
+    G4AdmissionDeterminismGate, G4DecisionKey, G4Mismatch, G4MismatchKind, G4Result,
+};
+pub use g4_deployability::{G4Config, G4Deployability};
+pub use g5_order_intent_determinism::{
+    G5Mismatch, G5MismatchKind, G5OrderIntentDeterminismGate, G5OrderIntentKey, G5Result,
+};
+pub use g6_execution_fill_determinism::{
+    G6ExecutionFillDeterminismGate, G6ExecutionFillKey, G6Mismatch, G6MismatchKind, G6Result,
+};
+pub use g7_position_determinism::{
+    G7Mismatch, G7MismatchKind, G7PositionDeterminismGate, G7PositionUpdateKey, G7Result,
+};
+pub use intent_shaping::{
+    BlockReason, CapReason, INTENT_TRANSFORM_SCHEMA_VERSION, IntentShaper, IntentType,
+    ModeRestrictReason, OrderIntentTransform, SHAPING_POLICY_SCHEMA_VERSION, ShapingPolicy,
+    TransformAction, TransformId,
+};
+pub use mtm_drawdown::{
+    DRAWDOWN_SNAPSHOT_SCHEMA_VERSION, DrawdownSnapshot, DrawdownSnapshotId,
+    EQUITY_POLICY_SCHEMA_VERSION, EquityPolicy, EquityViolationType, MTM_SNAPSHOT_SCHEMA_VERSION,
+    MtmEvaluator, MtmMetrics, MtmSnapshot, MtmSnapshotId, PositionValuation, PricePoint,
+    PriceSource,
+};
+pub use order_permission::{
+    OrderIntentRef, OrderPermission, OrderPermissionGate, OrderRefuseReason, OrderSide, OrderType,
+};
+pub use portfolio_selector::{
+    BucketSelectionResult, IntentId, OrderingRule, PORTFOLIO_INTENT_SCHEMA, PortfolioIntent,
+    PortfolioPolicy, PortfolioRejection, PortfolioSelectionResult, PortfolioSelector,
+    StrategyIntent, StrategyOrderingMetrics,
+};
+pub use position_keeper::{
+    POSITION_KEEPER_SCHEMA_VERSION, PortfolioLedger, PortfolioSnapshot, PositionError,
+    PositionKeeper, PositionSnapshot, PositionState, SnapshotId as PositionSnapshotId,
+    venue_to_position_venue,
+};
+pub use promotion::{
+    PROMOTION_DECISION_SCHEMA, PaperEvidence, PromotionCheck, PromotionDecision, PromotionPolicy,
+    PromotionRequest, PromotionSource, PromotionValidator,
+};
+pub use promotion_pipeline::{
+    GATES_SUMMARY_SCHEMA, GateOutcome, GatesSummary, PROMOTION_RECORD_SCHEMA, PromotionRecord,
+    PromotionRecordBuilder, TOOL_VERSION, g0_output_path, g1_output_path, g2_output_path,
+    gates_dir, gates_summary_path, get_git_branch, get_git_clean, get_git_commit, get_hostname,
+    promotion_dir, promotion_record_path, segment_summary_path, session_wal_path, sha256_file,
+    sha256_hex,
+};
+pub use promotion_resolver::{PromotionCacheEntry, PromotionResolver, PromotionStatus};
+pub use risk_exposure::{
+    BudgetView, ExposureMetrics, RISK_DECISION_SCHEMA_VERSION, RISK_POLICY_SCHEMA_VERSION,
+    RISK_SNAPSHOT_SCHEMA_VERSION, RiskDecision, RiskDecisionId, RiskDecisionScope,
+    RiskDecisionStatus, RiskError, RiskEvaluator, RiskPolicy, RiskSnapshot, RiskSnapshotId,
+    ViolationType, compute_notional, normalize_notional,
+};
+pub use signal_gates::{
+    DecisionFingerprint, G0Result, G0SchemaGate, G1DecisionKey, G1DeterminismGate, G1MismatchKind,
+    G1Result, G1Source, G2DataIntegrityGate, G2Result, G3ExecutionContractGate, G3Result,
+    G3Violation, SignalGatesResult, check_names,
+};
+pub use strategies_manifest::{
+    ExecutionClass, STRATEGIES_MANIFEST_SCHEMA_VERSION, StrategiesManifest,
+    StrategiesManifestError, StrategyDefaults, StrategySpec,
+};
+pub use strategy_admission_engine::{
+    AdmissionVerdict, StrategyAdmissionEngine, StrategyAdmissionEngineConfig,
+    StrategyAdmissionEngineError,
+};
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+/// Gate validation result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GateResult {
+    /// Gate identifier (G0, G1, G2, G3, G4)
+    pub gate: String,
+    /// Overall pass/fail
+    pub passed: bool,
+    /// Timestamp of validation
+    pub timestamp: DateTime<Utc>,
+    /// Individual check results
+    pub checks: Vec<CheckResult>,
+    /// Summary message
+    pub summary: String,
+    /// Validation duration in milliseconds
+    pub duration_ms: u64,
+}
+
+impl GateResult {
+    /// Create a new gate result.
+    pub fn new(gate: impl Into<String>) -> Self {
+        Self {
+            gate: gate.into(),
+            passed: true,
+            timestamp: Utc::now(),
+            checks: Vec::new(),
+            summary: String::new(),
+            duration_ms: 0,
+        }
+    }
+
+    /// Add a check result.
+    pub fn add_check(&mut self, check: CheckResult) {
+        if !check.passed {
+            self.passed = false;
+        }
+        self.checks.push(check);
+    }
+
+    /// Set the summary message.
+    pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
+        self.summary = summary.into();
+        self
+    }
+
+    /// Set the duration.
+    pub fn with_duration(mut self, duration_ms: u64) -> Self {
+        self.duration_ms = duration_ms;
+        self
+    }
+
+    /// Count passed checks.
+    pub fn passed_count(&self) -> usize {
+        self.checks.iter().filter(|c| c.passed).count()
+    }
+
+    /// Count failed checks.
+    pub fn failed_count(&self) -> usize {
+        self.checks.iter().filter(|c| !c.passed).count()
+    }
+}
+
+/// Individual check result within a gate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckResult {
+    /// Check name
+    pub name: String,
+    /// Pass/fail
+    pub passed: bool,
+    /// Details/reason
+    pub message: String,
+    /// Optional metrics
+    pub metrics: Option<serde_json::Value>,
+}
+
+impl CheckResult {
+    /// Create a passing check.
+    pub fn pass(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            passed: true,
+            message: message.into(),
+            metrics: None,
+        }
+    }
+
+    /// Create a failing check.
+    pub fn fail(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            passed: false,
+            message: message.into(),
+            metrics: None,
+        }
+    }
+
+    /// Create a warning check (passes but with warning message).
+    /// Warnings are treated as passing but should be reviewed.
+    pub fn warn(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            passed: true, // Warnings pass but message indicates concern
+            message: format!("WARNING: {}", message.into()),
+            metrics: None,
+        }
+    }
+
+    /// Add metrics to the check.
+    pub fn with_metrics(mut self, metrics: serde_json::Value) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+}
+
+/// Gate validation error.
+#[derive(Debug, thiserror::Error)]
+pub enum GateError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("IO error: {0}")]
+    IoError(String),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
+
+    #[error("Missing file: {0}")]
+    MissingFile(String),
+
+    #[error("Configuration error: {0}")]
+    Config(String),
+}

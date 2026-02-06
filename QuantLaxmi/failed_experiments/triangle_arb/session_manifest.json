@@ -1,0 +1,138 @@
+{
+  "session_id": "f56aea33-fe43-4811-8cbb-d2e77dc22a37",
+  "watermark": "QuantLaxmi-crypto-session-20260203-182151-f56aea33",
+  "family": "crypto",
+  "profile": "certified",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "ETHBTC",
+    "BNBBTC",
+    "SOLBTC"
+  ],
+  "captures": [
+    {
+      "symbol": "BTCUSDT",
+      "manifest_path": "BTCUSDT/manifest.json",
+      "depth_file": "BTCUSDT/depth.jsonl",
+      "depth_hash": "4e4b6faad6205133ea27baa52263781f2ab8ea97a0ab41e057f78f0853ef643d",
+      "trades_file": "BTCUSDT/trades.jsonl",
+      "trades_hash": "639888d609761b666568bd409f988f68a5e9de14d8ab2b0c8cfa668853c79fb8",
+      "events_written": 287997,
+      "trades_written": 332714,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "ETHUSDT",
+      "manifest_path": "ETHUSDT/manifest.json",
+      "depth_file": "ETHUSDT/depth.jsonl",
+      "depth_hash": "cccc6088600618e1a63d67cd6367d5462bc13b7af7fd1dd3be70a032c39d086e",
+      "trades_file": "ETHUSDT/trades.jsonl",
+      "trades_hash": "2dd47859ac259922c46e70a73bb380eb7e1c3cfe98ac1c375aa535d71f7e3f5c",
+      "events_written": 287984,
+      "trades_written": 450739,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "BNBUSDT",
+      "manifest_path": "BNBUSDT/manifest.json",
+      "depth_file": "BNBUSDT/depth.jsonl",
+      "depth_hash": "2e0aa554eb6215e8f81923a491ac73272cd5f7eb51194252053700b6ac66365c",
+      "trades_file": "BNBUSDT/trades.jsonl",
+      "trades_hash": "3863d7f092ff6068638e15e308810d9717f3753ba8e6116950491beb203392f0",
+      "events_written": 255180,
+      "trades_written": 122080,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "SOLUSDT",
+      "manifest_path": "SOLUSDT/manifest.json",
+      "depth_file": "SOLUSDT/depth.jsonl",
+      "depth_hash": "a53245d781ef69090d65d6ce08329b2f2ca39e18de579411a67d801e5ac39028",
+      "trades_file": "SOLUSDT/trades.jsonl",
+      "trades_hash": "9530e2dfd79190dde5d88b1eabaeb1118e1ca5771289e8f6bb480185b38fc280",
+      "events_written": 250486,
+      "trades_written": 112482,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "ETHBTC",
+      "manifest_path": "ETHBTC/manifest.json",
+      "depth_file": "ETHBTC/depth.jsonl",
+      "depth_hash": "03bf6f352d3735290a80082f1f6b712c20b19c2f4663cb00819678f9b1ff9967",
+      "trades_file": "ETHBTC/trades.jsonl",
+      "trades_hash": "d8cc726c0901b7bec69fc837a47c45ca6f3f34ddc2a55df042533227d5e06e99",
+      "events_written": 163148,
+      "trades_written": 20597,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "BNBBTC",
+      "manifest_path": "BNBBTC/manifest.json",
+      "depth_file": "BNBBTC/depth.jsonl",
+      "depth_hash": "dc6656a6b0b22c7c407d296e18f150f29a9ea31b2003a8174f0b97f6c63b6005",
+      "trades_file": "BNBBTC/trades.jsonl",
+      "trades_hash": "b04a6279589aa5dd09bbfa74ddc2364d87d022775a05349c86b928fbc11ebd97",
+      "events_written": 162386,
+      "trades_written": 14904,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "SOLBTC",
+      "manifest_path": "SOLBTC/manifest.json",
+      "depth_file": "SOLBTC/depth.jsonl",
+      "depth_hash": "2ec9772740add7bfdf6c845b6ff564a9d048089c3fd8982254004d2b206ffa38",
+      "trades_file": "SOLBTC/trades.jsonl",
+      "trades_hash": "f5c217fe5eeae1faa782f28edf04ac9c55a91c6b705fbadda2817610e2abe733",
+      "events_written": 150087,
+      "trades_written": 9936,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    }
+  ],
+  "determinism": {
+    "certified": true,
+    "all_symbols_clean": true,
+    "symbol_hashes": {
+      "SOLUSDT": {
+        "depth_hash": "a53245d781ef69090d65d6ce08329b2f2ca39e18de579411a67d801e5ac39028",
+        "trades_hash": "9530e2dfd79190dde5d88b1eabaeb1118e1ca5771289e8f6bb480185b38fc280"
+      },
+      "BNBBTC": {
+        "depth_hash": "dc6656a6b0b22c7c407d296e18f150f29a9ea31b2003a8174f0b97f6c63b6005",
+        "trades_hash": "b04a6279589aa5dd09bbfa74ddc2364d87d022775a05349c86b928fbc11ebd97"
+      },
+      "ETHBTC": {
+        "depth_hash": "03bf6f352d3735290a80082f1f6b712c20b19c2f4663cb00819678f9b1ff9967",
+        "trades_hash": "d8cc726c0901b7bec69fc837a47c45ca6f3f34ddc2a55df042533227d5e06e99"
+      },
+      "SOLBTC": {
+        "depth_hash": "2ec9772740add7bfdf6c845b6ff564a9d048089c3fd8982254004d2b206ffa38",
+        "trades_hash": "f5c217fe5eeae1faa782f28edf04ac9c55a91c6b705fbadda2817610e2abe733"
+      },
+      "BTCUSDT": {
+        "depth_hash": "4e4b6faad6205133ea27baa52263781f2ab8ea97a0ab41e057f78f0853ef643d",
+        "trades_hash": "639888d609761b666568bd409f988f68a5e9de14d8ab2b0c8cfa668853c79fb8"
+      },
+      "ETHUSDT": {
+        "depth_hash": "cccc6088600618e1a63d67cd6367d5462bc13b7af7fd1dd3be70a032c39d086e",
+        "trades_hash": "2dd47859ac259922c46e70a73bb380eb7e1c3cfe98ac1c375aa535d71f7e3f5c"
+      },
+      "BNBUSDT": {
+        "depth_hash": "2e0aa554eb6215e8f81923a491ac73272cd5f7eb51194252053700b6ac66365c",
+        "trades_hash": "3863d7f092ff6068638e15e308810d9717f3753ba8e6116950491beb203392f0"
+      }
+    }
+  },
+  "started_at": "2026-02-03T18:21:51.788325528Z",
+  "finished_at": "2026-02-03T22:21:56.091626503Z",
+  "duration_secs": 14404.303
+}

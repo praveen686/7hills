@@ -1,0 +1,19 @@
+[package]
+name = "quantlaxmi-data"
+version = "0.1.0"
+edition = "2024"
+description = "Market data processing for QuantLaxmi (tick aggregation, orderbook, VPIN)"
+publish = false
+
+[dependencies]
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-wal = { path = "../quantlaxmi-wal" }
+tokio = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+ordered-float = "4.2"
+parquet = "53.0"
+arrow = "53.0"

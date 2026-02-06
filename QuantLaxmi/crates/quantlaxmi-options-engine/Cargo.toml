@@ -1,0 +1,77 @@
+[package]
+name = "quantlaxmi-options-engine"
+version = "0.1.0"
+edition = "2021"
+description = "World-class options trading engine with Greeks, volatility surface, and multi-leg strategies"
+
+[[bin]]
+name = "options-backtest"
+path = "src/bin/options_backtest.rs"
+
+[[bin]]
+name = "gate-comparison"
+path = "src/bin/gate_comparison.rs"
+
+[[bin]]
+name = "paper-trading"
+path = "src/bin/paper_trading.rs"
+
+[[bin]]
+name = "live-paper"
+path = "src/bin/live_paper.rs"
+
+[[bin]]
+name = "live-paper-tui"
+path = "src/bin/live_paper_tui.rs"
+
+[[bin]]
+name = "warmup-debug"
+path = "src/bin/warmup_debug.rs"
+
+[dependencies]
+# TUI (workspace versions for consistency)
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+# Signal handling
+ctrlc = "3.4"
+
+# CLI
+clap = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Math and statistics
+statrs = "0.17"
+nalgebra = "0.33"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Hashing for determinism
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Internal dependencies
+quantlaxmi-regime = { path = "../quantlaxmi-regime" }
+quantlaxmi-connectors-zerodha = { path = "../quantlaxmi-connectors-zerodha" }
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+
+# Async runtime
+tokio = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []

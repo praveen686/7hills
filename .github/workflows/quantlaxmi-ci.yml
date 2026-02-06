@@ -1,0 +1,219 @@
+name: QuantLaxmi CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ============================================================
+  # Lightweight isolation checks (no Rust needed, runs fast)
+  # ============================================================
+  isolation:
+    name: Isolation & Policy Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert no Kubera crates exist
+        working-directory: QuantLaxmi
+        run: |
+          if ls crates/kubera-* >/dev/null 2>&1; then
+            echo "ERROR: Kubera crates still present under QuantLaxmi/crates"
+            ls -d crates/kubera-* || true
+            exit 1
+          fi
+          echo "✓ No Kubera crates present"
+
+      - name: Assert no Kubera deps or imports (QuantLaxmi scope)
+        working-directory: QuantLaxmi
+        run: |
+          if grep -RIn --include='Cargo.toml' -E '^\s*kubera-' crates apps; then exit 1; fi
+          if grep -RIn --include='*.rs' -E 'kubera_(models|core|data|risk|executor|options|sbe)::' crates apps; then exit 1; fi
+          echo "✓ No Kubera deps/imports in QuantLaxmi crates/apps"
+
+      - name: Assert no kubera_sdk in Python (renamed to quantlaxmi_sdk)
+        working-directory: QuantLaxmi
+        run: |
+          if [ -d "python/kubera_sdk" ]; then
+            echo "ERROR: python/kubera_sdk still exists (should be quantlaxmi_sdk)"
+            exit 1
+          fi
+          if grep -RIn --include='*.py' 'from kubera_sdk\|import kubera_sdk' python/; then
+            echo "ERROR: Python code still imports kubera_sdk"
+            exit 1
+          fi
+          echo "✓ No kubera_sdk in Python"
+
+      - name: Kubera Zero Policy (consolidated gate)
+        working-directory: QuantLaxmi
+        run: |
+          echo "Checking Kubera Zero Policy..."
+          VIOLATIONS=$(grep -rIn --include='*.rs' --include='*.toml' --include='*.py' -i 'kubera' \
+            crates apps python scripts Cargo.toml README.md 2>/dev/null \
+            | grep -v 'quantlaxmi_sdk.*deprecated\|quantlaxmi_sdk.*DeprecationWarning\|quantlaxmi_sdk.*KuberaStrategy\|quantlaxmi_sdk.*Historical\|quantlaxmi_sdk.*decommission\|check_isolation.sh' \
+            || true)
+          if [ -n "$VIOLATIONS" ]; then
+            echo "ERROR: Kubera Zero Policy violation in source:"
+            echo "$VIOLATIONS"
+            exit 1
+          fi
+          OP_VIOLATIONS=$(grep -rIn -i 'kubera' Dockerfile* contracts/ infra/ 2>/dev/null \
+            | grep -v 'patches/' \
+            || true)
+          if [ -n "$OP_VIOLATIONS" ]; then
+            echo "ERROR: Kubera Zero Policy violation in operational artifacts:"
+            echo "$OP_VIOLATIONS"
+            exit 1
+          fi
+          echo "✓ Kubera Zero Policy: no violations"
+
+      - name: Enforce single CI authority (migration policy)
+        run: |
+          if [ -d "QuantKubera1/.github" ]; then
+            echo "ERROR: Legacy CI detected at QuantKubera1/.github"
+            exit 1
+          fi
+          if [ -d "QuantLaxmi/.github" ]; then
+            echo "ERROR: Nested CI detected at QuantLaxmi/.github"
+            exit 1
+          fi
+          echo "✓ CI authority check passed"
+
+      - name: Verify fixtures exist + are valid JSON
+        working-directory: QuantLaxmi
+        run: |
+          test -f tests/fixtures/india/sample_quotes.jsonl
+          test -f tests/fixtures/crypto/sample_quotes.jsonl
+          head -1 tests/fixtures/india/sample_quotes.jsonl | python3 -c "import sys,json; json.load(sys.stdin)"
+          head -1 tests/fixtures/crypto/sample_quotes.jsonl | python3 -c "import sys,json; json.load(sys.stdin)"
+
+      - name: Dependency isolation check
+        working-directory: QuantLaxmi
+        run: bash scripts/check_isolation.sh
+
+  # ============================================================
+  # Formatting check (fast, parallel with other jobs)
+  # ============================================================
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        working-directory: QuantLaxmi
+        run: |
+          cargo fmt -p quantlaxmi-runner-common \
+                    -p quantlaxmi-runner-india \
+                    -p quantlaxmi-runner-crypto \
+                    -p quantlaxmi-connectors-zerodha \
+                    -p quantlaxmi-connectors-binance \
+                    -- --check
+
+  # ============================================================
+  # Clippy (parallel with tests)
+  # ============================================================
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "QuantLaxmi -> target"
+          cache-on-failure: true
+      - name: Clippy (strict)
+        working-directory: QuantLaxmi
+        run: |
+          cargo clippy -p quantlaxmi-runner-common \
+                       -p quantlaxmi-runner-india \
+                       -p quantlaxmi-runner-crypto \
+                       -p quantlaxmi-connectors-zerodha \
+                       -p quantlaxmi-connectors-binance \
+                       -- -D warnings
+
+  # ============================================================
+  # Tests (matrix strategy for parallelism)
+  # ============================================================
+  test:
+    name: Test (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - runner-common
+          - runner-india
+          - runner-crypto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "QuantLaxmi -> target"
+          cache-on-failure: true
+          shared-key: "test-${{ matrix.package }}"
+      - uses: taiki-e/install-action@nextest
+      - name: Run tests
+        working-directory: QuantLaxmi
+        run: cargo nextest run -p quantlaxmi-${{ matrix.package }} --lib
+
+  # ============================================================
+  # Release build (only on main branch, after tests pass)
+  # ============================================================
+  build-release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    needs: [isolation, fmt, clippy, test]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "QuantLaxmi -> target"
+          cache-on-failure: true
+          shared-key: "release"
+      - name: Build release binaries
+        working-directory: QuantLaxmi
+        run: |
+          cargo build --release -p quantlaxmi-india -p quantlaxmi-crypto
+      - name: Verify CLI commands
+        working-directory: QuantLaxmi
+        run: |
+          ./target/release/quantlaxmi-india --help | grep -q "discover-zerodha"
+          ./target/release/quantlaxmi-india --help | grep -q "capture-session"
+          ./target/release/quantlaxmi-india --help | grep -q "backtest-kitesim"
+          ./target/release/quantlaxmi-crypto --help | grep -q "capture-binance"
+          ./target/release/quantlaxmi-crypto --help | grep -q "capture-sbe-depth"
+          ./target/release/quantlaxmi-crypto --help | grep -q "exchange-info"
+
+  # ============================================================
+  # PR validation build (debug only, faster feedback)
+  # ============================================================
+  build-pr:
+    name: Build (PR Check)
+    runs-on: ubuntu-latest
+    needs: [isolation, fmt]
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "QuantLaxmi -> target"
+          cache-on-failure: true
+      - name: Build debug
+        working-directory: QuantLaxmi
+        run: cargo build -p quantlaxmi-india -p quantlaxmi-crypto

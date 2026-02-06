@@ -1,0 +1,16 @@
+[package]
+name = "quantlaxmi-paper"
+version = "0.1.0"
+edition = "2024"
+description = "Shared paper trading spine (venue-agnostic) for QuantLaxmi"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+quantlaxmi-core = { path = "../quantlaxmi-core" }

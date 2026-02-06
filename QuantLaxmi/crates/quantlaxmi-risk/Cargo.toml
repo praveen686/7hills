@@ -1,0 +1,23 @@
+[package]
+name = "quantlaxmi-risk"
+version = "0.1.0"
+edition = "2024"
+description = "Pre-trade risk management engine for QuantLaxmi"
+publish = false
+
+[dependencies]
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+serde = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+metrics = { workspace = true }
+
+[dev-dependencies]
+uuid = { workspace = true }
+chrono = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "bench_risk"
+harness = false

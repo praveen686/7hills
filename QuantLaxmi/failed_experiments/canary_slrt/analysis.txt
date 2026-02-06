@@ -1,0 +1,63 @@
+SLRT Canary — Failed Experiment Report
+=======================================
+Date: 2026-02-03
+
+Objective
+---------
+Test whether the SLRT signal (regime classification + imbalance + FTI)
+predicts short-term BTC price direction well enough to be profitable
+under taker fees (0.1% per side = ~20 bps round trip).
+
+Configuration
+-------------
+Canary mode: permissive gates to maximize trade count.
+  - Allowed regimes: R0, R1, R2, R3 (all)
+  - Confidence min: 0.55
+  - Toxicity max: 1.00
+  - Imbalance min: 0.05
+  - Cooldown: 0s
+  - No FTI confirmation required
+  - Qty: 0.001 BTC
+
+Three runs with different exit configs:
+
+Run A (slrt_20260203_165446)
+  TP/SL: 8 bps, time_stop: 60s
+  Result: 25 trades, gross -$0.28, net -$4.11
+  Issue: TP < round-trip fees. Mathematically impossible to profit.
+
+Run B (slrt_20260203_171619)
+  TP/SL: 30 bps, time_stop: 60s
+  Result: 70 trades, gross -$0.85, net -$11.39
+  Issue: 91% TIME exits. Price doesn't move 30 bps in 60s.
+
+Run C (slrt_20260203_184250)
+  TP/SL: 40 bps, time_stop: 300s
+  Result: 117 trades, gross -$2.66, net -$20.37
+  Issue: 73% TIME exits. Gross PnL is negative.
+
+Verdict
+-------
+GROSS PnL IS NEGATIVE across all configurations.
+
+This means the SLRT signal does not predict direction.
+It's not a fee problem or an exit problem — the signal itself has no edge.
+
+The clean fork:
+  "If gross is negative, stop arguing about exits and move to alpha work."
+
+What Was Proven
+---------------
++ Engineering pipeline is correct (trades, exits, logging, summaries)
++ Fee analysis is sound (break-even ~20 bps for taker)
++ Falsified: "SLRT signal has short-term directional edge on BTC"
+
+Files
+-----
+slrt_20260203_165446_trades.jsonl    — Run A (25 trades)
+slrt_20260203_165446_run_config.json — Run A config
+slrt_20260203_171619_trades.jsonl    — Run B (70 trades)
+slrt_20260203_171619_run_config.json — Run B config
+slrt_20260203_184250_trades.jsonl    — Run C (117 trades)
+slrt_20260203_184250_run_config.json — Run C config
+canary_300s_40bps_20260203.zip       — Run C archive
