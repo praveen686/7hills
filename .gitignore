@@ -1,13 +1,84 @@
-# Root gitignore — main rules live in qlx/.gitignore
-# This exists so VS Code stops scanning the venv and data dirs.
+# === Build ===
+target/
+dist/
+build/
 
-qlx/qlxr/qlxr_common/qlxr_env/
-qlx/qlxr/qlxr_common/qlxr_vault/
-qlx/qlxr/qlxr_india/data/
-qlx/qlxr/qlxr_crypto/data/
-qlx/qlxr/qlxr_common/qlxr_data/
-**/__pycache__/
-**/.pytest_cache/
-**/.claude/
+# === Python ===
+__pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+qlxr_env/
+.pytest_cache/
+.coverage
+
+# === Node ===
+node_modules/
+
+# === Data & large files ===
+*.parquet
+*.arrow
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.zip
+*.tar.gz
+*.7z
+*.csv.gz
+*.jsonl.gz
+*.feather
+*.wal
+*.jsonl
+!tests/fixtures/**/*.jsonl
+!tests/fixtures/**/*.parquet
+data/
+
+# === Secrets & sessions ===
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+*.token
+*.session
+*access_token.txt
+*credentials*
+*secret*
+credentials.json
+secrets.toml
+tokens.txt
+qlxr_vault/
+
+# === IDE / OS ===
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+*~
+*.iml
+.DS_Store
+Thumbs.db
+
+# === Logs ===
 *.log
+logs/
+
+# === Rust ===
+Cargo.lock
+*.rlib
+*.rmeta
+*.d
+
+# === Misc ===
+runs/
+output/
+sanos_*.json
+sanos_temporal_*/
+research/*.pdf
+memorysummary.txt
+*.pdf
