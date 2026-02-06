@@ -1,0 +1,13 @@
+# Root gitignore — main rules live in qlx/.gitignore
+# This exists so VS Code stops scanning the venv and data dirs.
+
+qlx/qlxr/qlxr_common/qlxr_env/
+qlx/qlxr/qlxr_common/qlxr_vault/
+qlx/qlxr/qlxr_india/data/
+qlx/qlxr/qlxr_crypto/data/
+qlx/qlxr/qlxr_common/qlxr_data/
+**/__pycache__/
+**/.pytest_cache/
+**/.claude/
+*.pyc
+*.log
