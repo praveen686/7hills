@@ -1,0 +1,84 @@
+# === Build ===
+target/
+dist/
+build/
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+qlxr_env/
+.pytest_cache/
+.coverage
+
+# === Node ===
+node_modules/
+
+# === Data & large files ===
+*.parquet
+*.arrow
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.zip
+*.tar.gz
+*.7z
+*.csv.gz
+*.jsonl.gz
+*.feather
+*.wal
+*.jsonl
+!tests/fixtures/**/*.jsonl
+!tests/fixtures/**/*.parquet
+data/
+
+# === Secrets & sessions ===
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+*.token
+*.session
+*access_token.txt
+*credentials*
+*secret*
+credentials.json
+secrets.toml
+tokens.txt
+qlxr_vault/
+
+# === IDE / OS ===
+.idea/
+.vscode/
+.claude/
+*.swp
+*.swo
+*~
+*.iml
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+*.log
+logs/
+
+# === Rust ===
+Cargo.lock
+*.rlib
+*.rmeta
+*.d
+
+# === Misc ===
+runs/
+output/
+sanos_*.json
+sanos_temporal_*/
+research/*.pdf
+memorysummary.txt
+*.pdf
