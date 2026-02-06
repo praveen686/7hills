@@ -88,16 +88,6 @@ class TestDayObs:
         assert obs.atm_iv == 0.14
         assert obs.sanos_ok is True
 
-    def test_rv_20d_default_nan(self):
-        obs = _make_day(date(2024, 6, 1))
-        assert math.isnan(obs.rv_20d)
-
-    def test_rv_20d_override(self):
-        obs = DayObs(
-            date=date(2024, 6, 1), spot=20000, atm_iv=0.14,
-            atm_var=0.001, forward=20050, sanos_ok=True, rv_20d=0.12,
-        )
-        assert obs.rv_20d == 0.12
 
 
 # ---------------------------------------------------------------------------
@@ -147,13 +137,13 @@ class TestBacktestResult:
 class TestRollingPercentile:
     def test_monotone_up(self):
         vals = [1.0, 2.0, 3.0, 4.0, 5.0]
-        ranks = rolling_percentile(vals, window=5, pctile=0.8)
+        ranks = rolling_percentile(vals, window=5, )
         # Each value is strictly the largest seen so far => rank = 1.0
         assert all(r == 1.0 for r in ranks)
 
     def test_monotone_down(self):
         vals = [5.0, 4.0, 3.0, 2.0, 1.0]
-        ranks = rolling_percentile(vals, window=5, pctile=0.8)
+        ranks = rolling_percentile(vals, window=5, )
         # First value alone => rank=1.0; subsequent values are smallest so far
         assert ranks[0] == 1.0
         for r in ranks[1:]:
@@ -161,33 +151,33 @@ class TestRollingPercentile:
 
     def test_constant_values(self):
         vals = [3.0] * 10
-        ranks = rolling_percentile(vals, window=5, pctile=0.8)
+        ranks = rolling_percentile(vals, window=5, )
         # All values equal: everyone <= v, so rank = 1.0
         assert all(r == 1.0 for r in ranks)
 
     def test_known_rank(self):
         # Window of exactly 5: [1,2,3,4,5]. Current=3 => 3 values <=3 => rank=3/5=0.6
         vals = [1.0, 2.0, 3.0, 4.0, 5.0]
-        ranks = rolling_percentile(vals, window=5, pctile=0.8)
+        ranks = rolling_percentile(vals, window=5, )
         # At index 2 (value=3), window is [1,2,3], 3 values <=3 => 3/3=1.0
         # At index 4 (value=5), window is [1,2,3,4,5], 5/5=1.0
         assert ranks[4] == 1.0
         # Check a non-trivial rank: for a window where value is not largest
         vals2 = [5.0, 1.0, 2.0, 3.0, 4.0]
-        ranks2 = rolling_percentile(vals2, window=5, pctile=0.8)
+        ranks2 = rolling_percentile(vals2, window=5, )
         # At index 4 (value=4, window=[5,1,2,3,4]): 4 values <=4 => 4/5=0.8
         assert ranks2[4] == pytest.approx(0.8)
 
     def test_window_smaller_than_series(self):
         vals = [10.0, 1.0, 2.0, 3.0, 4.0, 5.0]
-        ranks = rolling_percentile(vals, window=3, pctile=0.8)
+        ranks = rolling_percentile(vals, window=3, )
         # At index 3 (val=3), window is [1,2,3] => rank=3/3=1.0
         assert ranks[3] == 1.0
         # At index 1 (val=1), window is [10,1] => 1 value <=1 => 1/2=0.5
         assert ranks[1] == pytest.approx(0.5)
 
     def test_single_value(self):
-        ranks = rolling_percentile([42.0], window=10, pctile=0.5)
+        ranks = rolling_percentile([42.0], window=10, )
         assert ranks == [1.0]
 
 

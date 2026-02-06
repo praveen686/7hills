@@ -14,7 +14,13 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import (
+    get_delivery,
+    get_equity,
+    get_fii_dii,
+    get_futures_oi,
+    is_trading_day,
+)
 from apps.india_scanner.signals import (
     CompositeSignal,
     FIIFlowSignal,
@@ -25,6 +31,7 @@ from apps.india_scanner.signals import (
     compute_oi_signals,
 )
 from apps.india_scanner.universe import get_fno_symbols
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +62,7 @@ def _get_prev_trading_day(d: date) -> date:
 
 def run_daily_scan(
     target_date: date,
-    cache: BhavcopyCache | None = None,
+    store=None,
     top_n: int = 10,
     symbols: list[str] | None = None,
 ) -> list[CompositeSignal]:
@@ -64,8 +71,8 @@ def run_daily_scan(
     Loads historical data, computes all three signals, and returns
     top-N composite signals ranked by |score|.
     """
-    if cache is None:
-        cache = BhavcopyCache()
+    if store is None:
+        store = MarketDataStore()
 
     if symbols is None:
         symbols = get_fno_symbols()
@@ -89,17 +96,17 @@ def run_daily_scan(
 
     for d in trading_days:
         try:
-            equity_history[d] = cache.get_equity(d)
+            equity_history[d] = get_equity(store, d)
         except Exception as e:
             logger.debug("No equity data for %s: %s", d, e)
 
         try:
-            delivery_history[d] = cache.get_delivery(d)
+            delivery_history[d] = get_delivery(store, d)
         except Exception as e:
             logger.debug("No delivery data for %s: %s", d, e)
 
         try:
-            fii_dii_history[d] = cache.get_fii_dii(d)
+            fii_dii_history[d] = get_fii_dii(store, d)
         except Exception as e:
             logger.debug("No FII/DII data for %s: %s", d, e)
 
@@ -115,8 +122,8 @@ def run_daily_scan(
     prev_day = _get_prev_trading_day(target_date)
     oi_signals = {}
     try:
-        oi_today = cache.get_futures_oi(target_date)
-        oi_prev = cache.get_futures_oi(prev_day)
+        oi_today = get_futures_oi(store, target_date)
+        oi_prev = get_futures_oi(store, prev_day)
         eq_today = equity_history.get(target_date, pd.DataFrame())
         eq_prev = equity_history.get(prev_day, pd.DataFrame())
 

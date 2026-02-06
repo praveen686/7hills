@@ -1,0 +1,52 @@
+Date range: 2024-10-29 to 2026-02-06
+
+S2 Ramanujan Cycles Research (CAUSAL): 2024-10-29 to 2026-02-06
+  Symbol: NIFTY, max_period=64, top_k=3
+  316 available dates
+
+  20/316 dates (0.8s)
+  40/316 dates (1.7s)
+  60/316 dates (2.6s)
+  80/316 dates (3.5s)
+  100/316 dates (4.8s)
+  120/316 dates (6.1s)
+  140/316 dates (8.0s)
+  160/316 dates (9.8s)
+  180/316 dates (11.7s)
+  200/316 dates (13.4s)
+  220/316 dates (15.1s)
+  240/316 dates (16.8s)
+  260/316 dates (18.6s)
+  280/316 dates (20.2s)
+  300/316 dates (22.0s)
+
+  Processed 314 days in 23.6s
+
+======================================================================
+S2 RAMANUJAN CYCLES — NIFTY (CAUSAL)
+======================================================================
+
+  Dominant Period Distribution:
+    Period  30:   51 days (16.2%)
+    Period  12:   35 days (11.1%)
+    Period  24:   29 days (9.2%)
+    Period  42:   26 days (8.3%)
+    Period   6:   18 days (5.7%)
+    Period  60:   17 days (5.4%)
+    Period  36:   16 days (5.1%)
+    Period  10:   14 days (4.5%)
+    Period  20:   10 days (3.2%)
+    Period  18:   10 days (3.2%)
+
+  Period stability: 7.0% (1=always same, 0=changes every day)
+
+  Phase Backtest (causal — trades only in 2nd half of day):
+    Total trades:     1271
+    Win rate:         47.2%
+    Total P&L:        -4.650%
+    Avg daily P&L:    -0.0148%
+    Sharpe (ann.):    -1.11
+    Avg per cycle:    -0.0037%
+
+  Energy vs |return| correlation: 0.135 (p=0.0167)
+

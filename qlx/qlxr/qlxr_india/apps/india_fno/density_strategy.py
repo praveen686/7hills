@@ -47,7 +47,8 @@ from apps.india_fno.risk_neutral import (
     physical_skewness,
 )
 from apps.india_fno.sanos import SANOSResult, fit_sanos, prepare_nifty_chain
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import is_trading_day, get_fno
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -101,11 +102,11 @@ class DensityDayObs:
 
 
 # ---------------------------------------------------------------------------
-# Build daily series from bhavcopy
+# Build daily series from F&O data
 # ---------------------------------------------------------------------------
 
 def _calibrate_density(
-    cache: BhavcopyCache,
+    store,
     d: date,
     symbol: str,
 ) -> tuple[DensitySnapshot | None, SANOSResult | None, float, float]:
@@ -114,7 +115,9 @@ def _calibrate_density(
     Returns (snapshot, sanos_result, spot, atm_iv).
     """
     try:
-        fno = cache.get_fno(d)
+        fno = get_fno(store, d)
+        if fno.empty:
+            return None, None, 0.0, 0.0
     except Exception:
         return None, None, 0.0, 0.0
 
@@ -150,13 +153,13 @@ def _calibrate_density(
 
 
 def build_density_series(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
     symbol: str = "NIFTY",
     phys_window: int = DEFAULT_PHYS_WINDOW,
 ) -> list[DensityDayObs]:
-    """Build daily density-feature series from bhavcopy data.
+    """Build daily density-feature series from F&O data.
 
     For each trading day:
     1. Calibrate SANOS → density snapshot
@@ -165,6 +168,7 @@ def build_density_series(
     """
     series: list[DensityDayObs] = []
     spots: list[float] = []
+    spot_dates: list[date] = []
 
     prev_q: np.ndarray | None = None
     prev_dK: float = 0.0
@@ -177,19 +181,29 @@ def build_density_series(
             d += timedelta(days=1)
             continue
 
-        snap, result, spot, atm_iv = _calibrate_density(cache, d, symbol)
+        snap, result, spot, atm_iv = _calibrate_density(store, d, symbol)
 
         if snap is None or not snap.density_ok:
             d += timedelta(days=1)
             continue
 
         spots.append(spot)
+        spot_dates.append(d)
 
-        # Physical skewness from trailing log returns
+        # Physical skewness from trailing consecutive-day log returns
         phys_skew = 0.0
         if len(spots) > phys_window:
-            log_rets = np.diff(np.log(spots[-phys_window - 1:]))
-            phys_skew = physical_skewness(log_rets)
+            recent_spots = spots[-phys_window - 1:]
+            recent_dates = spot_dates[-phys_window - 1:]
+            # Only use returns between near-consecutive trading days
+            # (gap <= 4 calendar days covers weekends and single holidays)
+            log_rets = []
+            for j in range(1, len(recent_spots)):
+                gap = (recent_dates[j] - recent_dates[j - 1]).days
+                if gap <= 4:
+                    log_rets.append(math.log(recent_spots[j] / recent_spots[j - 1]))
+            if len(log_rets) >= phys_window // 2:
+                phys_skew = physical_skewness(np.array(log_rets))
 
         # KL divergence and entropy change vs yesterday
         K, q = extract_density(result, 0)
@@ -362,23 +376,34 @@ def run_density_backtest(
     n = len(series)
     cost_frac = cost_bps / 10_000
     trades: list[DensityTrade] = []
-    daily_pnl: list[float] = []
+    daily_pnl: list[float] = []  # ALL days from lookback onward
 
     in_trade = False
     entry_idx = 0
     n_signals = 0
+    pending_entry = False  # T+1 execution: signal at close, enter next day
 
     for i in range(lookback, n):
         # Percentile-rank the composite signal itself for thresholding
         sig_pctile = _rolling_percentile(signals, i, lookback)
 
+        # Execute pending entry from yesterday's signal
+        if pending_entry and not in_trade:
+            in_trade = True
+            entry_idx = i
+            pending_entry = False
+
         if not in_trade:
             if sig_pctile >= entry_pctile and signals[i] > 0:
-                in_trade = True
-                entry_idx = i
                 n_signals += 1
+                pending_entry = True  # enter at next bar (T+1)
+            daily_pnl.append(0.0)
         else:
             days_held = i - entry_idx
+            # Daily mark-to-market return (relative to entry spot)
+            spot_prev = series[i - 1].spot if i > entry_idx else series[entry_idx].spot
+            day_ret = (series[i].spot - spot_prev) / series[entry_idx].spot
+
             should_exit = (
                 days_held >= hold_days
                 or sig_pctile < exit_pctile
@@ -402,6 +427,8 @@ def run_density_backtest(
                     exit_reason=reason,
                 ))
                 in_trade = False
+
+            daily_pnl.append(day_ret)
 
     # Close open trade at end
     if in_trade:
@@ -441,14 +468,13 @@ def run_density_backtest(
         else:
             ann_ret = 0.0
 
-        # Sharpe from trade returns
-        rets = np.array([t.pnl_pct for t in trades])
-        if len(rets) > 1 and np.std(rets) > 0:
-            avg_hold = np.mean([t.hold_days for t in trades])
-            trades_per_year = 252 / max(avg_hold, 1)
-            sharpe = (np.mean(rets) / np.std(rets)) * math.sqrt(trades_per_year)
-        else:
-            sharpe = 0.0
+        # Sharpe from ALL daily returns (including flat days, ddof=1)
+        sharpe = 0.0
+        pnl_arr = np.array(daily_pnl)
+        if len(pnl_arr) > 1:
+            std = np.std(pnl_arr, ddof=1)
+            if std > 0:
+                sharpe = float(np.mean(pnl_arr) / std * math.sqrt(252))
 
         # Max drawdown
         peak = 1.0
@@ -483,7 +509,7 @@ def run_density_backtest(
 # ---------------------------------------------------------------------------
 
 def run_multi_index_density_backtest(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
     symbols: list[str] | None = None,
@@ -502,7 +528,7 @@ def run_multi_index_density_backtest(
 
     for sym in symbols:
         print(f"\n  {sym}: building density series...", end="", flush=True)
-        series = build_density_series(cache, start, end, sym, phys_window)
+        series = build_density_series(store, start, end, sym, phys_window)
         print(f" {len(series)} days", end="", flush=True)
 
         if len(series) < lookback + 10:

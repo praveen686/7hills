@@ -3,11 +3,11 @@
 Trades: NIFTY, BANKNIFTY, MIDCPNIFTY, FINNIFTY
 
 Subcommands:
-    scan      — Process a single day (fetch bhavcopy, SANOS → ATM IV, signal check)
+    scan      — Process a single day (fetch F&O data, SANOS → ATM IV, signal check)
     backtest  — Full historical backtest over a date range
     paper     — Paper trading loop (daily scan + position management)
     status    — Show current state, position, and performance
-    backfill  — Build IV history from all cached bhavcopy days
+    backfill  — Build IV history from all available F&O data
 
 Usage:
     python -m apps.india_fno scan
@@ -48,7 +48,8 @@ from apps.india_fno.paper_state import (
     TRADEABLE_INDICES,
 )
 from apps.india_fno.sanos import fit_sanos, prepare_nifty_chain
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import is_trading_day, get_fno
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +66,12 @@ def _handle_sigint(sig, frame):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _calibrate_day(cache: BhavcopyCache, d: date, symbol: str = "NIFTY") -> IVObservation | None:
-    """Fetch bhavcopy for `d`, calibrate SANOS, return ATM IV observation for a symbol."""
+def _calibrate_day(store, d: date, symbol: str = "NIFTY") -> IVObservation | None:
+    """Fetch F&O data for `d`, calibrate SANOS, return ATM IV observation for a symbol."""
     try:
-        fno = cache.get_fno(d)
+        fno = get_fno(store, d)
+        if fno.empty:
+            return None
     except Exception:
         return None
 
@@ -258,9 +261,9 @@ def _format_status(state: MultiIndexPaperState) -> str:
 # ---------------------------------------------------------------------------
 
 def cmd_scan(args: argparse.Namespace) -> None:
-    """Process a single day: fetch bhavcopy, SANOS calibration, signal check."""
+    """Process a single day: fetch F&O data, SANOS calibration, signal check."""
     target = date.fromisoformat(args.date)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
     state_path = Path(args.state_file)
     state = MultiIndexPaperState.load(state_path)
 
@@ -271,7 +274,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
     print(f"\n--- Scanning {target} ---\n")
 
     for sym in state.symbols:
-        obs = _calibrate_day(cache, target, symbol=sym)
+        obs = _calibrate_day(store, target, symbol=sym)
         if obs is None:
             print(f"  {sym}: No data available")
             continue
@@ -297,13 +300,13 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     """Run a full historical backtest across all indices."""
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
     print(f"Running multi-index backtest: {start} to {end}...")
     print(f"Indices: {', '.join(TRADEABLE_INDICES)}\n")
 
     results = run_multi_index_backtest(
-        cache, start, end,
+        store, start, end,
         symbols=TRADEABLE_INDICES,
         iv_lookback=args.lookback,
         entry_pctile=args.entry,
@@ -318,7 +321,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 def cmd_paper(args: argparse.Namespace) -> None:
     """Paper trading loop: daily scan → signal → position management."""
     state_path = Path(args.state_file)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
     if args.reset and state_path.exists():
         state_path.unlink()
@@ -366,9 +369,9 @@ def cmd_paper(args: argparse.Namespace) -> None:
 
             # Process each index
             for sym in state.symbols:
-                obs = _calibrate_day(cache, today, symbol=sym)
+                obs = _calibrate_day(store, today, symbol=sym)
                 if obs is None:
-                    print(f"\n  {sym}: No bhavcopy data")
+                    print(f"\n  {sym}: No F&O data")
                     continue
 
                 state.append_observation(obs)
@@ -428,16 +431,16 @@ def _calibrate_day_worker(args_tuple: tuple) -> IVObservation | None:
     """Top-level function for ProcessPoolExecutor (must be picklable).
 
     Args:
-        args_tuple: (data_dir, d_iso, symbol) — all serializable.
+        args_tuple: (d_iso, symbol) — all serializable.
     """
-    data_dir, d_iso, symbol = args_tuple
+    d_iso, symbol = args_tuple
     d = date.fromisoformat(d_iso)
-    cache = BhavcopyCache(data_dir)
-    return _calibrate_day(cache, d, symbol=symbol)
+    store = MarketDataStore()
+    return _calibrate_day(store, d, symbol=symbol)
 
 
 def cmd_backfill(args: argparse.Namespace) -> None:
-    """Build IV history from cached bhavcopy data for all indices."""
+    """Build IV history from F&O data for all indices."""
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end) if args.end else date.today()
     state_path = Path(args.state_file)
@@ -494,7 +497,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
 
             # Submit all symbols for this day in parallel
             futures = {
-                pool.submit(_calibrate_day_worker, (args.data_dir, d_iso, sym)): sym
+                pool.submit(_calibrate_day_worker, (d_iso, sym)): sym
                 for sym in symbols_to_cal
             }
 
@@ -571,8 +574,6 @@ def main() -> None:
         description="Multi-Index IV Mean-Reversion Paper Trader (NIFTY, BANKNIFTY, MIDCPNIFTY, FINNIFTY)",
     )
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
-    parser.add_argument("--data-dir", default="data/india",
-                        help="Bhavcopy cache directory")
     parser.add_argument("--state-file", default=str(DEFAULT_STATE_FILE),
                         help="Paper trading state file")
 
@@ -616,7 +617,7 @@ def main() -> None:
 
     # --- backfill ---
     p_bf = sub.add_parser("backfill",
-                          help="Build IV history from cached bhavcopy data")
+                          help="Build IV history from F&O data")
     p_bf.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     p_bf.add_argument("--end", default=None, help="End date (default: today)")
     p_bf.add_argument("--simulate", action="store_true",

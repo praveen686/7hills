@@ -1,6 +1,6 @@
 """Tests for the RNDR Options Variant (bull put credit spreads).
 
-Uses a MockBhavcopyCache with synthetic option prices computed via
+Uses a MockStore with synthetic option prices computed via
 Black-Scholes put-call parity so tests are fully self-contained.
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from datetime import date, timedelta
 from dataclasses import FrozenInstanceError
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -79,35 +80,44 @@ def _build_fno_df(
 
         for opt_type, price in [("PE", p), ("CE", max(c_price, 0.01))]:
             rows.append({
-                "SYMBOL": symbol,
-                "INSTRUMENT": "OPTIDX",
+                "TckrSymb": symbol,
+                "FinInstrmTp": "IDO",
                 "StrkPric": K,
                 "OptnTp": opt_type,
-                "CLOSE": round(max(price, 0.05), 2),
-                "OPEN_INT": base_oi + int(abs(K - atm) / strike_step) * 100,
-                "EXPIRY_DT": expiry.strftime("%d-%b-%Y"),
+                "ClsPric": round(max(price, 0.05), 2),
+                "OpnIntrst": base_oi + int(abs(K - atm) / strike_step) * 100,
+                "XpryDt": expiry.strftime("%d-%b-%Y"),
             })
 
     return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
-# MockBhavcopyCache
+# MockStore
 # ---------------------------------------------------------------------------
 
-class MockBhavcopyCache:
+class MockStore:
     """Dict-backed cache: {date: DataFrame}."""
 
     def __init__(self, data: dict[date, pd.DataFrame] | None = None):
         self._data = data or {}
 
-    def get_fno(self, d: date) -> pd.DataFrame:
-        if d not in self._data:
-            raise FileNotFoundError(f"No data for {d}")
-        return self._data[d]
-
     def add(self, d: date, df: pd.DataFrame) -> None:
         self._data[d] = df
+
+
+def _mock_get_fno(store, d: date) -> pd.DataFrame:
+    """Bridge: replace data.get_fno with direct MockStore._data lookup."""
+    if d in store._data:
+        return store._data[d]
+    return pd.DataFrame()
+
+
+@pytest.fixture(autouse=True)
+def _patch_get_fno():
+    """Patch get_fno in density_options so tests use MockStore._data."""
+    with patch("apps.india_fno.density_options.get_fno", new=_mock_get_fno):
+        yield
 
 
 def _make_cache_with_chain(
@@ -116,9 +126,9 @@ def _make_cache_with_chain(
     start: date = date(2025, 3, 3),
     n_days: int = 20,
     iv: float = 0.20,
-) -> MockBhavcopyCache:
+) -> MockStore:
     """Build a cache with synthetic option chains for several trading days."""
-    cache = MockBhavcopyCache()
+    cache = MockStore()
     # Two expiries: weekly (Thursday 7 days out) + monthly (last Thursday of month)
     weekly_exp = start + timedelta(days=(3 - start.weekday()) % 7 + 7)
     monthly_exp = start + timedelta(days=30)
@@ -234,9 +244,9 @@ class TestSelectSpreadStrikes:
 
     @pytest.fixture()
     def puts_df(self, chain_df):
-        """Puts only, with DTE column."""
+        """Puts only, with parsed _expiry and DTE — matches _get_put_chain output."""
         df = chain_df[chain_df["OptnTp"].str.strip() == "PE"].copy()
-        df["EXPIRY_DT"] = pd.to_datetime(df["EXPIRY_DT"], format="mixed", dayfirst=True)
+        df["_expiry"] = pd.to_datetime(df["XpryDt"], format="mixed", dayfirst=True)
         df["DTE"] = 17
         return df
 
@@ -253,8 +263,8 @@ class TestSelectSpreadStrikes:
     def test_no_pe_options_returns_none(self):
         """Empty DataFrame → None."""
         df = pd.DataFrame(columns=[
-            "SYMBOL", "INSTRUMENT", "StrkPric", "OptnTp",
-            "CLOSE", "OPEN_INT", "EXPIRY_DT", "DTE",
+            "TckrSymb", "FinInstrmTp", "StrkPric", "OptnTp",
+            "ClsPric", "OpnIntrst", "_expiry", "DTE",
         ])
         result = _select_spread_strikes(
             df, 50000.0, date(2025, 3, 3), "BANKNIFTY", 0.5,
@@ -272,7 +282,7 @@ class TestSelectSpreadStrikes:
 
     def test_low_oi_filter(self, puts_df):
         """Low open interest → None."""
-        puts_df["OPEN_INT"] = 10  # below MIN_OI
+        puts_df["OpnIntrst"] = 10  # below MIN_OI
         result = _select_spread_strikes(
             puts_df, 50000.0, date(2025, 3, 3), "BANKNIFTY", 0.5,
             min_oi=MIN_OI,
@@ -281,7 +291,7 @@ class TestSelectSpreadStrikes:
 
     def test_low_premium_filter(self, puts_df):
         """Premiums too small → None."""
-        puts_df["CLOSE"] = 0.10  # below MIN_PREMIUM
+        puts_df["ClsPric"] = 0.10  # below MIN_PREMIUM
         result = _select_spread_strikes(
             puts_df, 50000.0, date(2025, 3, 3), "BANKNIFTY", 0.5,
             min_premium=MIN_PREMIUM,
@@ -301,10 +311,8 @@ class TestSelectSpreadStrikes:
         far = _build_fno_df("BANKNIFTY", 50000, date(2025, 3, 27), 24)
         df = pd.concat([near, far], ignore_index=True)
         df = df[df["OptnTp"].str.strip() == "PE"].copy()
-        df["EXPIRY_DT"] = pd.to_datetime(df["EXPIRY_DT"], format="mixed", dayfirst=True)
-        near_ts = pd.Timestamp(date(2025, 3, 13))
-        far_ts = pd.Timestamp(date(2025, 3, 27))
-        df["DTE"] = df["EXPIRY_DT"].apply(
+        df["_expiry"] = pd.to_datetime(df["XpryDt"], format="mixed", dayfirst=True)
+        df["DTE"] = df["_expiry"].apply(
             lambda x: (x - pd.Timestamp(date(2025, 3, 3))).days
         )
         entry = _select_spread_strikes(
@@ -322,7 +330,7 @@ class TestMarkToMarket:
 
     def test_finds_both_legs(self):
         """MTM finds closing prices for both strikes."""
-        cache = MockBhavcopyCache()
+        cache = MockStore()
         d = date(2025, 3, 10)
         df = _build_fno_df("BANKNIFTY", 49500, date(2025, 3, 20), 10)
         cache.add(d, df)
@@ -338,7 +346,7 @@ class TestMarkToMarket:
 
     def test_missing_strike_returns_intrinsic(self):
         """When a strike isn't in the chain, falls back to intrinsic."""
-        cache = MockBhavcopyCache()
+        cache = MockStore()
         d = date(2025, 3, 10)
         # Chain that doesn't include strike 99999
         df = _build_fno_df("BANKNIFTY", 49500, date(2025, 3, 20), 10)
@@ -356,7 +364,7 @@ class TestMarkToMarket:
 
     def test_expired_option_uses_intrinsic(self):
         """After expiry, use intrinsic max(K - S, 0)."""
-        cache = MockBhavcopyCache()
+        cache = MockStore()
         result = _mark_to_market_spread(
             cache, date(2025, 3, 25), "BANKNIFTY",
             short_strike=49000.0, long_strike=47500.0,
@@ -378,9 +386,9 @@ class TestBacktestLoop:
 
     def _make_cache_for_series(
         self, series: list[DensityDayObs], symbol: str = "BANKNIFTY",
-    ) -> MockBhavcopyCache:
+    ) -> MockStore:
         """Build a cache that has option chain data for each day in series."""
-        cache = MockBhavcopyCache()
+        cache = MockStore()
         weekly_exp = series[0].date + timedelta(days=21)
         for obs in series:
             dte = (weekly_exp - obs.date).days
@@ -507,7 +515,7 @@ class TestBacktestLoop:
         overrides = {i: -0.90 for i in range(40, 48)}
         series = _make_series(80, skew_overrides=overrides)
         # Empty cache → no chain data
-        cache = MockBhavcopyCache()
+        cache = MockStore()
         result = run_density_options_backtest(
             series, cache,
             lookback=30, entry_pctile=0.70, hold_days=5,
@@ -563,7 +571,7 @@ class TestMetrics:
 
     def test_no_trades_zero_metrics(self):
         series = _make_series(80)
-        cache = MockBhavcopyCache()  # empty
+        cache = MockStore()  # empty
         result = run_density_options_backtest(
             series, cache,
             lookback=30, entry_pctile=0.99, hold_days=5,

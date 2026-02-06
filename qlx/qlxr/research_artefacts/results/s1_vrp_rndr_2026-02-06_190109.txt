@@ -1,0 +1,37 @@
+Auto-detected date range: 2025-08-06 to 2026-02-06
+
+======================================================================
+S1 VRP-RNDR: 2025-08-06 to 2026-02-06
+  entry_pctile=0.8, hold_days=5
+======================================================================
+
+--- Futures Variant (directional) ---
+
+  NIFTY: building density series... 122 days → 15 trades, +1.28%, Sharpe 1.44, WR 27%
+
+  BANKNIFTY: building density series... 122 days → 9 trades, +2.72%, Sharpe 1.67, WR 33%
+
+  MIDCPNIFTY: building density series... 122 days → 8 trades, +1.80%, Sharpe 0.92, WR 25%
+
+  FINNIFTY: building density series... 121 days → 9 trades, +1.66%, Sharpe 1.39, WR 44%
+  (311.5s)
+  Index           Sharpe   Return  Ann.Ret   MaxDD  WinRate Signals
+  ----------------------------------------------------------------------
+  BANKNIFTY         1.67   +2.72%   +5.46%   0.71%    33.3%       9
+  FINNIFTY          1.39   +1.66%   +3.32%   0.96%    44.4%       9
+  MIDCPNIFTY        0.92   +1.80%   +3.60%   1.71%    25.0%       8
+  NIFTY             1.44   +1.28%   +2.55%   0.62%    26.7%      15
+
+--- Options Variant (bull put spreads) ---
+
+  BANKNIFTY: building density series... 122 days → 8 trades, RoR +11.57%, Sharpe 5.59, WR 50%
+
+  MIDCPNIFTY: building density series... 122 days → 4 trades, RoR +8.53%, Sharpe 3.56, WR 75%
+
+  FINNIFTY: building density series... 121 days → 5 trades, RoR +6.90%, Sharpe 2.68, WR 60%
+  (231.6s)
+  Index           Sharpe  RetOnRisk   MaxDD  WinRate Signals  AvgCred
+  ----------------------------------------------------------------------
+  BANKNIFTY         5.59    +11.57%   0.88%    50.0%       9   92.84pts
+  FINNIFTY          2.68     +6.90%   1.73%    60.0%      17   35.85pts
+  MIDCPNIFTY        3.56     +8.53%   0.89%    75.0%      16   39.64pts

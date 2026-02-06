@@ -1,0 +1,71 @@
+
+S5 Tick Microstructure Research (GPU: Tesla T4)
+  Token: 256265, 311 dates, 8 workers
+
+  loaded 50/311 (49 valid, 4.6s)
+  loaded 100/311 (98 valid, 9.8s)
+  loaded 150/311 (148 valid, 15.1s)
+  loaded 200/311 (198 valid, 20.3s)
+  loaded 250/311 (248 valid, 25.7s)
+  loaded 300/311 (298 valid, 30.8s)
+  Data loaded: 309 days in 32.1s
+  GPU features: 50/309 (3.0s)
+  GPU features: 100/309 (5.3s)
+  GPU features: 150/309 (7.7s)
+  GPU features: 200/309 (10.4s)
+  GPU features: 250/309 (12.7s)
+  GPU features: 300/309 (15.2s)
+  GPU phase: 15.7s | Total: 47.7s
+
+======================================================================
+S5 TICK MICROSTRUCTURE RESULTS
+======================================================================
+
+  Feature Statistics:
+    vpin            mean=0.0263, std=0.0089, min=0.0110, max=0.0767
+    entropy         mean=2.5725, std=0.2815, min=1.6770, max=3.1119
+    hawkes_mean     mean=1591.5000, std=313.1040, min=711.3990, max=1992.5665
+    hawkes_ratio    mean=0.4752, std=0.3755, min=0.0100, max=0.9500
+
+  Predictive Correlations (vs next-day return):
+    (full-sample IC shown for diagnostics; backtests use causal rolling IC)
+    vpin            IC=+0.0741 (p=0.4294)    
+    entropy         IC=+0.0446 (p=0.6348)    
+    hawkes_mean     IC=+0.1096 (p=0.2415)    
+    hawkes_ratio    IC=-0.1681 (p=0.0712)    
+
+  Quintile Spreads (full-sample, in-sample — not achievable OOS):
+    vpin            spread=+0.118%  [Q1=-0.048% | Q2=-0.002% | Q3=-0.033% | Q4=+0.165% | Q5=+0.070%]
+    entropy         spread=+0.210%  [Q1=-0.063% | Q2=+0.010% | Q3=+0.031% | Q4=+0.026% | Q5=+0.147%]
+    hawkes_mean     spread=+0.233%  [Q1=-0.140% | Q2=+0.079% | Q3=+0.016% | Q4=+0.103% | Q5=+0.094%]
+    hawkes_ratio    spread=-0.284%  [Q1=+0.099% | Q2=+0.128% | Q3=+0.123% | Q4=-0.002% | Q5=-0.185%]
+
+======================================================================
+SIGNAL BACKTESTS (causal rolling IC → direction, feature > rolling pctile → entry)
+======================================================================
+
+  Feature          Dir   LB  Entry |  Sharpe   Return   MaxDD  WinRate  Trades
+  --------------------------------------------------------------------------------
+  vpin            long   30   0.75 |   -0.38   -0.81%   3.14%    54.2%      24
+  vpin            long   30   0.80 |   -0.41   -0.86%   3.14%    52.6%      19
+  vpin            long   60   0.75 |   -3.33   -4.86%   5.74%    30.8%      13
+  vpin            long   60   0.80 |   -3.52   -4.99%   5.36%    20.0%      10
+  entropy         long   30   0.75 |   -0.54   -1.14%   4.11%    56.5%      23
+  entropy         long   30   0.80 |    0.09   +0.19%   2.78%    61.9%      21
+  entropy         long   60   0.75 |   -1.29   -1.97%   3.98%    30.8%      13
+  entropy         long   60   0.80 |   -1.14   -1.70%   3.63%    22.2%       9
+  hawkes_mean     long   30   0.75 |    0.96   +1.86%   2.15%    50.0%      22
+  hawkes_mean     long   30   0.80 |    1.53   +2.90%   1.66%    64.7%      17
+  hawkes_mean     long   60   0.75 |   -1.30   -1.20%   2.13%    35.7%      14
+  hawkes_mean     long   60   0.80 |   -1.51   -1.38%   2.03%    33.3%      12
+  hawkes_ratio    short   30   0.75 |    3.12   +4.30%   0.93%    65.0%      20
+  hawkes_ratio    short   30   0.80 |    3.12   +4.30%   0.93%    65.0%      20
+  hawkes_ratio    short   60   0.75 |    4.29   +3.62%   0.56%    75.0%      12
+  hawkes_ratio    short   60   0.80 |    3.61   +2.90%   0.56%    70.0%      10
+
+                             --- Composite signals ---                            
+  composite       long   30   0.75 |   -3.53   -5.63%   6.44%    40.0%      15
+  composite       long   30   0.80 |   -3.24   -4.99%   5.91%    44.4%       9
+
+  Best: hawkes_ratio dir=short lb=60 entry=0.75 (Sharpe=4.29)
+

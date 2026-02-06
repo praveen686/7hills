@@ -586,23 +586,23 @@ class TestPrepareNiftyChain:
             # CE row
             rows.append({
                 "TradDt": trade_date,
-                "SYMBOL": "NIFTY",
-                "INSTRUMENT": "OPTIDX",
-                "EXPIRY_DT": expiry,
+                "TckrSymb": "NIFTY",
+                "FinInstrmTp": "IDO",
+                "XpryDt": expiry,
                 "StrkPric": K,
                 "OptnTp": "CE",
-                "CLOSE": max(call_price, 0.05),
+                "ClsPric": max(call_price, 0.05),
                 "UndrlygPric": spot,
             })
             # PE row
             rows.append({
                 "TradDt": trade_date,
-                "SYMBOL": "NIFTY",
-                "INSTRUMENT": "OPTIDX",
-                "EXPIRY_DT": expiry,
+                "TckrSymb": "NIFTY",
+                "FinInstrmTp": "IDO",
+                "XpryDt": expiry,
                 "StrkPric": K,
                 "OptnTp": "PE",
-                "CLOSE": max(put_price, 0.05),
+                "ClsPric": max(put_price, 0.05),
                 "UndrlygPric": spot,
             })
 
@@ -650,7 +650,7 @@ class TestPrepareNiftyChain:
 
     def test_wrong_instrument_returns_none(self, mock_fno_df):
         """Querying for wrong instrument type should return None."""
-        result = prepare_nifty_chain(mock_fno_df, instrument="FUTSTK")
+        result = prepare_nifty_chain(mock_fno_df, instrument="STF")
         assert result is None
 
     def test_can_fit_sanos_from_mock_chain(self, mock_fno_df):
@@ -690,12 +690,12 @@ class TestPrepareNiftyChain:
                 for tp, pr in [("CE", cp), ("PE", pp)]:
                     rows.append({
                         "TradDt": trade_date,
-                        "SYMBOL": "NIFTY",
-                        "INSTRUMENT": "OPTIDX",
-                        "EXPIRY_DT": expiry,
+                        "TckrSymb": "NIFTY",
+                        "FinInstrmTp": "IDO",
+                        "XpryDt": expiry,
                         "StrkPric": K,
                         "OptnTp": tp,
-                        "CLOSE": max(pr, 0.05),
+                        "ClsPric": max(pr, 0.05),
                         "UndrlygPric": spot,
                     })
 
@@ -714,28 +714,35 @@ class TestPrepareNiftyChain:
 class TestPrepareNiftyChainReal:
     @pytest.fixture
     def fno_df(self):
-        """Load real FnO bhavcopy parquet, skip if not available."""
-        import pandas as pd
-
-        # Find the most recent available file
-        parquet_files = sorted(DATA_DIR.glob("*.parquet"))
-        if not parquet_files:
-            pytest.skip("No FnO parquet files available in data/india/fno/")
-        path = parquet_files[-1]
-        return pd.read_parquet(path)
+        """Load one day of real FnO bhavcopy from DuckDB store."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        try:
+            from qlx.data.store import MarketDataStore
+            store = MarketDataStore()
+            dates = store.available_dates("nse_fo_bhavcopy")
+            if not dates:
+                pytest.skip("No nse_fo_bhavcopy data in DuckDB store")
+            d = dates[-1]
+            df = store.sql("SELECT * FROM nse_fo_bhavcopy WHERE date = ?", [d.isoformat()])
+            if df is None or df.empty:
+                pytest.skip("No data for latest date")
+            return df
+        except Exception as e:
+            pytest.skip(f"DuckDB store unavailable: {e}")
 
     def test_real_chain_not_none(self, fno_df):
         """Should return a valid chain for real NIFTY data."""
         result = prepare_nifty_chain(fno_df, symbol="NIFTY")
         if result is None:
-            pytest.skip("No NIFTY OPTIDX data in this file")
+            pytest.skip("No NIFTY IDO data in this file")
         assert len(result["market_strikes"]) >= 1
 
     def test_real_chain_fit(self, fno_df):
         """Fit SANOS to real NIFTY data and check basic properties."""
         chain = prepare_nifty_chain(fno_df, symbol="NIFTY", max_expiries=3)
         if chain is None:
-            pytest.skip("No NIFTY OPTIDX data in this file")
+            pytest.skip("No NIFTY IDO data in this file")
 
         result = fit_sanos(
             market_strikes=chain["market_strikes"],

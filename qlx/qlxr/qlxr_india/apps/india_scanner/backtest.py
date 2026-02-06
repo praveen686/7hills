@@ -1,7 +1,7 @@
 """Historical backtester for the India institutional footprint strategy.
 
 Execution model:
-  - Signal generated at EOD on date T (after bhavcopy available ~6 PM IST)
+  - Signal generated at EOD on date T (after NSE daily data available ~6 PM IST)
   - Entry at T+1 open
   - Exit at T+hold_days close, or earlier on signal flip
   - Equal weight across top-N signals
@@ -19,10 +19,11 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import get_equity, is_trading_day
 from apps.india_scanner.costs import DEFAULT_COSTS, IndiaCostModel
 from apps.india_scanner.scanner import run_daily_scan
 from apps.india_scanner.signals import CompositeSignal
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def _get_trading_day_offset(d: date, offset: int) -> date:
 
 
 def _get_price(equity_df: pd.DataFrame, symbol: str, field: str = "CLOSE") -> float | None:
-    """Extract a price for a symbol from equity bhavcopy."""
+    """Extract a price for a symbol from equity data."""
     if equity_df.empty or "SYMBOL" not in equity_df.columns:
         return None
     rows = equity_df[equity_df["SYMBOL"].str.strip() == symbol]
@@ -108,7 +109,7 @@ def run_backtest(
     top_n: int = 5,
     initial_equity: float = 100_000.0,
     cost_model: IndiaCostModel | None = None,
-    cache: BhavcopyCache | None = None,
+    store=None,
     symbols: list[str] | None = None,
 ) -> BacktestResult:
     """Run a historical backtest of the institutional footprint strategy.
@@ -119,8 +120,8 @@ def run_backtest(
       3. Exit after hold_days at close
       4. Track equity curve with costs
     """
-    if cache is None:
-        cache = BhavcopyCache()
+    if store is None:
+        store = MarketDataStore()
     if cost_model is None:
         cost_model = DEFAULT_COSTS
 
@@ -148,7 +149,7 @@ def run_backtest(
 
         # Process exits
         try:
-            eq_df = cache.get_equity(current)
+            eq_df = get_equity(store, current)
         except Exception:
             eq_df = pd.DataFrame()
 
@@ -193,7 +194,7 @@ def run_backtest(
         # Run daily scan for new signals
         try:
             signals = run_daily_scan(
-                target_date=current, cache=cache, top_n=top_n, symbols=symbols,
+                target_date=current, store=store, top_n=top_n, symbols=symbols,
             )
         except Exception as e:
             logger.debug("Scan failed for %s: %s", current, e)
@@ -207,7 +208,7 @@ def run_backtest(
             exit_target = _get_trading_day_offset(entry_date, hold_days)
 
             try:
-                entry_eq_df = cache.get_equity(entry_date)
+                entry_eq_df = get_equity(store, entry_date)
             except Exception:
                 entry_eq_df = pd.DataFrame()
 
@@ -288,8 +289,8 @@ def run_backtest(
     bench_ret = 0.0
     bench_sharpe = 0.0
     try:
-        start_eq = cache.get_equity(start)
-        end_eq = cache.get_equity(end)
+        start_eq = get_equity(store, start)
+        end_eq = get_equity(store, end)
         nifty_start = _get_price(start_eq, "NIFTY 50", "CLOSE")
         nifty_end = _get_price(end_eq, "NIFTY 50", "CLOSE")
         if nifty_start and nifty_end and nifty_start > 0:

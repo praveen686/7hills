@@ -28,7 +28,8 @@ from apps.india_fno.iv_engine import (
     realized_vol,
     OptionChainIV,
 )
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import is_trading_day, get_fno, get_delivery
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,8 @@ class VRPBacktestResult:
     avg_rv: float
 
 
-def _get_nifty_close_series(cache: BhavcopyCache, start: date, end: date) -> pd.Series:
-    """Build NIFTY close price series from F&O bhavcopy.
+def _get_nifty_close_series(store, start: date, end: date) -> pd.Series:
+    """Build NIFTY close price series from F&O data.
 
     Starts from `start - 45 calendar days` to provide lookback for HAR-RV.
     """
@@ -72,18 +73,16 @@ def _get_nifty_close_series(cache: BhavcopyCache, start: date, end: date) -> pd.
     while d <= end:
         if is_trading_day(d):
             try:
-                eq = cache.get_delivery(d)
-                # NIFTY is an index — it's in UndrlygPric of OPTIDX.
-                # But delivery data is equity. Use the FnO bhavcopy instead.
-                fno = cache.get_fno(d)
-                nifty_opts = fno[
-                    (fno["SYMBOL"] == "NIFTY")
-                    & (fno["INSTRUMENT"].isin(["OPTIDX", "FUTIDX"]))
-                ]
-                if not nifty_opts.empty and "UndrlygPric" in nifty_opts.columns:
-                    spot = float(nifty_opts["UndrlygPric"].iloc[0])
-                    if spot > 0:
-                        closes[d] = spot
+                fno = get_fno(store, d)
+                if not fno.empty:
+                    nifty_opts = fno[
+                        (fno["TckrSymb"] == "NIFTY")
+                        & (fno["FinInstrmTp"].isin(["IDO", "IDF"]))
+                    ]
+                    if not nifty_opts.empty and "UndrlygPric" in nifty_opts.columns:
+                        spot = float(nifty_opts["UndrlygPric"].iloc[0])
+                        if spot > 0:
+                            closes[d] = spot
             except Exception:
                 pass
         d += timedelta(days=1)
@@ -96,14 +95,14 @@ def _get_nifty_close_series(cache: BhavcopyCache, start: date, end: date) -> pd.
 
 
 def compute_vrp_series(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
 ) -> list[VRPDayResult]:
     """Compute daily IV, RV, and VRP for the date range."""
 
     # Build NIFTY close series going back enough for RV computation
-    close_series = _get_nifty_close_series(cache, start, end)
+    close_series = _get_nifty_close_series(store, start, end)
     if close_series.empty:
         logger.warning("No NIFTY close data available")
         return []
@@ -125,9 +124,12 @@ def compute_vrp_series(
         rv_val = rv_series.get(d, float("nan"))
 
         try:
-            fno = cache.get_fno(d)
+            fno = get_fno(store, d)
+            if fno.empty:
+                d += timedelta(days=1)
+                continue
             nifty_opts = fno[
-                (fno["SYMBOL"] == "NIFTY") & (fno["INSTRUMENT"] == "OPTIDX")
+                (fno["TckrSymb"] == "NIFTY") & (fno["FinInstrmTp"] == "IDO")
             ].copy()
 
             if nifty_opts.empty:
@@ -145,7 +147,7 @@ def compute_vrp_series(
             chain = chain_iv.df.dropna(subset=["IV"])
             # Find nearest expiry
             nearest_exp = chain_iv.nearest_expiry
-            nearest = chain[chain["EXPIRY_DT"] == nearest_exp] if nearest_exp else chain
+            nearest = chain[chain["XpryDt"] == nearest_exp] if nearest_exp else chain
             if nearest.empty:
                 # Fallback: use all
                 nearest = chain
@@ -164,7 +166,7 @@ def compute_vrp_series(
             ]
             straddle = 0.0
             if not atm_ce.empty and not atm_pe.empty:
-                straddle = float(atm_ce["CLOSE"].iloc[0] + atm_pe["CLOSE"].iloc[0])
+                straddle = float(atm_ce["ClsPric"].iloc[0] + atm_pe["ClsPric"].iloc[0])
 
             vrp = chain_iv.atm_iv - rv_val if not np.isnan(rv_val) else float("nan")
 
@@ -193,7 +195,7 @@ def compute_vrp_series(
 
 
 def run_vrp_backtest(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
     entry_vrp: float = 0.03,     # Enter when VRP > 3% (IV 3pts above RV)
@@ -212,7 +214,7 @@ def run_vrp_backtest(
     - Net P&L = (straddle_premium - |spot_move|) / spot, then subtract costs.
     """
     logger.info("Computing VRP series %s to %s...", start, end)
-    daily = compute_vrp_series(cache, start, end)
+    daily = compute_vrp_series(store, start, end)
 
     if not daily:
         return VRPBacktestResult(

@@ -5,7 +5,7 @@ Trades: BANKNIFTY, MIDCPNIFTY, FINNIFTY (NIFTY excluded — too efficient)
 Subcommands:
     scan      — Process a single day (calibrate SANOS, extract density, signal check)
     paper     — Paper trading loop (daily scan + position management)
-    backfill  — Build density history from cached bhavcopy data
+    backfill  — Build density history from F&O data
     status    — Show current state, positions, and performance
 
 Usage:
@@ -53,7 +53,8 @@ from apps.india_fno.rndr.state import (
     DensityObservation,
     DensityPaperState,
 )
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import is_trading_day, get_fno
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ def _handle_sigint(sig, frame):
 # ---------------------------------------------------------------------------
 
 def _process_single_day(
-    cache: BhavcopyCache,
+    store,
     d: date,
     symbol: str,
     state: DensityPaperState,
@@ -81,7 +82,7 @@ def _process_single_day(
     Uses prev_densities from state for KL divergence, and trailing spots
     from state history for physical skewness.
     """
-    snap, result, spot, atm_iv = _calibrate_density(cache, d, symbol)
+    snap, result, spot, atm_iv = _calibrate_density(store, d, symbol)
 
     if snap is None or not snap.density_ok:
         return None
@@ -278,7 +279,7 @@ def _format_status(state: DensityPaperState) -> str:
 def cmd_scan(args: argparse.Namespace) -> None:
     """Process a single day: calibrate SANOS, extract density, signal check."""
     target = date.fromisoformat(args.date)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
     state_path = Path(args.state_file)
     state = DensityPaperState.load(state_path)
 
@@ -289,7 +290,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
     print(f"\n--- RNDR Scanning {target} ---\n")
 
     for sym in state.symbols:
-        obs = _process_single_day(cache, target, sym, state)
+        obs = _process_single_day(store, target, sym, state)
         if obs is None:
             print(f"  {sym}: No data or SANOS failed")
             continue
@@ -316,7 +317,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
 def cmd_paper(args: argparse.Namespace) -> None:
     """Paper trading loop: daily scan -> signal -> position management."""
     state_path = Path(args.state_file)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
     if args.reset and state_path.exists():
         state_path.unlink()
@@ -363,9 +364,9 @@ def cmd_paper(args: argparse.Namespace) -> None:
             print("=" * 60)
 
             for sym in state.symbols:
-                obs = _process_single_day(cache, today, sym, state)
+                obs = _process_single_day(store, today, sym, state)
                 if obs is None:
-                    print(f"\n  {sym}: No bhavcopy data or SANOS failed")
+                    print(f"\n  {sym}: No F&O data or SANOS failed")
                     continue
 
                 state.append_observation(obs)
@@ -427,11 +428,11 @@ def cmd_paper(args: argparse.Namespace) -> None:
 
 
 def cmd_backfill(args: argparse.Namespace) -> None:
-    """Build density history from cached bhavcopy data."""
+    """Build density history from F&O data."""
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end) if args.end else date.today()
     state_path = Path(args.state_file)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
     state = DensityPaperState.load(state_path)
 
@@ -461,7 +462,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
     for sym in state.symbols:
         print(f"  {sym}: building density series...", end="", flush=True)
         series = build_density_series(
-            cache, start, end, sym, state.phys_window
+            store, start, end, sym, state.phys_window
         )
         print(f" {len(series)} days")
 
@@ -476,7 +477,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
         # Store final prev_densities for live continuation
         # We need to redo the last SANOS calibration to get the raw density
         last_obs = series[-1]
-        snap, result, _, _ = _calibrate_density(cache, last_obs.date, sym)
+        snap, result, _, _ = _calibrate_density(store, last_obs.date, sym)
         if result is not None:
             K, q = extract_density(result, 0)
             state.prev_densities[sym] = q.tolist()
@@ -576,10 +577,6 @@ def main() -> None:
     )
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
     parser.add_argument(
-        "--data-dir", default="data/india",
-        help="Bhavcopy cache directory",
-    )
-    parser.add_argument(
         "--state-file", default=str(DEFAULT_STATE_FILE),
         help="Paper trading state file",
     )
@@ -614,7 +611,7 @@ def main() -> None:
 
     # --- backfill ---
     p_bf = sub.add_parser(
-        "backfill", help="Build density history from cached bhavcopy"
+        "backfill", help="Build density history from F&O data"
     )
     p_bf.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     p_bf.add_argument("--end", default=None, help="End date (default: today)")

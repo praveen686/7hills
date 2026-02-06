@@ -37,7 +37,8 @@ from apps.india_fno.density_strategy import (
     DEFAULT_HOLD_DAYS,
     DEFAULT_PHYS_WINDOW,
 )
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import is_trading_day, get_fno
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ class SpreadBacktestResult:
     max_dd_pct: float = 0.0
     win_rate: float = 0.0
     n_signals: int = 0
-    avg_credit_pct: float = 0.0
+    avg_credit_pts: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -125,23 +126,26 @@ class SpreadBacktestResult:
 # ---------------------------------------------------------------------------
 
 def _get_put_chain(
-    cache: BhavcopyCache,
+    store,
     d: date,
     symbol: str,
 ) -> pd.DataFrame | None:
     """Return PE options for *symbol* on date *d*.
 
-    Columns kept: StrkPric, CLOSE, OPEN_INT, EXPIRY_DT, DTE.
+    Uses raw NSE columns: TckrSymb, FinInstrmTp, OptnTp, XpryDt,
+    StrkPric, ClsPric, OpnIntrst.  Adds computed DTE column.
     Returns None when data is unavailable or empty.
     """
     try:
-        fno = cache.get_fno(d)
+        fno = get_fno(store, d)
+        if fno.empty:
+            return None
     except Exception:
         return None
 
     opts = fno[
-        (fno["SYMBOL"] == symbol)
-        & (fno["INSTRUMENT"] == "OPTIDX")
+        (fno["TckrSymb"] == symbol)
+        & (fno["FinInstrmTp"] == "IDO")
         & (fno["OptnTp"].str.strip() == "PE")
     ].copy()
 
@@ -149,19 +153,19 @@ def _get_put_chain(
         return None
 
     # Parse expiry dates
-    opts["EXPIRY_DT"] = pd.to_datetime(
-        opts["EXPIRY_DT"].astype(str).str.strip(),
+    opts["_expiry"] = pd.to_datetime(
+        opts["XpryDt"].astype(str).str.strip(),
         format="mixed",
         dayfirst=True,
     )
 
     # DTE = calendar days to expiry
     today_ts = pd.Timestamp(d)
-    opts["DTE"] = (opts["EXPIRY_DT"] - today_ts).dt.days
+    opts["DTE"] = (opts["_expiry"] - today_ts).dt.days
 
     # Drop expired / zero-priced
     opts = opts[opts["DTE"] >= 0]
-    opts = opts[opts["CLOSE"] > 0]
+    opts = opts[opts["ClsPric"] > 0]
 
     if opts.empty:
         return None
@@ -186,12 +190,12 @@ def _select_spread_strikes(
     Returns None when suitable strikes cannot be found.
     """
     # Pick nearest expiry with sufficient DTE
-    valid_expiries = puts_df[puts_df["DTE"] >= min_dte]["EXPIRY_DT"].unique()
+    valid_expiries = puts_df[puts_df["DTE"] >= min_dte]["_expiry"].unique()
     if len(valid_expiries) == 0:
         return None
 
     nearest_expiry = min(valid_expiries)
-    chain = puts_df[puts_df["EXPIRY_DT"] == nearest_expiry].copy()
+    chain = puts_df[puts_df["_expiry"] == nearest_expiry].copy()
 
     # Target strikes
     short_target = spot * (1.0 - short_offset)
@@ -211,10 +215,10 @@ def _select_spread_strikes(
     if short_strike <= long_strike:
         return None
 
-    short_premium = float(short_row["CLOSE"])
-    long_premium = float(long_row["CLOSE"])
-    short_oi = int(short_row["OPEN_INT"])
-    long_oi = int(long_row["OPEN_INT"])
+    short_premium = float(short_row["ClsPric"])
+    long_premium = float(long_row["ClsPric"])
+    short_oi = int(short_row["OpnIntrst"])
+    long_oi = int(long_row["OpnIntrst"])
 
     # Liquidity filters
     if short_oi < min_oi or long_oi < min_oi:
@@ -258,7 +262,7 @@ def _select_spread_strikes(
 
 
 def _mark_to_market_spread(
-    cache: BhavcopyCache,
+    store,
     exit_date: date,
     symbol: str,
     short_strike: float,
@@ -282,7 +286,11 @@ def _mark_to_market_spread(
 
     # Try to look up market prices for the SAME expiry
     try:
-        fno = cache.get_fno(exit_date)
+        fno = get_fno(store, exit_date)
+        if fno.empty:
+            short_val = max(short_strike - exit_spot, 0.0)
+            long_val = max(long_strike - exit_spot, 0.0)
+            return short_val, long_val
     except Exception:
         # Fallback to intrinsic
         short_val = max(short_strike - exit_spot, 0.0)
@@ -290,8 +298,8 @@ def _mark_to_market_spread(
         return short_val, long_val
 
     opts = fno[
-        (fno["SYMBOL"] == symbol)
-        & (fno["INSTRUMENT"] == "OPTIDX")
+        (fno["TckrSymb"] == symbol)
+        & (fno["FinInstrmTp"] == "IDO")
         & (fno["OptnTp"].str.strip() == "PE")
     ].copy()
 
@@ -302,12 +310,12 @@ def _mark_to_market_spread(
 
     # Filter to the SAME expiry we entered on — critical to avoid
     # matching strikes from a different expiry with wrong premiums
-    opts["EXPIRY_DT"] = pd.to_datetime(
-        opts["EXPIRY_DT"].astype(str).str.strip(),
+    opts["_expiry"] = pd.to_datetime(
+        opts["XpryDt"].astype(str).str.strip(),
         format="mixed", dayfirst=True,
     )
     expiry_ts = pd.Timestamp(expiry)
-    same_exp = opts[opts["EXPIRY_DT"] == expiry_ts]
+    same_exp = opts[opts["_expiry"] == expiry_ts]
     if same_exp.empty:
         # Expiry no longer listed (may have already settled)
         short_val = max(short_strike - exit_spot, 0.0)
@@ -316,11 +324,11 @@ def _mark_to_market_spread(
 
     short_rows = same_exp[
         (same_exp["StrkPric"] == short_strike)
-        & (same_exp["CLOSE"] > 0)
+        & (same_exp["ClsPric"] > 0)
     ]
     long_rows = same_exp[
         (same_exp["StrkPric"] == long_strike)
-        & (same_exp["CLOSE"] > 0)
+        & (same_exp["ClsPric"] > 0)
     ]
 
     if short_rows.empty or long_rows.empty:
@@ -329,7 +337,7 @@ def _mark_to_market_spread(
         long_val = max(long_strike - exit_spot, 0.0)
         return short_val, long_val
 
-    return float(short_rows.iloc[0]["CLOSE"]), float(long_rows.iloc[0]["CLOSE"])
+    return float(short_rows.iloc[0]["ClsPric"]), float(long_rows.iloc[0]["ClsPric"])
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +346,7 @@ def _mark_to_market_spread(
 
 def run_density_options_backtest(
     series: list[DensityDayObs],
-    cache: BhavcopyCache,
+    store,
     lookback: int = DEFAULT_LOOKBACK,
     entry_pctile: float = DEFAULT_ENTRY_PCTILE,
     exit_pctile: float = DEFAULT_EXIT_PCTILE,
@@ -362,29 +370,34 @@ def run_density_options_backtest(
     # Active position state
     active: PutSpreadEntry | None = None
     entry_idx: int = 0
+    pending_signal_idx: int = -1  # T+1 execution: signal at close, enter next day
 
     for i in range(lookback, n):
         sig_pctile = _rolling_percentile(signals, i, lookback)
         obs = series[i]
 
-        if active is None:
-            # --- Look for entry ---
-            if sig_pctile >= entry_pctile and signals[i] > 0:
-                n_signals += 1
-                puts = _get_put_chain(cache, obs.date, symbol)
-                if puts is None:
-                    continue
+        # Execute pending entry from yesterday's signal
+        if pending_signal_idx >= 0 and active is None:
+            puts = _get_put_chain(store, obs.date, symbol)
+            if puts is not None:
                 min_dte = hold_days + MIN_DTE_BUFFER
                 entry = _select_spread_strikes(
-                    puts, obs.spot, obs.date, symbol, signals[i],
+                    puts, obs.spot, obs.date, symbol,
+                    signals[pending_signal_idx],
                     short_offset=short_offset,
                     long_offset=long_offset,
                     min_dte=min_dte,
                 )
-                if entry is None:
-                    continue
-                active = entry
-                entry_idx = i
+                if entry is not None:
+                    active = entry
+                    entry_idx = i
+            pending_signal_idx = -1
+
+        if active is None:
+            # --- Look for entry (signal fires, execution deferred to T+1) ---
+            if sig_pctile >= entry_pctile and signals[i] > 0:
+                n_signals += 1
+                pending_signal_idx = i  # will try to enter next bar
         else:
             # --- Check exit conditions ---
             days_held = i - entry_idx
@@ -399,7 +412,7 @@ def run_density_options_backtest(
 
             if exit_reason is not None:
                 trade = _close_trade(
-                    active, obs.date, obs.spot, cache, days_held,
+                    active, obs.date, obs.spot, store, days_held,
                     exit_reason, cost_frac,
                 )
                 trades.append(trade)
@@ -410,13 +423,14 @@ def run_density_options_backtest(
         obs = series[-1]
         days_held = len(series) - 1 - entry_idx
         trade = _close_trade(
-            active, obs.date, obs.spot, cache, days_held,
+            active, obs.date, obs.spot, store, days_held,
             "end_of_data", cost_frac,
         )
         trades.append(trade)
 
     # --- Metrics ---
-    result = _compute_metrics(symbol, series, signals, trades, n_signals)
+    n_total_days = n - lookback  # total tradeable days
+    result = _compute_metrics(symbol, series, signals, trades, n_signals, n_total_days)
     return result
 
 
@@ -424,14 +438,14 @@ def _close_trade(
     entry: PutSpreadEntry,
     exit_date: date,
     exit_spot: float,
-    cache: BhavcopyCache,
+    store,
     days_held: int,
     exit_reason: str,
     cost_frac: float,
 ) -> SpreadTrade:
     """Close an open spread and compute P&L."""
     mtm = _mark_to_market_spread(
-        cache, exit_date, entry.symbol,
+        store, exit_date, entry.symbol,
         entry.short_leg.strike, entry.long_leg.strike,
         entry.short_leg.expiry, exit_spot,
     )
@@ -485,6 +499,7 @@ def _compute_metrics(
     signals: list[float],
     trades: list[SpreadTrade],
     n_signals: int,
+    n_total_days: int = 0,
 ) -> SpreadBacktestResult:
     """Compute backtest summary metrics from a list of trades."""
     if trades:
@@ -497,16 +512,25 @@ def _compute_metrics(
 
         total_ror = (equity - 1) * 100
 
-        # Sharpe from trade returns
-        rets = np.array([t.pnl_on_risk for t in trades])
-        if len(rets) > 1 and np.std(rets) > 0:
-            avg_hold = np.mean([t.hold_days for t in trades])
-            trades_per_year = 252 / max(avg_hold, 1)
-            sharpe = float(
-                (np.mean(rets) / np.std(rets)) * math.sqrt(trades_per_year)
-            )
-        else:
-            sharpe = 0.0
+        # Sharpe from ALL daily returns (including flat days, ddof=1)
+        # Allocate each trade's P&L to its exit day; flat days = 0
+        n_days = max(n_total_days, len(series) - 1)
+        n_trade_days = sum(max(t.hold_days, 1) for t in trades)
+        n_flat_days = max(n_days - n_trade_days, 0)
+        # Build daily P&L: trade P&L spread across hold days + zeros for flat days
+        daily_pnl: list[float] = []
+        for t in trades:
+            hold = max(t.hold_days, 1)
+            daily_ret = t.pnl_on_risk / hold
+            daily_pnl.extend([daily_ret] * hold)
+        daily_pnl.extend([0.0] * n_flat_days)
+
+        sharpe = 0.0
+        if len(daily_pnl) > 1:
+            pnl_arr = np.array(daily_pnl)
+            std = np.std(pnl_arr, ddof=1)
+            if std > 0:
+                sharpe = float(np.mean(pnl_arr) / std * math.sqrt(252))
 
         # Max drawdown
         peak = 1.0
@@ -519,9 +543,9 @@ def _compute_metrics(
                 max_dd = dd
 
         win_rate = sum(1 for t in trades if t.pnl_on_risk > 0) / len(trades)
-        avg_credit = float(np.mean([t.net_credit for t in trades]))
+        avg_credit_pts = float(np.mean([t.net_credit for t in trades]))
     else:
-        total_ror = sharpe = max_dd = win_rate = avg_credit = 0.0
+        total_ror = sharpe = max_dd = win_rate = avg_credit_pts = 0.0
 
     return SpreadBacktestResult(
         symbol=symbol,
@@ -533,7 +557,7 @@ def _compute_metrics(
         max_dd_pct=max_dd * 100,
         win_rate=win_rate,
         n_signals=n_signals,
-        avg_credit_pct=avg_credit,
+        avg_credit_pts=avg_credit_pts,
     )
 
 
@@ -542,7 +566,7 @@ def _compute_metrics(
 # ---------------------------------------------------------------------------
 
 def run_multi_index_options_backtest(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
     symbols: list[str] | None = None,
@@ -563,7 +587,7 @@ def run_multi_index_options_backtest(
 
     for sym in symbols:
         print(f"\n  {sym}: building density series...", end="", flush=True)
-        series = build_density_series(cache, start, end, sym, phys_window)
+        series = build_density_series(store, start, end, sym, phys_window)
         print(f" {len(series)} days", end="", flush=True)
 
         if len(series) < lookback + 10:
@@ -572,7 +596,7 @@ def run_multi_index_options_backtest(
 
         result = run_density_options_backtest(
             series,
-            cache,
+            store,
             lookback=lookback,
             entry_pctile=entry_pctile,
             exit_pctile=exit_pctile,

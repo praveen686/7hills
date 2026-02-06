@@ -207,12 +207,12 @@ class OptionChainIV:
 def compute_chain_iv(
     chain_df: pd.DataFrame,
     risk_free_rate: float = 0.065,
-    expiry_col: str = "EXPIRY_DT",
+    expiry_col: str = "XpryDt",
     strike_col: str = "StrkPric",
     type_col: str = "OptnTp",
-    close_col: str = "CLOSE",
+    close_col: str = "ClsPric",
     spot_col: str = "UndrlygPric",
-    oi_col: str = "OPEN_INT",
+    oi_col: str = "OpnIntrst",
 ) -> OptionChainIV:
     """Compute IV for every contract in the chain using GPU.
 
@@ -406,7 +406,7 @@ def compute_gex(
     spot: float,
     strike_col: str = "StrkPric",
     type_col: str = "OptnTp",
-    oi_col: str = "OPEN_INT",
+    oi_col: str = "OpnIntrst",
     gamma_col: str = "GAMMA",
     lot_size: int = 75,
 ) -> pd.DataFrame:

@@ -36,7 +36,7 @@ from apps.india_news.strategy import (
     generate_signals,
     score_headlines,
 )
-from apps.india_scanner.bhavcopy import is_trading_day
+from apps.india_scanner.data import is_trading_day
 
 logger = logging.getLogger(__name__)
 

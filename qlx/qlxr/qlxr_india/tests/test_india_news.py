@@ -541,7 +541,7 @@ class TestIntegration:
 
     def test_trading_day_check(self):
         """Weekend should not be a trading day."""
-        from apps.india_scanner.bhavcopy import is_trading_day
+        from apps.india_scanner.data import is_trading_day
         from datetime import date
         # Feb 1, 2026 is a Sunday
         assert not is_trading_day(date(2026, 2, 1))

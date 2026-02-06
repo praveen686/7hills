@@ -8,13 +8,13 @@ from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
 
-from apps.india_scanner.bhavcopy import BhavcopyCache
+from apps.india_scanner.data import available_dates
 from apps.india_scanner.state import ScannerState, compute_performance
 
 
 def format_status(
     state: ScannerState,
-    cache: BhavcopyCache | None = None,
+    store=None,
 ) -> str:
     """Format a quick status report."""
     lines = [
@@ -54,13 +54,13 @@ def format_status(
         lines.append(f"    Days:      {perf.days_running:.0f}")
 
     # Data freshness
-    if cache is not None:
-        equity_dates = cache.available_dates("equity")
+    if store is not None:
+        equity_dates = available_dates(store, "nse_delivery")
         if equity_dates:
             latest = equity_dates[-1]
-            lines.append(f"\n  Data: {len(equity_dates)} days cached, "
+            lines.append(f"\n  Data: {len(equity_dates)} days available, "
                           f"latest: {latest}")
         else:
-            lines.append(f"\n  Data: no cached data — run 'backfill' first")
+            lines.append(f"\n  Data: no data available — run nse_daily collector first")
 
     return "\n".join(lines)

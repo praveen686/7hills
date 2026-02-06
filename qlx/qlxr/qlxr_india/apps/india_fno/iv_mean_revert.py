@@ -23,7 +23,8 @@ import numpy as np
 import pandas as pd
 
 from apps.india_fno.sanos import fit_sanos, prepare_nifty_chain, SANOSResult
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
+from apps.india_scanner.data import is_trading_day, get_fno
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,6 @@ class DayObs:
     forward: float
     sanos_ok: bool
     symbol: str = "NIFTY"    # which index this observation is for
-    rv_20d: float = float("nan")  # realized vol (if computed)
 
 
 @dataclass
@@ -83,7 +83,7 @@ class BacktestResult:
 # ---------------------------------------------------------------------------
 
 def build_iv_series(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
     symbol: str = "NIFTY",
@@ -91,7 +91,7 @@ def build_iv_series(
     """Calibrate SANOS each day and extract ATM IV for a given index.
 
     Args:
-        cache: BhavcopyCache instance
+        store: MarketDataStore instance
         start: Start date
         end: End date
         symbol: Index symbol (NIFTY, BANKNIFTY, MIDCPNIFTY, FINNIFTY, NIFTYNXT50)
@@ -104,7 +104,10 @@ def build_iv_series(
             continue
 
         try:
-            fno = cache.get_fno(d)
+            fno = get_fno(store, d)
+            if fno.empty:
+                d += timedelta(days=1)
+                continue
         except Exception:
             d += timedelta(days=1)
             continue
@@ -173,7 +176,7 @@ def build_iv_series(
 # Compute rolling percentile of ATM IV
 # ---------------------------------------------------------------------------
 
-def rolling_percentile(values: list[float], window: int, pctile: float) -> list[float]:
+def rolling_percentile(values: list[float], window: int) -> list[float]:
     """Compute rolling percentile rank of current value within window."""
     ranks = []
     for i, v in enumerate(values):
@@ -207,7 +210,7 @@ def run_from_series(
 
     # Compute rolling IV percentile ranks
     ivs = [d.atm_iv for d in daily]
-    pctile_ranks = rolling_percentile(ivs, iv_lookback, entry_pctile)
+    pctile_ranks = rolling_percentile(ivs, iv_lookback)
 
     # --- Trading simulation ---
     trades: list[Trade] = []
@@ -217,12 +220,21 @@ def run_from_series(
 
     in_trade = False
     entry_idx = 0
+    pending_entry = False  # T+1 execution: signal at close, enter next day
 
     for i in range(iv_lookback, len(daily)):
         obs = daily[i]
 
+        # Execute pending entry from yesterday's signal
+        if pending_entry and not in_trade:
+            in_trade = True
+            entry_idx = i
+            pending_entry = False
+            daily_pnl.append(0.0)  # no P&L on entry day
+            continue
+
         if not in_trade:
-            # Check entry conditions
+            # Check entry conditions (signal fires, execution deferred to T+1)
             if pctile_ranks[i] >= entry_pctile:
                 # Optional entropy gate
                 if entropy_filter is not None:
@@ -231,9 +243,8 @@ def run_from_series(
                         continue
 
                 n_signals += 1
-                in_trade = True
-                entry_idx = i
-                daily_pnl.append(0.0)  # no P&L on entry day
+                pending_entry = True  # enter at next bar (T+1)
+                daily_pnl.append(0.0)
             else:
                 daily_pnl.append(0.0)
         else:
@@ -283,12 +294,15 @@ def run_from_series(
     total_return = float(cumulative[-1]) if len(cumulative) > 0 else 0.0
 
     years = max(len(daily_pnl) / 252, 1 / 252)
-    annual_return = total_return / years
+    annual_return = ((1 + total_return) ** (1 / years) - 1) if years > 0 else 0.0
 
-    # Sharpe from daily returns (trade days only)
-    trade_returns = pnl_arr[pnl_arr != 0.0]
-    if len(trade_returns) > 1:
-        sharpe = float(np.mean(trade_returns) / np.std(trade_returns) * np.sqrt(252))
+    # Sharpe from ALL daily returns (including zero-trade days) with ddof=1
+    if len(pnl_arr) > 1:
+        std = np.std(pnl_arr, ddof=1)
+        if std > 0:
+            sharpe = float(np.mean(pnl_arr) / std * np.sqrt(252))
+        else:
+            sharpe = 0.0
     else:
         sharpe = 0.0
 
@@ -321,7 +335,7 @@ def run_from_series(
 
 
 def run_iv_mean_revert(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
     iv_lookback: int = 60,
@@ -339,7 +353,7 @@ def run_iv_mean_revert(
         symbol: Index symbol (NIFTY, BANKNIFTY, MIDCPNIFTY, FINNIFTY, NIFTYNXT50)
     """
     logger.info("Building %s IV series %s to %s...", symbol, start, end)
-    daily = build_iv_series(cache, start, end, symbol=symbol)
+    daily = build_iv_series(store, start, end, symbol=symbol)
     return run_from_series(
         daily, iv_lookback, entry_pctile, exit_pctile,
         hold_days, cost_bps, entropy_filter, entropy_threshold, symbol=symbol,
@@ -347,7 +361,7 @@ def run_iv_mean_revert(
 
 
 def run_multi_index_backtest(
-    cache: BhavcopyCache,
+    store,
     start: date,
     end: date,
     symbols: list[str] | None = None,
@@ -374,7 +388,7 @@ def run_multi_index_backtest(
         logger.info("Backtesting %s...", sym)
         try:
             result = run_iv_mean_revert(
-                cache, start, end,
+                store, start, end,
                 iv_lookback=iv_lookback,
                 entry_pctile=entry_pctile,
                 exit_pctile=exit_pctile,

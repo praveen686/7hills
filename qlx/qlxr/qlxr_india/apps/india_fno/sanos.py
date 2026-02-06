@@ -372,10 +372,14 @@ def fit_sanos(
 def prepare_nifty_chain(
     fno_df,
     symbol: str = "NIFTY",
-    instrument: str = "OPTIDX",
+    instrument: str = "IDO",
     max_expiries: int = 6,
 ):
     """Convert F&O bhavcopy DataFrame into SANOS-ready inputs.
+
+    Uses raw NSE column names: TckrSymb, FinInstrmTp, XpryDt, StrkPric,
+    OptnTp, ClsPric, UndrlygPric.  FinInstrmTp values: IDO (index option),
+    IDF (index future), STO (stock option), STF (stock future).
 
     Normalizes strikes and prices by the implied forward (from put-call parity).
 
@@ -386,7 +390,7 @@ def prepare_nifty_chain(
     import pandas as pd
 
     df = fno_df[
-        (fno_df["SYMBOL"] == symbol) & (fno_df["INSTRUMENT"] == instrument)
+        (fno_df["TckrSymb"] == symbol) & (fno_df["FinInstrmTp"] == instrument)
     ].copy()
 
     if df.empty:
@@ -396,7 +400,7 @@ def prepare_nifty_chain(
     trade_date = df["TradDt"].iloc[0] if "TradDt" in df.columns else ""
 
     # Parse expiry dates
-    df["_exp"] = pd.to_datetime(df["EXPIRY_DT"].astype(str).str.strip(), format="mixed")
+    df["_exp"] = pd.to_datetime(df["XpryDt"].astype(str).str.strip(), format="mixed")
     df["_dte"] = (df["_exp"] - pd.to_datetime(trade_date)).dt.days
     df = df[df["_dte"] > 0]
 
@@ -427,8 +431,8 @@ def prepare_nifty_chain(
             p_row = puts[puts["StrkPric"] == K]
             if c_row.empty or p_row.empty:
                 continue
-            C = float(c_row["CLOSE"].iloc[0])
-            P = float(p_row["CLOSE"].iloc[0])
+            C = float(c_row["ClsPric"].iloc[0])
+            P = float(p_row["ClsPric"].iloc[0])
             F = K + C - P
             diff = abs(C - P)
             if diff < best_diff:
@@ -446,14 +450,14 @@ def prepare_nifty_chain(
         rows = []
         for _, r in otm_calls.iterrows():
             k_norm = r["StrkPric"] / forward
-            c_norm = r["CLOSE"] / forward
+            c_norm = r["ClsPric"] / forward
             if c_norm > 0.001:  # filter near-zero
                 rows.append((k_norm, c_norm))
 
         for _, r in otm_puts.iterrows():
             k_norm = r["StrkPric"] / forward
             # Convert put to call: C = P + 1 - K/F (in normalized terms)
-            c_norm = r["CLOSE"] / forward + 1.0 - k_norm
+            c_norm = r["ClsPric"] / forward + 1.0 - k_norm
             if c_norm > 0.001:
                 rows.append((k_norm, c_norm))
 
@@ -471,7 +475,7 @@ def prepare_nifty_chain(
         ce_row = calls[calls["StrkPric"] == atm_K]
         pe_row = puts[puts["StrkPric"] == atm_K]
         if not ce_row.empty and not pe_row.empty:
-            straddle = float(ce_row["CLOSE"].iloc[0] + pe_row["CLOSE"].iloc[0])
+            straddle = float(ce_row["ClsPric"].iloc[0] + pe_row["ClsPric"].iloc[0])
             straddle_norm = straddle / forward
             atm_var = max((straddle_norm / 2.0 * math.sqrt(2.0 * math.pi)) ** 2, 1e-6)
         else:

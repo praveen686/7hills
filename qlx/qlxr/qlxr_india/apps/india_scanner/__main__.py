@@ -4,14 +4,12 @@ Subcommands:
     scan      — Run daily scan for a date (default: today)
     backtest  — Historical backtest over a date range
     paper     — Paper trading cycle (scan + enter/exit positions)
-    backfill  — Download historical bhavcopy data
     status    — Show current state and performance
 
 Usage:
     python -m apps.india_scanner scan --date 2026-02-03
     python -m apps.india_scanner backtest --start 2025-06-01 --end 2026-01-31
     python -m apps.india_scanner paper --once
-    python -m apps.india_scanner backfill --start 2025-06-01
     python -m apps.india_scanner status
 """
 
@@ -22,15 +20,16 @@ import logging
 import signal
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from apps.india_scanner.backtest import format_backtest_results, run_backtest
-from apps.india_scanner.bhavcopy import BhavcopyCache, is_trading_day
 from apps.india_scanner.costs import DEFAULT_COSTS
+from apps.india_scanner.data import is_trading_day
 from apps.india_scanner.scanner import format_scan_results, run_daily_scan
 from apps.india_scanner.state import ScannerState, PaperPosition
 from apps.india_scanner.status import format_status
+from qlx.data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +50,9 @@ def _handle_sigint(sig, frame):
 def cmd_scan(args: argparse.Namespace) -> None:
     """Run a daily scan and print results."""
     target = date.fromisoformat(args.date)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
-    signals = run_daily_scan(target, cache=cache, top_n=args.top_n)
+    signals = run_daily_scan(target, store=store, top_n=args.top_n)
     print(format_scan_results(signals, target))
 
 
@@ -61,7 +60,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
     """Run a historical backtest."""
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
     print(f"Running backtest: {start} to {end}, hold={args.hold}d, top-{args.top_n}")
     print("This may take a while for large date ranges...\n")
@@ -71,7 +70,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
         end=end,
         hold_days=args.hold,
         top_n=args.top_n,
-        cache=cache,
+        store=store,
     )
     print(format_backtest_results(result))
 
@@ -79,7 +78,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 def cmd_paper(args: argparse.Namespace) -> None:
     """Run a paper trading cycle."""
     state_path = Path(args.state_file)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
     if args.reset and state_path.exists():
         state_path.unlink()
@@ -136,7 +135,7 @@ def cmd_paper(args: argparse.Namespace) -> None:
                 pos.days_held += 1
 
             # 2. Run daily scan
-            signals = run_daily_scan(today, cache=cache, top_n=args.top_n)
+            signals = run_daily_scan(today, store=store, top_n=args.top_n)
             print(format_scan_results(signals, today))
 
             # 3. Enter new positions
@@ -189,30 +188,13 @@ def cmd_paper(args: argparse.Namespace) -> None:
     print(f"\nState saved to {state_path}")
 
 
-def cmd_backfill(args: argparse.Namespace) -> None:
-    """Download historical data."""
-    start = date.fromisoformat(args.start)
-    end = date.fromisoformat(args.end) if args.end else date.today() - timedelta(days=1)
-    cache = BhavcopyCache(args.data_dir)
-
-    categories = None
-    if args.category:
-        categories = [args.category]
-
-    print(f"Backfilling {start} to {end}...")
-    counts = cache.backfill(start=start, end=end, categories=categories)
-
-    for cat, n in counts.items():
-        print(f"  {cat}: {n} days")
-
-
 def cmd_status(args: argparse.Namespace) -> None:
     """Show current status."""
     state_path = Path(args.state_file)
-    cache = BhavcopyCache(args.data_dir)
+    store = MarketDataStore()
 
     state = ScannerState.load(state_path)
-    print(format_status(state, cache))
+    print(format_status(state, store))
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +208,6 @@ def main() -> None:
         description="India Institutional Footprint Scanner",
     )
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
-    parser.add_argument("--data-dir", default="data/india", help="Data cache directory")
     parser.add_argument("--state-file", default="data/india_scanner_state.json",
                         help="Paper trading state file")
 
@@ -254,14 +235,6 @@ def main() -> None:
     p_paper.add_argument("--top-n", type=int, default=5, help="Max positions")
     p_paper.add_argument("--reset", action="store_true", help="Clear state and restart")
 
-    # backfill
-    p_bf = sub.add_parser("backfill", help="Download historical data")
-    p_bf.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
-    p_bf.add_argument("--end", default=None, help="End date (default: yesterday)")
-    p_bf.add_argument("--category", default=None,
-                      choices=["delivery", "fno", "fii_dii"],
-                      help="Only backfill one category")
-
     # status
     sub.add_parser("status", help="Show current status")
 
@@ -283,7 +256,6 @@ def main() -> None:
         "scan": cmd_scan,
         "backtest": cmd_backtest,
         "paper": cmd_paper,
-        "backfill": cmd_backfill,
         "status": cmd_status,
     }
     cmd_map[args.command](args)
