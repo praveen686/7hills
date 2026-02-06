@@ -1,0 +1,140 @@
+Plan to implement                                                                                                                                                                           │
+│                                                                                                                                                                                             │
+│ Plan: Load 22 NSE Daily Files into DuckDB + Parquet                                                                                                                                         │
+│                                                                                                                                                                                             │
+│ Context                                                                                                                                                                                     │
+│                                                                                                                                                                                             │
+│ The NSE daily collector (apps/nse_daily/) now downloads 22 file types per trading day to data/nse/daily/YYYY-MM-DD/. We have 133 dates (2025-08-06 to 2026-02-06), 1.3 GB raw. The existing │
+│  MarketDataStore handles 4 categories (nfo_1min, bfo_1min, ticks, instruments) from Telegram data. We need to convert all 22 NSE file types into the same hive-partitioned parquet layout   │
+│ so they're queryable via DuckDB SQL.                                                                                                                                                        │
+│                                                                                                                                                                                             │
+│ Approach                                                                                                                                                                                    │
+│                                                                                                                                                                                             │
+│ Create a new converter nse_convert.py (separate from existing convert.py which handles Telegram data), extending the same patterns. Each of the 22 files becomes its own parquet category   │
+│ under market/nse_{name}/date=YYYY-MM-DD/data.parquet. The store auto-discovers nse_* directories.                                                                                           │
+│                                                                                                                                                                                             │
+│ Files to Create/Modify                                                                                                                                                                      │
+│                                                                                                                                                                                             │
+│ 1. NEW: qlxr/qlxr_india/qlx/data/nse_convert.py (~400 lines)                                                                                                                                │
+│                                                                                                                                                                                             │
+│ Registry — data-driven mapping of all 22 file types:                                                                                                                                        │
+│ ┌─────┬───────────────────────┬───────────────────────┬─────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────┐                   │
+│ │  #  │      Source File      │   Parquet Category    │     Parser      │                                             Notes                                             │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 1   │ fo_bhavcopy.csv.zip   │ nse_fo_bhavcopy       │ zip_csv         │ Extract CSV from zip, strip cols                                                              │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 2   │ cm_bhavcopy.csv.zip   │ nse_cm_bhavcopy       │ zip_csv         │ Same                                                                                          │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 3   │ participant_oi.csv    │ nse_participant_oi    │ participant     │ skiprows=1 (title in double-quotes)                                                           │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 4   │ participant_vol.csv   │ nse_participant_vol   │ participant     │ Same                                                                                          │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 5   │ settlement_prices.csv │ nse_settlement_prices │ csv             │ Direct read, strip cols                                                                       │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 6   │ volatility.csv        │ nse_volatility        │ volatility      │ Rename 16 long col names to short                                                             │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 7   │ contract_delta.csv    │ nse_contract_delta    │ csv             │ Optional (from 2025-09-26 only)                                                               │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 8   │ index_close.csv       │ nse_index_close       │ csv             │ Direct read                                                                                   │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 9   │ delivery_bhavcopy.csv │ nse_delivery          │ csv             │ Strip leading spaces from cols                                                                │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 10  │ fii_stats.xls         │ nse_fii_stats         │ fii_stats       │ xlrd, extract structured rows                                                                 │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 11  │ market_activity.zip   │ nse_market_activity   │ market_activity │ Extract fo_DDMMYYYY.csv summary (6 rows), skip detailed files that overlap fo_bhavcopy        │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 12  │ nse_oi.zip            │ nse_oi                │ zip_csv         │ Extract CSV, skip XML                                                                         │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 13  │ combined_oi.zip       │ nse_combined_oi       │ zip_csv         │ Extract CSV, skip XML                                                                         │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 14  │ combined_oi_deleq.csv │ nse_combined_oi_deleq │ csv             │ Direct read                                                                                   │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 15  │ security_ban.csv      │ nse_security_ban      │ security_ban    │ Skip title line, parse rank,symbol                                                            │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 16  │ fo_contract.csv.gz    │ nse_fo_contract       │ gzip_csv        │ compression='gzip', 125+ cols                                                                 │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 17  │ bulk_deals.csv        │ nse_bulk_deals        │ deals           │ Handle "NO RECORDS" sentinel                                                                  │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 18  │ block_deals.csv       │ nse_block_deals       │ deals           │ Handle "NO RECORDS" sentinel                                                                  │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 19  │ mto.dat               │ nse_mto               │ mto             │ Skip 4 header lines, comma-delimited, filter rec_type=20                                      │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 20  │ margin_data.dat       │ nse_margin_data       │ margin_data     │ Skip 1 header line, comma-delimited, filter rec_type=20                                       │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 21  │ fo_mktlots.csv        │ nse_fo_mktlots        │ fo_mktlots      │ Strip spaces, remove divider row, melt wide→long (underlying, symbol, expiry_month, lot_size) │                   │
+│ ├─────┼───────────────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤                   │
+│ │ 22  │ 52wk_highlow.csv      │ nse_52wk_highlow      │ 52wk            │ skiprows=2 (disclaimer + date), quoted fields, strip spaces                                   │                   │
+│ └─────┴───────────────────────┴───────────────────────┴─────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────┘                   │
+│ Parsers — each returns pd.DataFrame | None:                                                                                                                                                 │
+│                                                                                                                                                                                             │
+│ - parse_csv(path) — pd.read_csv(), strip col names                                                                                                                                          │
+│ - parse_zip_csv(path) — zipfile → first .csv inside → pd.read_csv()                                                                                                                         │
+│ - parse_gzip_csv(path) — pd.read_csv(path, compression='gzip')                                                                                                                              │
+│ - parse_participant(path) — pd.read_csv(path, skiprows=1), strip cols+values                                                                                                                │
+│ - parse_volatility(path) — read CSV, rename 16 cols to: date, symbol, underlying_close, underlying_prev_close, underlying_log_return, prev_underlying_vol, current_underlying_vol,          │
+│ underlying_ann_vol, futures_close, futures_prev_close, futures_log_return, prev_futures_vol, current_futures_vol, futures_ann_vol, applicable_daily_vol, applicable_ann_vol                 │
+│ - parse_fii_stats(path) — xlrd.open_workbook(), iterate rows 3-20, extract category/buy/sell/OI values                                                                                      │
+│ - parse_market_activity(path) — zipfile → find fo_DDMMYYYY.csv (with underscore), skiprows=1, 3 cols: Product, No of Contracts, Traded Value                                                │
+│ - parse_security_ban(path) — skip line 1, split remaining on comma → {symbol: str}                                                                                                          │
+│ - parse_deals(path) — read CSV, return empty DataFrame if first row is "NO RECORDS"                                                                                                         │
+│ - parse_mto(path) — pd.read_csv(path, skiprows=4, header=None), names=[rec_type, sr_no, symbol, series, qty_traded, deliv_qty, deliv_pct], filter rec_type==20                              │
+│ - parse_margin_data(path) — pd.read_csv(path, skiprows=1, header=None), names=[rec_type, symbol, series, isin, var_margin, elm, adhoc_margin, applicable_var, applicable_elm,               │
+│ applicable_adhoc], filter rec_type==20                                                                                                                                                      │
+│ - parse_fo_mktlots(path) — read CSV with skipinitialspace=True, remove divider rows ("Derivatives on Individual Securities"), melt to long format                                           │
+│ - parse_52wk(path) — pd.read_csv(path, skiprows=2, quotechar='"', skipinitialspace=True), strip quotes+spaces                                                                               │
+│                                                                                                                                                                                             │
+│ Batch functions (same pattern as existing convert.py):                                                                                                                                      │
+│ - convert_nse_file(cat, d) → find source, parse, write parquet (zstd), return row count                                                                                                     │
+│ - convert_nse_day(d, force=False) → convert all 22 for one date                                                                                                                             │
+│ - convert_all_nse(dates=None, force=False, dry_run=False) → batch with progress logging                                                                                                     │
+│                                                                                                                                                                                             │
+│ CLI: python -m qlx.data.nse_convert [--dates ...] [--force] [--dry-run] [-v]                                                                                                                │
+│                                                                                                                                                                                             │
+│ 2. MODIFY: qlxr/qlxr_india/qlx/data/store.py                                                                                                                                                │
+│                                                                                                                                                                                             │
+│ Auto-discover NSE views — in _register_views(), after existing 4 views:                                                                                                                     │
+│ # Auto-register any nse_* directories with parquet data                                                                                                                                     │
+│ for cat_dir in sorted(self.market_dir.iterdir()):                                                                                                                                           │
+│     if cat_dir.is_dir() and cat_dir.name.startswith("nse_") and any(cat_dir.rglob("*.parquet")):                                                                                            │
+│         glob_path = cat_dir / "*" / "*.parquet"                                                                                                                                             │
+│         self._con.execute(f"CREATE OR REPLACE VIEW {cat_dir.name} AS SELECT * FROM read_parquet('{glob_path}', hive_partitioning=true, hive_types_autocast=false)")                         │
+│                                                                                                                                                                                             │
+│ Add ingest_nse_day(d) — calls nse_convert.convert_nse_day(), then re-registers views.                                                                                                       │
+│                                                                                                                                                                                             │
+│ Extend summary() — include nse_* categories alongside existing 4.                                                                                                                           │
+│                                                                                                                                                                                             │
+│ Edge Cases                                                                                                                                                                                  │
+│                                                                                                                                                                                             │
+│ - 8 holiday dates (2025-08-15, etc.) have only 3-5 files (snapshot-only: bulk_deals, block_deals, fo_mktlots). Non-optional files that are missing on holidays are silently skipped (source │
+│  file doesn't exist → return 0).                                                                                                                                                            │
+│ - contract_delta.csv only exists from 2025-09-26 onwards → marked optional                                                                                                                  │
+│ - block_deals.csv is usually "NO RECORDS" → store empty DataFrame with correct schema                                                                                                       │
+│ - fo_mktlots.csv month columns change over time → melt to long format for stable schema                                                                                                     │
+│ - fo_contract.csv.gz is large (~36MB/day uncompressed, 125+ cols) → store all columns, rely on DuckDB column projection pushdown                                                            │
+│ - Files <10 bytes → skip (empty/corrupt)                                                                                                                                                    │
+│                                                                                                                                                                                             │
+│ Estimated Output                                                                                                                                                                            │
+│                                                                                                                                                                                             │
+│ - ~2,600 parquet files (133 dates × ~20 files per valid trading day)                                                                                                                        │
+│ - ~800MB-1.2GB total new parquet (zstd compressed)                                                                                                                                          │
+│ - Largest: nse_fo_contract (~300MB), nse_contract_delta (~100MB), nse_fo_bhavcopy (~200MB)                                                                                                  │
+│                                                                                                                                                                                             │
+│ Steps                                                                                                                                                                                       │
+│                                                                                                                                                                                             │
+│ 1. Create nse_convert.py with all parsers + registry + batch logic + CLI                                                                                                                    │
+│ 2. Modify store.py — auto-register nse_* views, add ingest_nse_day(), extend summary()                                                                                                      │
+│ 3. Run: python -m qlx.data.nse_convert to convert all 133 dates                                                                                                                             │
+│ 4. Verify: store.summary(), sample SQL queries on each category                                                                                                                             │
+│                                                                                                                                                                                             │
+│ Verification                                                                                                                                                                                │
+│                                                                                                                                                                                             │
+│ from qlx.data import MarketDataStore                                                                                                                                                        │
+│ store = MarketDataStore()                                                                                                                                                                   │
+│ print(store.summary())  # should show 22+ nse_ categories                                                                                                                                   │
+│                                                                                                                                                                                             │
+│ # Sample queries                                                                                                                                                                            │
+│ store.sql("SELECT count(*) FROM nse_fo_bhavcopy WHERE date='2026-02-05'")                                                                                                                   │
+│ store.sql("SELECT * FROM nse_participant_oi WHERE date='2026-02-05'")                                                                                                                       │
+│ store.sql("SELECT * FROM nse_index_close WHERE date='2026-02-05' AND \"Index Name\" LIKE 'Nifty%'")                                                                                         │
+│ store.sql("SELECT * FROM nse_security_ban WHERE date='2026-02-05'")                                                                                                                         │
+│ store.sql("SELECT symbol, lot_size FROM nse_fo_mktlots WHERE date='2026-02-05' AND symbol='NIFTY'")                  

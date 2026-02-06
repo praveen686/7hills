@@ -1,7 +1,10 @@
 
+import argparse
 import os
+import re
 import asyncio
 import traceback
+from datetime import date
 from pathlib import Path
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
@@ -11,75 +14,80 @@ load_dotenv(Path(__file__).parent.parent / "qlxr_vault" / ".env")
 
 API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
-TELEGRAM_PHONE = os.getenv("ph_number_telegram")
+TELEGRAM_PHONE = os.getenv("TELEGRAM_PHONE") or os.getenv("ph_number_telegram")
 CHANNEL_NAME = "nfo_data"
 DOWNLOAD_DIR = Path("/home/ubuntu/Desktop/7hills/qlx/qlxr/qlxr_common/qlxr_data/telegram_source_files/india_tick_data")
 
 # Configuration constants
 DOWNLOAD_TIMEOUT = 600  # 10 minutes per file
 MAX_ZIP_DEPTH = 5  # Prevent infinite recursion in nested zips
-MESSAGE_LIMIT = 50000 # Full history scan
+DEFAULT_RECENT_LIMIT = 50  # Enough to catch a day's uploads (~4 files/day)
+FULL_HISTORY_LIMIT = 50000  # For backfill scans
 
 # Session file lives alongside this script
 SESSION_PATH = Path(__file__).parent / "brahmastra_session"
 
-async def download_nfo_data():
+async def download_nfo_data(message_limit: int = DEFAULT_RECENT_LIMIT):
     """
-    Scrapes the specified Telegram channel for CSV data files.
+    Scrapes the specified Telegram channel for data files.
+
+    Args:
+        message_limit: Number of recent messages to scan (default: 50).
     """
     if not API_ID or not API_HASH:
         print("Error: TELEGRAM_API_ID or TELEGRAM_API_HASH not found in .env")
         return
 
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Use a specific session file name to avoid conflicts if multiple scripts run
+
     # Adding a small sleep to ensure any previous session closure is processed
     await asyncio.sleep(1)
-    
+
     client = TelegramClient(str(SESSION_PATH), API_ID, API_HASH)
-    
+
     try:
         await client.start(phone=TELEGRAM_PHONE)
-        print(f"Connected to Telegram. Checking channel: {CHANNEL_NAME}")
+        print(f"Connected to Telegram. Scanning last {message_limit} messages in '{CHANNEL_NAME}'")
 
+        existing = set(os.listdir(DOWNLOAD_DIR))
         count = 0
-        processed = 0
-        async for message in client.iter_messages(CHANNEL_NAME, limit=MESSAGE_LIMIT):
+        skipped = 0
+        total = 0
+        async for message in client.iter_messages(CHANNEL_NAME, limit=message_limit):
             if message.file and message.file.name:
                 fname = message.file.name
-                if fname.lower().endswith(('.csv', '.zip', '.feather')):
-                    # Filter for relevant files
-                    is_relevant = any(x in fname.upper() for x in ["NIFTY", "BANKNIFTY", "INDEX-NFO", "TICK_DATA"])
-                    if is_relevant:
-                        processed += 1
-                        target_path = DOWNLOAD_DIR / fname
-                        if not target_path.exists():
-                            print(f"[{processed}] Downloading {fname}...")
-                            try:
-                                await asyncio.wait_for(
-                                    message.download_media(file=str(target_path)),
-                                    timeout=DOWNLOAD_TIMEOUT
-                                )
-                                count += 1
+                total += 1
+                target_path = DOWNLOAD_DIR / fname
+                if fname in existing:
+                    skipped += 1
+                    # Still extract zips if not yet extracted
+                    if fname.lower().endswith('.zip'):
+                        await extract_nested_zips(target_path, DOWNLOAD_DIR)
+                    continue
+                count += 1
+                size_mb = message.file.size / 1024 / 1024
+                print(f"[{count}/{total}] Downloading {fname} ({size_mb:.1f} MB)...")
+                try:
+                    await asyncio.wait_for(
+                        message.download_media(file=str(target_path)),
+                        timeout=DOWNLOAD_TIMEOUT
+                    )
+                    # Extract after download
+                    if fname.lower().endswith('.zip'):
+                        await extract_nested_zips(target_path, DOWNLOAD_DIR)
+                except asyncio.TimeoutError:
+                    print(f"  -> TIMEOUT: Download of {fname} exceeded {DOWNLOAD_TIMEOUT}s, skipping")
+                    if target_path.exists():
+                        target_path.unlink()
+                except Exception as e:
+                    print(f"  -> ERROR downloading {fname}: {e}")
+                    if target_path.exists():
+                        target_path.unlink()
+        print(f"Sync complete. Downloaded {count} new files, skipped {skipped} existing, {total} total scanned.")
 
-                                # Extract after download
-                                if fname.lower().endswith('.zip'):
-                                    await extract_nested_zips(target_path, DOWNLOAD_DIR)
-                            except asyncio.TimeoutError:
-                                print(f"  -> TIMEOUT: Download of {fname} exceeded {DOWNLOAD_TIMEOUT}s, skipping")
-                                # Clean up partial download
-                                if target_path.exists():
-                                    target_path.unlink()
-                            except Exception as e:
-                                print(f"  -> ERROR downloading {fname}: {e}")
-                                if target_path.exists():
-                                    target_path.unlink()
-                        else:
-                            # Only extract if not already extracted (idempotency handled in extract_nested_zips)
-                            if fname.lower().endswith('.zip'):
-                                await extract_nested_zips(target_path, DOWNLOAD_DIR)
-        print(f"Sync complete. Downloaded {count} new files, processed {processed} total.")
+        # Always check for unconverted data (covers both new downloads
+        # and previously downloaded files that weren't ingested yet)
+        await _ingest_new_dates(DOWNLOAD_DIR)
     except Exception as e:
         print(f"Error during Telegram sync: {e}")
         traceback.print_exc()
@@ -168,5 +176,64 @@ async def extract_nested_zips(zip_path: Path, extract_to: Path, depth: int = 0):
         print(f"{'  ' * depth}  -> Zstandard Extraction failed: {e}")
         traceback.print_exc()
 
+_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+async def _ingest_new_dates(download_dir: Path) -> None:
+    """Convert newly downloaded files to hive-partitioned parquet.
+
+    Runs conversion in a thread pool so it doesn't block the event loop.
+    Only converts dates that haven't been converted yet (idempotent).
+    """
+    try:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "qlxr_india"))
+        from qlx.data.convert import convert_all, discover_sources, discover_converted
+
+        sources = discover_sources()
+        converted = discover_converted()
+
+        all_source_dates = sorted(
+            sources["nfo_feather"]
+            | sources["bfo_feather"]
+            | sources["tick_zip"]
+            | sources["tick_pkl"]
+            | sources["instrument_pkl"]
+        )
+
+        # Find dates needing conversion
+        all_converted = (
+            converted.get("nfo_1min", set())
+            & converted.get("bfo_1min", set())
+        )
+        new_dates = [d for d in all_source_dates if d not in all_converted]
+
+        if new_dates:
+            print(f"Ingesting {len(new_dates)} dates into parquet store...")
+            results = await asyncio.to_thread(convert_all, new_dates)
+            total_rows = sum(
+                sum(v for v in day.values() if isinstance(v, int))
+                for day in results.values()
+            )
+            print(f"Ingestion complete: {len(results)} dates, {total_rows:,} rows")
+        else:
+            print("All dates already ingested into parquet store.")
+    except Exception as e:
+        print(f"Warning: Parquet ingestion failed (data still available as raw files): {e}")
+        traceback.print_exc()
+
+
 if __name__ == "__main__":
-    asyncio.run(download_nfo_data())
+    parser = argparse.ArgumentParser(description="Download NFO data from Telegram")
+    parser.add_argument(
+        "--full", action="store_true",
+        help=f"Scan full channel history ({FULL_HISTORY_LIMIT} messages) instead of recent {DEFAULT_RECENT_LIMIT}",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Custom message scan limit",
+    )
+    args = parser.parse_args()
+
+    limit = FULL_HISTORY_LIMIT if args.full else (args.limit or DEFAULT_RECENT_LIMIT)
+    asyncio.run(download_nfo_data(message_limit=limit))

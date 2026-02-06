@@ -34,7 +34,18 @@ node_modules/
 *.jsonl
 !tests/fixtures/**/*.jsonl
 !tests/fixtures/**/*.parquet
-data/
+# Raw/downloaded data directories (not Python code packages named "data")
+**/data/nse/
+**/data/market/
+**/data/telegram_source_files/
+**/data/kite_depth/
+# Legacy data directories
+qlx/qlxleg/**/data/
+# Strategy state files and session files
+*_state.json
+*_state.json.bak
+*_session.json
+*_catalog.md
 
 # === Secrets & sessions ===
 .env

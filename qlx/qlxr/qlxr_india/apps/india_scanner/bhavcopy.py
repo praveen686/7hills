@@ -8,9 +8,9 @@ Data sources (all public, no API key required):
 All data is cached as parquet files under data/india/{category}/YYYY-MM-DD.parquet.
 
 URL patterns (verified Feb 2026):
-  - Delivery:  archives.nseindia.com/products/content/sec_bhavdata_full_DDMMYYYY.csv
-  - F&O:       archives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
-  - FII stats: archives.nseindia.com/content/fo/fii_stats_DD-Mon-YYYY.xls
+  - Delivery:  nsearchives.nseindia.com/products/content/sec_bhavdata_full_DDMMYYYY.csv
+  - F&O:       nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_YYYYMMDD_F_0000.csv.zip
+  - FII stats: nsearchives.nseindia.com/content/fo/fii_stats_DD-Mon-YYYY.xls
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class NSESession:
     but we avoid it (uses Akamai bot protection).
     """
 
-    ARCHIVE_URL = "https://archives.nseindia.com"
+    ARCHIVE_URL = "https://nsearchives.nseindia.com"
 
     def __init__(self, min_delay: float = 0.5):
         self.session = requests.Session()
@@ -327,6 +327,96 @@ def extract_nearest_futures_oi(fno_df: pd.DataFrame, d: date) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# Parse helpers — read raw files from nse_daily local storage
+# ---------------------------------------------------------------------------
+
+
+def _parse_fno_from_file(path: Path) -> pd.DataFrame:
+    """Parse FO bhavcopy from a local zip file (same logic as download_fno_bhav)."""
+    data = path.read_bytes()
+    df = _parse_csv_from_zip(data)
+    df.columns = df.columns.str.strip()
+
+    rename = {
+        "TckrSymb": "SYMBOL",
+        "FinInstrmTp": "INSTRUMENT",
+        "XpryDt": "EXPIRY_DT",
+        "OpnPric": "OPEN",
+        "HghPric": "HIGH",
+        "LwPric": "LOW",
+        "ClsPric": "CLOSE",
+        "OpnIntrst": "OPEN_INT",
+        "ChngInOpnIntrst": "CHG_IN_OI",
+        "TtlTradgVol": "CONTRACTS",
+    }
+    df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+
+    instr_map = {"STF": "FUTSTK", "STO": "OPTSTK", "IDF": "FUTIDX", "IDO": "OPTIDX"}
+    if "INSTRUMENT" in df.columns:
+        df["INSTRUMENT"] = df["INSTRUMENT"].map(instr_map).fillna(df["INSTRUMENT"])
+
+    return df
+
+
+def _parse_fii_from_file(path: Path) -> pd.DataFrame:
+    """Parse FII stats from a local XLS file (same logic as download_fii_stats)."""
+    df = pd.read_excel(path, engine="xlrd", header=None)
+
+    rows = []
+    for idx, row in df.iterrows():
+        label = str(row.iloc[0]).strip().upper() if pd.notna(row.iloc[0]) else ""
+        if label in ("INDEX FUTURES", "STOCK FUTURES"):
+            try:
+                buy = float(row.iloc[2])
+                sell = float(row.iloc[4])
+                rows.append({
+                    "category": "FII/FPI",
+                    "sub_category": label,
+                    "buyValue": buy,
+                    "sellValue": sell,
+                    "netValue": buy - sell,
+                })
+            except (ValueError, TypeError, IndexError):
+                continue
+
+    if not rows:
+        return pd.DataFrame([{
+            "category": "FII/FPI",
+            "buyValue": 0.0, "sellValue": 0.0, "netValue": 0.0,
+        }])
+
+    result = pd.DataFrame(rows)
+    total_buy = result["buyValue"].sum()
+    total_sell = result["sellValue"].sum()
+    combined = pd.DataFrame([{
+        "category": "FII/FPI",
+        "sub_category": "TOTAL_FUTURES",
+        "buyValue": total_buy,
+        "sellValue": total_sell,
+        "netValue": total_buy - total_sell,
+    }])
+    return pd.concat([result, combined], ignore_index=True)
+
+
+def _parse_delivery_from_file(path: Path) -> pd.DataFrame:
+    """Parse delivery data from a local CSV file (same logic as download_delivery_data)."""
+    df = pd.read_csv(path)
+    df.columns = df.columns.str.strip()
+
+    rename = {
+        "OPEN_PRICE": "OPEN",
+        "HIGH_PRICE": "HIGH",
+        "LOW_PRICE": "LOW",
+        "CLOSE_PRICE": "CLOSE",
+        "TRADED_QTY": "TOTTRDQTY",
+        "TURNOVER_LACS": "TOTTRDVAL",
+        "DELIV_PER": "DELIVERY_PCT",
+    }
+    df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Parquet cache
 # ---------------------------------------------------------------------------
 
@@ -340,8 +430,13 @@ class BhavcopyCache:
       data/india/fii_dii/YYYY-MM-DD.parquet    (FII buy/sell/net)
     """
 
-    def __init__(self, base_dir: str | Path = "data/india"):
+    def __init__(
+        self,
+        base_dir: str | Path = "data/india",
+        nse_daily_dir: str | Path | None = "data/nse/daily",
+    ):
         self.base_dir = Path(base_dir)
+        self.nse_daily_dir = Path(nse_daily_dir) if nse_daily_dir else None
         self._session: NSESession | None = None
 
     @property
@@ -364,6 +459,15 @@ class BhavcopyCache:
 
     def _load(self, category: str, d: date) -> pd.DataFrame:
         return pd.read_parquet(self._path(category, d))
+
+    def _nse_daily_path(self, d: date, filename: str) -> Path | None:
+        """Return path to raw file in nse_daily dir, or None if not present."""
+        if self.nse_daily_dir is None:
+            return None
+        path = self.nse_daily_dir / d.isoformat() / filename
+        if path.exists() and path.stat().st_size > 0:
+            return path
+        return None
 
     @staticmethod
     def _normalize_delivery_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -395,6 +499,11 @@ class BhavcopyCache:
         """Get delivery data (includes equity OHLCV + delivery %)."""
         if self._has("delivery", d):
             return self._normalize_delivery_cols(self._load("delivery", d))
+        raw = self._nse_daily_path(d, "delivery_bhavcopy.csv")
+        if raw:
+            df = _parse_delivery_from_file(raw)
+            self._save("delivery", d, df)
+            return df
         df = download_delivery_data(self.session, d)
         self._save("delivery", d, df)
         return df
@@ -403,6 +512,11 @@ class BhavcopyCache:
         """Get F&O bhavcopy, downloading if not cached."""
         if self._has("fno", d):
             return self._load("fno", d)
+        raw = self._nse_daily_path(d, "fo_bhavcopy.csv.zip")
+        if raw:
+            df = _parse_fno_from_file(raw)
+            self._save("fno", d, df)
+            return df
         df = download_fno_bhav(self.session, d)
         self._save("fno", d, df)
         return df
@@ -411,6 +525,11 @@ class BhavcopyCache:
         """Get FII/DII data, downloading if not cached."""
         if self._has("fii_dii", d):
             return self._load("fii_dii", d)
+        raw = self._nse_daily_path(d, "fii_stats.xls")
+        if raw:
+            df = _parse_fii_from_file(raw)
+            self._save("fii_dii", d, df)
+            return df
         df = download_fii_stats(self.session, d)
         self._save("fii_dii", d, df)
         return df

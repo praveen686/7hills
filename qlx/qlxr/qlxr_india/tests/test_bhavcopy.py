@@ -15,6 +15,8 @@ from apps.india_scanner.bhavcopy import (
     BhavcopyCache,
     NSESession,
     _parse_csv_from_zip,
+    _parse_delivery_from_file,
+    _parse_fno_from_file,
     extract_nearest_futures_oi,
     is_trading_day,
 )
@@ -148,3 +150,116 @@ class TestBhavcopyCache:
         cache._save("delivery", date(2026, 2, 3), df)
         result = cache.get_equity(date(2026, 2, 3))
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# nse_daily fallback
+# ---------------------------------------------------------------------------
+
+
+class TestNseDailyFallback:
+    """BhavcopyCache reads from nse_daily raw files before falling back to HTTP."""
+
+    def test_get_fno_from_nse_daily(self, tmp_path: Path):
+        """get_fno reads fo_bhavcopy.csv.zip from nse_daily dir."""
+        d = date(2026, 2, 5)
+        cache_dir = tmp_path / "cache"
+        nse_daily_dir = tmp_path / "nse_daily"
+
+        # Create a raw FO bhavcopy zip in nse_daily dir
+        day_dir = nse_daily_dir / d.isoformat()
+        day_dir.mkdir(parents=True)
+
+        csv_content = (
+            "TckrSymb,FinInstrmTp,XpryDt,OpnPric,HghPric,LwPric,ClsPric,"
+            "OpnIntrst,ChngInOpnIntrst,TtlTradgVol\n"
+            "RELIANCE,STF,27-Feb-2026,2800,2850,2780,2820,5000000,100000,50000\n"
+        )
+        zip_path = day_dir / "fo_bhavcopy.csv.zip"
+        zip_path.write_bytes(_make_zip_bytes(csv_content, "bhav.csv"))
+
+        cache = BhavcopyCache(base_dir=cache_dir, nse_daily_dir=nse_daily_dir)
+        df = cache.get_fno(d)
+
+        assert len(df) == 1
+        assert df.iloc[0]["SYMBOL"] == "RELIANCE"
+        assert df.iloc[0]["INSTRUMENT"] == "FUTSTK"  # STF mapped
+        assert df.iloc[0]["CLOSE"] == 2820
+        # Should also be cached as parquet now
+        assert cache._has("fno", d)
+
+    def test_get_fno_falls_back_to_download(self, tmp_path: Path):
+        """Without nse_daily file, get_fno falls back to HTTP download."""
+        d = date(2026, 2, 5)
+        cache_dir = tmp_path / "cache"
+        nse_daily_dir = tmp_path / "nse_daily"  # empty — no files
+
+        cache = BhavcopyCache(base_dir=cache_dir, nse_daily_dir=nse_daily_dir)
+
+        mock_df = pd.DataFrame({
+            "SYMBOL": ["TCS"],
+            "INSTRUMENT": ["FUTSTK"],
+            "CLOSE": [3500],
+        })
+
+        with patch("apps.india_scanner.bhavcopy.download_fno_bhav", return_value=mock_df) as mock_dl:
+            df = cache.get_fno(d)
+
+        mock_dl.assert_called_once()
+        assert len(df) == 1
+        assert df.iloc[0]["SYMBOL"] == "TCS"
+
+    def test_get_delivery_from_nse_daily(self, tmp_path: Path):
+        """get_delivery reads delivery_bhavcopy.csv from nse_daily dir."""
+        d = date(2026, 2, 5)
+        cache_dir = tmp_path / "cache"
+        nse_daily_dir = tmp_path / "nse_daily"
+
+        day_dir = nse_daily_dir / d.isoformat()
+        day_dir.mkdir(parents=True)
+
+        csv_content = (
+            " SYMBOL , SERIES , OPEN_PRICE , HIGH_PRICE , LOW_PRICE , "
+            "CLOSE_PRICE , TRADED_QTY , TURNOVER_LACS , DELIV_PER \n"
+            "RELIANCE,EQ,2800,2850,2780,2820,1000000,28000,45.5\n"
+        )
+        (day_dir / "delivery_bhavcopy.csv").write_text(csv_content)
+
+        cache = BhavcopyCache(base_dir=cache_dir, nse_daily_dir=nse_daily_dir)
+        df = cache.get_delivery(d)
+
+        assert len(df) == 1
+        assert "OPEN" in df.columns  # renamed from OPEN_PRICE
+        assert "DELIVERY_PCT" in df.columns  # renamed from DELIV_PER
+        assert df.iloc[0]["OPEN"] == 2800
+        assert cache._has("delivery", d)
+
+    def test_nse_daily_disabled(self, tmp_path: Path):
+        """nse_daily_dir=None disables the fallback entirely."""
+        d = date(2026, 2, 5)
+        cache = BhavcopyCache(base_dir=tmp_path, nse_daily_dir=None)
+
+        mock_df = pd.DataFrame({"SYMBOL": ["TCS"], "CLOSE": [3500]})
+        with patch("apps.india_scanner.bhavcopy.download_fno_bhav", return_value=mock_df) as mock_dl:
+            df = cache.get_fno(d)
+
+        mock_dl.assert_called_once()
+        assert len(df) == 1
+
+    def test_empty_nse_daily_file_ignored(self, tmp_path: Path):
+        """A zero-byte file in nse_daily dir is ignored (falls through to download)."""
+        d = date(2026, 2, 5)
+        cache_dir = tmp_path / "cache"
+        nse_daily_dir = tmp_path / "nse_daily"
+
+        day_dir = nse_daily_dir / d.isoformat()
+        day_dir.mkdir(parents=True)
+        (day_dir / "fo_bhavcopy.csv.zip").write_bytes(b"")  # empty file
+
+        cache = BhavcopyCache(base_dir=cache_dir, nse_daily_dir=nse_daily_dir)
+
+        mock_df = pd.DataFrame({"SYMBOL": ["TCS"], "CLOSE": [3500]})
+        with patch("apps.india_scanner.bhavcopy.download_fno_bhav", return_value=mock_df) as mock_dl:
+            df = cache.get_fno(d)
+
+        mock_dl.assert_called_once()

@@ -18,7 +18,6 @@ source /home/ubuntu/Desktop/7hills/qlx/qlxr/qlxr_common/qlxr_env/bin/activate
 - numpy 2.4.2
 - scipy 1.17.0
 - pyarrow 23.0.0
-- duckdb 1.4.4
 - questdb 4.1.0
 
 ### Machine Learning
