@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol, runtime_checkable
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 @dataclass(frozen=True)

@@ -23,7 +23,7 @@ import pandas as pd
 
 from strategies.s9_momentum.data import available_dates, is_trading_day
 from strategies.s9_momentum.scanner import run_daily_scan
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 def _next_trading_days(d: date, n: int) -> list[date]:
@@ -223,7 +223,7 @@ def run_research(
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S3 Institutional Flow Research")
     parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD)")

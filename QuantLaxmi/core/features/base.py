@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 
 import pandas as pd
 
-from core.core.types import OHLCV, FeatureTransform
+from core.base.types import OHLCV, FeatureTransform
 
 
 class Feature(ABC):

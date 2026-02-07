@@ -1,6 +1,6 @@
 """Portfolio route — GET /api/portfolio.
 
-Returns the current Brahmastra portfolio state: equity, drawdown,
+Returns the current portfolio state: equity, drawdown,
 active positions, recent trades, per-strategy equity, equity curve,
 day P&L, drawdown history, and total P&L.
 """
@@ -127,7 +127,7 @@ def _compute_drawdown_history(
 
 @router.get("", response_model=PortfolioOut)
 async def get_portfolio(request: Request) -> PortfolioOut:
-    """Return the full Brahmastra portfolio snapshot."""
+    """Return the full portfolio snapshot."""
     state = request.app.state.engine
 
     positions = [

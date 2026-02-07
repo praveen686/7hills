@@ -1,1 +1,1 @@
-"""BRAHMASTRA — Unified India FnO trading system."""
+"""QuantLaxmi Engine — Unified India FnO trading system."""

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core.core.timeguard import LookaheadError
+from core.base.timeguard import LookaheadError
 from core.pipeline.split import ExpandingSplit, WalkForwardSplit
 from core.pipeline.config import PipelineConfig
 

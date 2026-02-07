@@ -10,7 +10,7 @@ from telethon import TelegramClient, events
 from dotenv import load_dotenv
 
 # Load credentials from .env
-load_dotenv(Path(__file__).parent.parent / "vault" / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
@@ -188,7 +188,7 @@ async def _ingest_new_dates(download_dir: Path) -> None:
     try:
         import sys
         sys.path.insert(0, str(Path(__file__).parent.parent.parent / "QuantLaxmi"))
-        from core.data.convert import convert_all, discover_sources, discover_converted
+        from core.market.convert import convert_all, discover_sources, discover_converted
 
         sources = discover_sources()
         converted = discover_converted()

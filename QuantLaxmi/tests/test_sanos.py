@@ -718,7 +718,7 @@ class TestPrepareNiftyChainReal:
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         try:
-            from core.data.store import MarketDataStore
+            from core.market.store import MarketDataStore
             store = MarketDataStore()
             dates = store.available_dates("nse_fo_bhavcopy")
             if not dates:

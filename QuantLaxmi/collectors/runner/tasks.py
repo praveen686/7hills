@@ -148,7 +148,7 @@ def add_timestamps(
       1. Feather files (unconverted) — read feather, add timestamp, write parquet
       2. Existing parquets without timestamp — read parquet, add timestamp, rewrite
     """
-    from core.data.convert import (
+    from core.market.convert import (
         MARKET_DIR,
         _feather_path,
         _parquet_out,
@@ -268,7 +268,7 @@ def filter_ticks(
     sys.path.insert(
         0, str(Path(__file__).resolve().parent.parent.parent)
     )
-    from core.data.store import MarketDataStore
+    from core.market.store import MarketDataStore
 
     store = MarketDataStore()
 
@@ -341,7 +341,7 @@ def status() -> dict:
     import pyarrow.parquet as pq
     from pathlib import Path
 
-    from core.data.convert import MARKET_DIR
+    from core.market.convert import MARKET_DIR
 
     info: dict[str, dict] = {"tasks": {}}
 
@@ -404,8 +404,8 @@ def backfill_deltas(
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from core.pricing.iv_engine import _DEVICE, _DTYPE, bs_delta
-    from core.data.convert import MARKET_DIR
-    from core.data.store import MarketDataStore
+    from core.market.convert import MARKET_DIR
+    from core.market.store import MarketDataStore
 
     store = MarketDataStore()
 
@@ -653,7 +653,7 @@ def india_news_scan(
         score=DEFAULT_SCORE_THRESHOLD,
         max_positions=DEFAULT_MAX_POSITIONS,
         verbose=False,
-        state_file="data/india_news_state.json",
+        state_file="data/state/india_news.json",
     )
     cmd_scan(args)
     return {"action": "scan"}

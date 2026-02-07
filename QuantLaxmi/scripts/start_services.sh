@@ -7,7 +7,7 @@ FRONTEND_PORT=3000
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 QLAXMI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$QLAXMI_DIR/.." && pwd)"
-VENV="$QLAXMI_DIR/env/bin/activate"
+VENV="$QLAXMI_DIR/venv/bin/activate"
 BACKEND_DIR="$QLAXMI_DIR"
 FRONTEND_DIR="$QLAXMI_DIR/ui"
 BACKEND_LOG="/tmp/quantlaxmi_backend.log"
@@ -68,10 +68,13 @@ echo ""
 echo "── Starting backend (uvicorn on :$BACKEND_PORT) ──"
 source "$VENV"
 cd "$BACKEND_DIR"
-nohup uvicorn engine.api.app:app \
+UVICORN="$QLAXMI_DIR/venv/bin/uvicorn"
+nohup "$UVICORN" engine.api.app:app \
     --host 0.0.0.0 \
     --port $BACKEND_PORT \
     --reload \
+    --reload-dir engine \
+    --reload-dir core \
     > "$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 echo "  PID: $BACKEND_PID | Log: $BACKEND_LOG"
@@ -80,6 +83,7 @@ echo "  PID: $BACKEND_PID | Log: $BACKEND_LOG"
 echo ""
 echo "── Starting frontend (next dev on :$FRONTEND_PORT) ──"
 cd "$FRONTEND_DIR"
+NODE_OPTIONS="--max-old-space-size=1024" \
 nohup npx next dev --port $FRONTEND_PORT \
     > "$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!

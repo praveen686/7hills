@@ -20,7 +20,7 @@ from engine.replay.equity_comparator import (
     compare_equity_curves,
 )
 from engine.replay.engine import ReplayResult
-from engine.state import BrahmastraState, ClosedTrade, Position
+from engine.state import PortfolioState, ClosedTrade, Position
 
 
 # ---------------------------------------------------------------------------
@@ -28,9 +28,9 @@ from engine.state import BrahmastraState, ClosedTrade, Position
 # ---------------------------------------------------------------------------
 
 def _make_state_with_history(n_days=10, seed=42, equity_start=1.0):
-    """Build a BrahmastraState with synthetic equity history and trades."""
+    """Build a PortfolioState with synthetic equity history and trades."""
     np.random.seed(seed)
-    state = BrahmastraState(equity=equity_start, peak_equity=equity_start)
+    state = PortfolioState(equity=equity_start, peak_equity=equity_start)
     for i in range(n_days):
         day_ret = np.random.normal(0.001, 0.01)
         state.equity *= (1 + day_ret)
@@ -73,8 +73,8 @@ def _make_position(strategy_id: str, symbol: str, direction: str = "long") -> Po
     )
 
 
-def _make_replay_result(state: BrahmastraState) -> ReplayResult:
-    """Wrap a BrahmastraState into a ReplayResult."""
+def _make_replay_result(state: PortfolioState) -> ReplayResult:
+    """Wrap a PortfolioState into a ReplayResult."""
     result = ReplayResult()
     result.final_state = state
     result.equity_curve = list(state.equity_history)
@@ -324,8 +324,8 @@ class TestE2ECrossDayParity:
     def test_position_transitions(self):
         """States with positions opened/closed across days should match."""
         np.random.seed(123)
-        state_a = BrahmastraState(equity=1.0, peak_equity=1.0)
-        state_b = BrahmastraState(equity=1.0, peak_equity=1.0)
+        state_a = PortfolioState(equity=1.0, peak_equity=1.0)
+        state_b = PortfolioState(equity=1.0, peak_equity=1.0)
 
         # Open and close positions identically in both states
         for s in (state_a, state_b):
@@ -374,7 +374,7 @@ class TestE2ECrossDayParity:
 
         def _build_multi_strategy_state():
             np.random.seed(55)
-            state = BrahmastraState(equity=1.0, peak_equity=1.0)
+            state = PortfolioState(equity=1.0, peak_equity=1.0)
             for day in range(15):
                 day_ret = np.random.normal(0.0005, 0.008)
                 state.equity *= (1 + day_ret)
@@ -426,7 +426,7 @@ class TestE2ECrossDayParity:
 
 class TestReplayStatePersistence:
     """Verify ReplayResult correctly captures state, equity curve,
-    and trade history from the final BrahmastraState."""
+    and trade history from the final PortfolioState."""
 
     def test_state_captured(self):
         """ReplayResult.final_state should be non-None after construction."""
@@ -434,7 +434,7 @@ class TestReplayStatePersistence:
         result = _make_replay_result(state)
 
         assert result.final_state is not None
-        assert isinstance(result.final_state, BrahmastraState)
+        assert isinstance(result.final_state, PortfolioState)
         assert result.final_state.equity == state.equity
 
     def test_equity_non_empty(self):

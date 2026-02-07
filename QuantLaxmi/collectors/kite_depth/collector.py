@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 from collectors.auth import headless_login
-from core.data.zerodha import KiteTickFeed, load_zerodha_env
+from core.market.zerodha import KiteTickFeed, load_zerodha_env
 
 from .storage import DepthStore, DepthStoreConfig, DepthTick
 from .tokens import (

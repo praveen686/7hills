@@ -522,12 +522,12 @@ def main() -> None:
 
     # Logging
     level = logging.DEBUG if args.verbose else logging.INFO
-    Path("data").mkdir(exist_ok=True)
+    Path("logs").mkdir(exist_ok=True)
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
-            logging.FileHandler("data/india_news.log"),
+            logging.FileHandler("logs/india_news.log"),
             logging.StreamHandler() if args.verbose else logging.NullHandler(),
         ],
     )

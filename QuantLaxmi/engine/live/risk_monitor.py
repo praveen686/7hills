@@ -7,7 +7,7 @@ Runs as a background async task that:
   - Publishes "risk_alert" events when limits are breached.
 
 This is the live complement to the batch-mode RiskManager in
-``qlx.risk.manager``.  The batch manager gates new entries; this monitor
+``core.risk.manager``.  The batch manager gates new entries; this monitor
 watches for deterioration in real-time and triggers emergency actions.
 """
 
@@ -27,7 +27,7 @@ from core.risk.limits import RiskLimits
 from core.risk.greeks import PortfolioGreeks, compute_portfolio_greeks
 
 from engine.live.event_bus import EventBus, EventType
-from engine.state import BrahmastraState
+from engine.state import PortfolioState
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class RiskMonitor:
     ----------
     event_bus : EventBus
         For subscribing to ticks and publishing risk alerts.
-    state : BrahmastraState
+    state : PortfolioState
         Mutable portfolio state -- positions are read for MtM.
     limits : RiskLimits
         Risk thresholds (drawdown, VPIN, concentration, etc.).
@@ -94,7 +94,7 @@ class RiskMonitor:
     def __init__(
         self,
         event_bus: EventBus,
-        state: BrahmastraState,
+        state: PortfolioState,
         limits: RiskLimits | None = None,
         greeks_interval: float = _GREEKS_INTERVAL_SEC,
     ) -> None:
@@ -359,7 +359,7 @@ class RiskMonitor:
             await self._recompute_greeks()
 
     async def _recompute_greeks(self) -> None:
-        """Compute Greeks for all positions using qlx.risk.greeks."""
+        """Compute Greeks for all positions using core.risk.greeks."""
         positions_list: list[dict] = []
 
         for key, pos in self.state.positions.items():

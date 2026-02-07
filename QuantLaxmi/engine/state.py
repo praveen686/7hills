@@ -1,4 +1,4 @@
-"""Brahmastra portfolio state — atomic JSON persistence.
+"""Portfolio state — atomic JSON persistence.
 
 Tracks combined portfolio equity, per-strategy state, positions,
 and trade history across all strategies.  Follows the atomic JSON
@@ -17,7 +17,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_FILE = Path("data/brahmastra_state.json")
+DEFAULT_STATE_FILE = Path("data/state/portfolio.json")
 
 
 @dataclass
@@ -126,8 +126,8 @@ class ClosedTrade:
 
 
 @dataclass
-class BrahmastraState:
-    """Complete Brahmastra portfolio state."""
+class PortfolioState:
+    """Complete portfolio state."""
 
     # Portfolio tracking
     equity: float = 1.0
@@ -343,7 +343,7 @@ class BrahmastraState:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> BrahmastraState:
+    def from_dict(cls, d: dict) -> PortfolioState:
         state = cls(
             equity=float(d.get("equity", 1.0)),
             peak_equity=float(d.get("peak_equity", 1.0)),
@@ -382,7 +382,7 @@ class BrahmastraState:
             raise
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_STATE_FILE) -> BrahmastraState:
+    def load(cls, path: Path = DEFAULT_STATE_FILE) -> PortfolioState:
         """Load from JSON, returning fresh state if file doesn't exist."""
         if not path.exists():
             return cls()
@@ -390,5 +390,5 @@ class BrahmastraState:
             data = json.loads(path.read_text())
             return cls.from_dict(data)
         except Exception as e:
-            logger.warning("Failed to load Brahmastra state from %s: %s", path, e)
+            logger.warning("Failed to load portfolio state from %s: %s", path, e)
             return cls()

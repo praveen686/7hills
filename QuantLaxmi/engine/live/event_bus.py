@@ -1,4 +1,4 @@
-"""AsyncIO pub/sub event bus for the BRAHMASTRA real-time engine.
+"""AsyncIO pub/sub event bus for the QuantLaxmi real-time engine.
 
 All engine components communicate through typed events on this bus.
 Each subscriber gets its own asyncio.Queue, so slow consumers do not

@@ -25,7 +25,7 @@ from strategies.s7_regime.detector import (
     classify_regime,
     VPIN_TOXIC,
 )
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 from core.strategy.base import BaseStrategy
 from core.strategy.protocol import Signal
 

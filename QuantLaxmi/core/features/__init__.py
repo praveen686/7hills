@@ -3,7 +3,7 @@ from core.features.matrix import FeatureMatrix
 from core.features.technical import RSI, BollingerBands, SuperTrend, Stochastic, ATR
 from core.features.returns import HistoricalReturns, Momentum
 from core.features.temporal import CyclicalTime
-from core.features.iv import RealizedVol
+from core.features.volatility import RealizedVol
 from core.features.ramanujan import RamanujanPeriodicity
 from core.features.microstructure import Microstructure
 

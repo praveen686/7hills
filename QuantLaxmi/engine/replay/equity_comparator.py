@@ -70,7 +70,7 @@ def compare_equity_curves(
     state_a,
     state_b,
 ) -> EquityCurveComparison:
-    """Compare two BrahmastraState objects for equity curve parity.
+    """Compare two PortfolioState objects for equity curve parity.
 
     Checks:
       - equity_history (day-by-day equity, drawdown)
@@ -79,7 +79,7 @@ def compare_equity_curves(
 
     Parameters
     ----------
-    state_a, state_b : BrahmastraState
+    state_a, state_b : PortfolioState
         States to compare (typically from two independent replay runs).
 
     Returns

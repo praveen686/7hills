@@ -28,7 +28,7 @@ from strategies.s4_iv_mr.engine import (
     format_multi_index_results,
     run_from_series,
 )
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 def _get_date_range(store: MarketDataStore) -> tuple[date, date]:
@@ -229,7 +229,7 @@ def run_sweep(start: date, end: date) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S4 IV Mean-Reversion Research")
     parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD)")

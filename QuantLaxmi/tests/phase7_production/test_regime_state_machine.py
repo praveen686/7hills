@@ -26,7 +26,7 @@ from engine.services.regime_coordinator import (
     RegimeDecision,
     RegimeState,
 )
-from engine.state import BrahmastraState, Position, ClosedTrade
+from engine.state import PortfolioState, Position, ClosedTrade
 
 
 # ======================================================================
@@ -247,9 +247,9 @@ class TestRegimeCoordinator:
 
 
 class TestPositionTTL:
-    """Tests for BrahmastraState.archive_stale_positions (TTL eviction)."""
+    """Tests for PortfolioState.archive_stale_positions (TTL eviction)."""
 
-    def test_stale_archived(self, state_with_positions: BrahmastraState):
+    def test_stale_archived(self, state_with_positions: PortfolioState):
         """Only BANKNIFTY (65 days old) is archived at max_age=30."""
         archived = state_with_positions.archive_stale_positions(
             current_date="2025-12-05", max_age_days=30,
@@ -260,7 +260,7 @@ class TestPositionTTL:
         # BANKNIFTY should no longer be in active positions
         assert state_with_positions.get_position("s4_iv_mr", "BANKNIFTY") is None
 
-    def test_fresh_kept(self, state_with_positions: BrahmastraState):
+    def test_fresh_kept(self, state_with_positions: PortfolioState):
         """s5_hawkes:NIFTY (4 days old) is not archived."""
         state_with_positions.archive_stale_positions(
             current_date="2025-12-05", max_age_days=30,
@@ -269,7 +269,7 @@ class TestPositionTTL:
         assert pos is not None
         assert pos.entry_date == "2025-12-01"
 
-    def test_boundary_exact(self, state_with_positions: BrahmastraState):
+    def test_boundary_exact(self, state_with_positions: PortfolioState):
         """Position at exactly max_age days is NOT archived (> not >=)."""
         # s1_vrp_options: entry 2025-11-05, current 2025-12-05 = 30 days
         archived = state_with_positions.archive_stale_positions(
@@ -283,7 +283,7 @@ class TestPositionTTL:
         pos = state_with_positions.get_position("s1_vrp_options", "NIFTY")
         assert pos is not None, "s1_vrp_options at exactly 30 days should NOT be archived"
 
-    def test_generates_closed_trade(self, state_with_positions: BrahmastraState):
+    def test_generates_closed_trade(self, state_with_positions: PortfolioState):
         """Archived positions appear in state.closed_trades."""
         assert len(state_with_positions.closed_trades) == 0
         archived = state_with_positions.archive_stale_positions(
@@ -294,7 +294,7 @@ class TestPositionTTL:
         for trade in archived:
             assert trade in state_with_positions.closed_trades
 
-    def test_exit_reason_ttl(self, state_with_positions: BrahmastraState):
+    def test_exit_reason_ttl(self, state_with_positions: PortfolioState):
         """Archived trades have exit_reason='ttl_expired'."""
         archived = state_with_positions.archive_stale_positions(
             current_date="2025-12-05", max_age_days=30,
@@ -313,7 +313,7 @@ class TestPositionTTL:
 class TestPositionStateMachine:
     """Tests for position lifecycle transitions integrated with regime gating."""
 
-    def test_direction_flip_flat_then_entry(self, fresh_state: BrahmastraState):
+    def test_direction_flip_flat_then_entry(self, fresh_state: PortfolioState):
         """Close a long position, then open a short in the same instrument."""
         # Open long
         fresh_state.open_position(Position(

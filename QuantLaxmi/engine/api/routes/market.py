@@ -168,7 +168,7 @@ async def get_vix(request: Request) -> VIXOut:
     except Exception as e:
         logger.debug("nse_volatility query failed: %s", e)
 
-    # Fallback: check BrahmastraState
+    # Fallback: check PortfolioState
     state = request.app.state.engine
     if state.last_vix > 0:
         return VIXOut(

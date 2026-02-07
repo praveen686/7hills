@@ -13,9 +13,9 @@ Output layout (in MARKET_DIR):
   instruments/date=YYYY-MM-DD/data.parquet # Instrument master
 
 Usage:
-  python -m qlx.data.convert                    # convert all available dates
-  python -m qlx.data.convert --dates 2026-02-05 # convert specific date(s)
-  python -m qlx.data.convert --dry-run          # show what would be converted
+  python -m core.market.convert                    # convert all available dates
+  python -m core.market.convert --dates 2026-02-05 # convert specific date(s)
+  python -m core.market.convert --dry-run          # show what would be converted
 """
 
 from __future__ import annotations

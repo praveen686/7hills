@@ -11,8 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.core.timeguard import LookaheadError, TimeGuard
-from core.core.types import OHLCV
+from core.base.timeguard import LookaheadError, TimeGuard
+from core.base.types import OHLCV
 
 
 # ---------------------------------------------------------------------------

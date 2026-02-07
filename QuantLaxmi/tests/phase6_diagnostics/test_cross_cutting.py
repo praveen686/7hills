@@ -17,7 +17,7 @@ import pytest
 from engine.services.ars_surface import ARSSurfaceService
 from engine.services.missed_opportunity import MissedOpportunityService
 from engine.services.trade_analytics import TradeAnalyticsService, TradeAnalytics
-from engine.state import BrahmastraState, ClosedTrade, Position
+from engine.state import PortfolioState, ClosedTrade, Position
 from core.events.envelope import EventEnvelope
 from core.events.serde import serialize_envelope
 from core.events.types import EventType
@@ -56,7 +56,7 @@ class TestTradeIdUniqueness:
     """test_trade_id_uniqueness - close 3 trades for same strategy, all get unique trade_ids."""
 
     def test_trade_id_uniqueness(self):
-        state = BrahmastraState()
+        state = PortfolioState()
 
         # Open and close 3 positions for strategy s1, same symbol
         for i in range(3):

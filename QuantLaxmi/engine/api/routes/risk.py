@@ -71,7 +71,7 @@ class RiskOut(BaseModel):
 
 # ------------------------------------------------------------------
 # Greeks computation (inline, no external dependency needed at route
-# level — reuses the same logic as qlx.risk.greeks but avoids the
+# level — reuses the same logic as core.risk.greeks but avoids the
 # torch import path for the API hot path)
 # ------------------------------------------------------------------
 

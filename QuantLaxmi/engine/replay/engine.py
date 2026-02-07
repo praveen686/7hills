@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 from core.strategy.registry import StrategyRegistry
 from core.allocator.meta import MetaAllocator
 from core.risk.manager import RiskManager
@@ -68,7 +68,7 @@ class ReplayResult:
     replay_positions: list[dict] = field(default_factory=list)
 
     # E2E determinism: final state and equity curve
-    final_state: object = None       # BrahmastraState from the replay run
+    final_state: object = None       # PortfolioState from the replay run
     equity_curve: list[dict] = field(default_factory=list)  # equity_history snapshot
 
     def to_dict(self) -> dict:

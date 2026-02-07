@@ -1,4 +1,4 @@
-"""EventLogWriter — append-only JSONL persistence for BRAHMASTRA.
+"""EventLogWriter — append-only JSONL persistence for QuantLaxmi.
 
 Writes EventEnvelopes to daily-rotated JSONL files:
   data/events/YYYY-MM-DD.jsonl

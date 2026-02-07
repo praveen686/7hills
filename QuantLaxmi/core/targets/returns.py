@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from core.core.types import OHLCV
+from core.base.types import OHLCV
 
 
 @dataclass(frozen=True)

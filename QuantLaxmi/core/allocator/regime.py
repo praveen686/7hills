@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 

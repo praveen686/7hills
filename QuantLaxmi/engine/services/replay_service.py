@@ -224,7 +224,7 @@ def _summarize(e: EventEnvelope) -> str:
 def _add_ms(iso_ts: str, delta_ms: int) -> str:
     """Add milliseconds to an ISO-8601 timestamp string.
 
-    Handles the BRAHMASTRA timestamp format: YYYY-MM-DDTHH:MM:SS.ffffffZ
+    Handles the ISO-8601 timestamp format: YYYY-MM-DDTHH:MM:SS.ffffffZ
     """
     from datetime import datetime, timezone, timedelta
 

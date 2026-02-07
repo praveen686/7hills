@@ -8,12 +8,12 @@
 set -euo pipefail
 cd /home/ubuntu/Desktop/7hills/QuantLaxmi
 
-VENV="/home/ubuntu/Desktop/7hills/QuantLaxmi/env/bin/python3"
-LOG="data/nse_daily.log"
-mkdir -p data
+VENV="/home/ubuntu/Desktop/7hills/QuantLaxmi/venv/bin/python3"
+LOG="logs/nse_daily.log"
+mkdir -p logs
 
 echo "$(date -u '+%Y-%m-%d %H:%M:%S'): Starting NSE daily collection" >> "$LOG"
 
-"$VENV" -m apps.nse_daily collect >> "$LOG" 2>&1
+"$VENV" -m collectors.nse_daily collect >> "$LOG" 2>&1
 
 echo "$(date -u '+%Y-%m-%d %H:%M:%S'): NSE daily collection finished" >> "$LOG"

@@ -1,4 +1,4 @@
-"""Brahmastra Orchestrator — Main trading loop.
+"""Orchestrator — Main trading loop.
 
 For each trading day:
   1. Each strategy.scan(date, store) → list[Signal]
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from core.allocator.meta import MetaAllocator, TargetPosition
 from core.allocator.regime import VIXRegime, detect_regime
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 from core.events.envelope import EventEnvelope
 from core.events.payloads import (
     SignalPayload,
@@ -39,13 +39,13 @@ from core.strategy.registry import StrategyRegistry
 from engine.live.event_log import EventLogWriter
 from engine.live.journals import ExecutionJournal, SignalJournal
 from engine.live.session_manifest import SessionManifest
-from engine.state import BrahmastraState, Position, DEFAULT_STATE_FILE
+from engine.state import PortfolioState, Position, DEFAULT_STATE_FILE
 
 logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    """Main BRAHMASTRA trading orchestrator.
+    """Main trading orchestrator.
 
     Coordinates strategies, allocation, risk management, and execution.
     Emits events to the EventLog at every decision boundary.
@@ -64,7 +64,7 @@ class Orchestrator:
         self.registry = registry or StrategyRegistry()
         self.allocator = allocator or MetaAllocator()
         self.risk_manager = risk_manager or RiskManager()
-        self.state = BrahmastraState.load(state_file)
+        self.state = PortfolioState.load(state_file)
         self._state_file = state_file
 
         # Event infrastructure (Phase 2)
@@ -124,7 +124,7 @@ class Orchestrator:
         Returns a summary dict with signals, targets, risk checks, and actions.
         """
         logger.info("=" * 70)
-        logger.info("BRAHMASTRA scan: %s", d.isoformat())
+        logger.info("QuantLaxmi scan: %s", d.isoformat())
         logger.info("=" * 70)
 
         summary: dict = {
@@ -465,7 +465,7 @@ class Orchestrator:
         return 0.0
 
     def _build_risk_state(self) -> RiskPortfolioState:
-        """Convert BrahmastraState to RiskManager's PortfolioState."""
+        """Convert PortfolioState to RiskManager's PortfolioState."""
         positions = {}
         for key, pos in self.state.positions.items():
             positions[pos.symbol] = {

@@ -19,7 +19,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -274,7 +274,7 @@ def run_research(
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S6 Multi-Factor Research")
     parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD)")

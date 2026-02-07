@@ -2,8 +2,8 @@
 # Usage: make test | make test-phase7 | make deploy-gate
 
 SHELL := /bin/bash
-PYTHON := source QuantLaxmi/env/bin/activate && python
-PYTEST := source QuantLaxmi/env/bin/activate && python -m pytest
+PYTHON := source QuantLaxmi/venv/bin/activate && python
+PYTEST := source QuantLaxmi/venv/bin/activate && python -m pytest
 SRC := QuantLaxmi
 TESTS := $(SRC)/tests
 

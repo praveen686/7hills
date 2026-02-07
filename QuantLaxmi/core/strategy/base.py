@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from datetime import date
 from pathlib import Path
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 from core.strategy.protocol import Signal
 
 logger = logging.getLogger(__name__)

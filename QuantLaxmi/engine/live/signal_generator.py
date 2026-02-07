@@ -25,7 +25,7 @@ from typing import Any
 
 from core.strategy.protocol import Signal, StrategyProtocol
 from core.strategy.registry import StrategyRegistry
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 from engine.live.event_bus import EventBus, EventType
 

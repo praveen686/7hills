@@ -19,7 +19,7 @@ from datetime import date
 
 from core.allocator.regime import VIXRegime, VIXRegimeType, detect_regime
 from core.allocator.sizing import conviction_to_size, kelly_fraction
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 from core.strategy.protocol import Signal
 
 logger = logging.getLogger(__name__)

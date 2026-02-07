@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.data.zerodha import (
+from core.market.zerodha import (
     INTERVALS,
     KiteTick,
     generate_totp,

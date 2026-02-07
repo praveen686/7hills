@@ -27,7 +27,7 @@ import numpy as np
 
 from strategies.s9_momentum.scanner import run_daily_scan
 from strategies.s9_momentum.data import is_trading_day, get_fno
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 COST_BPS = 10.0
@@ -257,7 +257,7 @@ def run_sweep(store: MarketDataStore, start: date, end: date) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S9 Momentum Research")
     parser.add_argument("--start", default=None)

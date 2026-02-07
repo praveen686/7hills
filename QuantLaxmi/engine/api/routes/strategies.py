@@ -445,7 +445,7 @@ async def list_strategies(request: Request) -> StrategiesListOut:
     Sources:
     1. Research artefact .txt files for Sharpe, return, win rate, trades
     2. Strategy state .json files for live positions and state
-    3. BrahmastraState for consolidated portfolio positions
+    3. PortfolioState for consolidated portfolio positions
     """
     reader = request.app.state.strategy_reader
     state_by_id: dict[str, dict] = {}

@@ -26,7 +26,7 @@ import pandas as pd
 import torch
 
 from strategies.s9_momentum.data import is_trading_day
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 NIFTY_TOKEN = 256265
 BANKNIFTY_TOKEN = 260105
@@ -611,7 +611,7 @@ def _print_results(df: pd.DataFrame) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S5 Tick Microstructure Research (GPU)")
     parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD)")

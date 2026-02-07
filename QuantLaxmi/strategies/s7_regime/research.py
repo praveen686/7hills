@@ -33,7 +33,7 @@ from strategies.s7_regime.detector import (
     VPIN_TOXIC,
 )
 from strategies.s9_momentum.data import is_trading_day
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 SYMBOLS = ["NIFTY", "BANKNIFTY"]
@@ -373,7 +373,7 @@ def run_sweep(store: MarketDataStore, start: date, end: date) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S7 Regime Switch Research")
     parser.add_argument("--start", default=None)

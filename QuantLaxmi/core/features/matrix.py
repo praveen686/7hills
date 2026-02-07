@@ -28,8 +28,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from core.core.timeguard import TimeGuard
-from core.core.types import OHLCV, FeatureTransform
+from core.base.timeguard import TimeGuard
+from core.base.types import OHLCV, FeatureTransform
 from core.features.base import Feature
 
 

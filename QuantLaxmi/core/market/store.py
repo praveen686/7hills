@@ -11,7 +11,7 @@ hive-partitioned parquet directories. No data is duplicated — DuckDB
 reads parquet files directly with predicate pushdown.
 
 Usage:
-    from core.data.store import MarketDataStore
+    from core.market.store import MarketDataStore
 
     store = MarketDataStore()
     chain = store.get_option_chain("NIFTY", date(2026, 2, 5), "2026-02-06")
@@ -274,7 +274,7 @@ class MarketDataStore:
         This is the daily ingestion hook — call it after downloading
         new data from Telegram.
         """
-        from core.data.convert import convert_day
+        from core.market.convert import convert_day
 
         results = convert_day(d, force=force)
         if results:
@@ -285,7 +285,7 @@ class MarketDataStore:
 
     def ingest_nse_day(self, d: date, force: bool = False) -> dict[str, int]:
         """Convert and ingest NSE daily files for a single date."""
-        from core.data.nse_convert import convert_nse_day
+        from core.market.nse_convert import convert_nse_day
 
         results = convert_nse_day(d, force=force)
         if results:

@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from strategies.s9_momentum.data import is_trading_day
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 COST_BPS = 10.0
@@ -420,7 +420,7 @@ def run_sweep(store: MarketDataStore, start: date, end: date) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S11 Pairs Trading Research")
     parser.add_argument("--start", default=None)

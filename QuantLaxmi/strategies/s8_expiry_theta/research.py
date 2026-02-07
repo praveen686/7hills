@@ -21,7 +21,7 @@ import time
 from datetime import date
 
 from strategies.s8_expiry_theta.strategy import backtest_expiry_theta
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 SYMBOLS = ["NIFTY", "BANKNIFTY"]
@@ -111,7 +111,7 @@ def run_sweep(store: MarketDataStore, start: date, end: date) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S8 Expiry Theta Research")
     parser.add_argument("--start", default=None)

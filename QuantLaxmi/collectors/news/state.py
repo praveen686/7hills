@@ -16,7 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_FILE = Path("data/india_news_state.json")
+DEFAULT_STATE_FILE = Path("data/state/india_news.json")
 
 
 # ---------------------------------------------------------------------------

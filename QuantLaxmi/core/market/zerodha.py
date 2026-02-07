@@ -24,7 +24,7 @@ import pyotp
 from dotenv import load_dotenv
 from kiteconnect import KiteConnect, KiteTicker
 
-from core.core.types import OHLCV
+from core.base.types import OHLCV
 
 logger = logging.getLogger(__name__)
 

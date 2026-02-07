@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    from core.core.types import FeatureTransform, TargetTransform
+    from core.base.types import FeatureTransform, TargetTransform
 
 
 class LookaheadError(Exception):

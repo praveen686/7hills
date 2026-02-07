@@ -184,7 +184,7 @@ def _parse_events_file(path: Path) -> list[dict]:
 
 
 def _signals_from_state(state: Any) -> list[dict]:
-    """Extract signals from BrahmastraState.
+    """Extract signals from PortfolioState.
 
     The orchestrator stores recent signals in state metadata.
     We also synthesize signals from active positions (latest entries).
@@ -241,10 +241,10 @@ def _signals_from_state(state: Any) -> list[dict]:
 
 @router.get("", response_model=list[SignalOut])
 async def get_signals(request: Request) -> list[SignalOut]:
-    """Return recent signals from WAL event logs and Brahmastra state.
+    """Return recent signals from WAL event logs and portfolio state.
 
     Primary source: WAL event log .jsonl files in data/events/
-    Secondary source: BrahmastraState closed trades and active positions
+    Secondary source: PortfolioState closed trades and active positions
     """
     all_signals: list[dict] = []
 

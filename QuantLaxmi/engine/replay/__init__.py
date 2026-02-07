@@ -1,1 +1,1 @@
-"""BRAHMASTRA Replay Engine — deterministic decision replay from WAL."""
+"""QuantLaxmi Replay Engine — deterministic decision replay from WAL."""

@@ -1,4 +1,4 @@
-"""BRAHMASTRA CLI entry point.
+"""QuantLaxmi Engine CLI entry point.
 
 Usage:
     python -m engine paper --once              # single day scan
@@ -24,7 +24,7 @@ logger = logging.getLogger("engine")
 
 def cmd_paper(args: argparse.Namespace) -> None:
     """Run paper trading mode."""
-    from core.data.store import MarketDataStore
+    from core.market.store import MarketDataStore
     from core.strategy.registry import StrategyRegistry
     from core.allocator.meta import MetaAllocator
     from core.risk.manager import RiskManager
@@ -75,7 +75,7 @@ def cmd_paper(args: argparse.Namespace) -> None:
 
 def cmd_replay(args: argparse.Namespace) -> None:
     """Run replay engine for parity verification."""
-    from core.data.store import MarketDataStore
+    from core.market.store import MarketDataStore
     from core.strategy.registry import StrategyRegistry
     from engine.replay.engine import ReplayEngine
 
@@ -136,11 +136,11 @@ def cmd_replay(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     """Show current portfolio status."""
-    from engine.state import BrahmastraState
+    from engine.state import PortfolioState
 
-    state = BrahmastraState.load(Path(args.state_file))
+    state = PortfolioState.load(Path(args.state_file))
 
-    print("BRAHMASTRA Portfolio Status")
+    print("QuantLaxmi Portfolio Status")
     print("=" * 60)
     print(f"  Equity:         {state.equity:.4f} ({state.total_return_pct():+.2f}%)")
     print(f"  Peak equity:    {state.peak_equity:.4f}")
@@ -225,14 +225,14 @@ def _print_summary(summary: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="engine",
-        description="BRAHMASTRA — India FnO Trading System",
+        description="QuantLaxmi Engine — India FnO Trading System",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Enable debug logging",
     )
     parser.add_argument(
-        "--state-file", default="data/brahmastra_state.json",
+        "--state-file", default="data/state/portfolio.json",
         help="Path to state JSON file",
     )
 
@@ -269,7 +269,7 @@ def main() -> None:
     )
 
     # live (placeholder)
-    sub.add_parser("live", help="Live trading mode (requires BRAHMASTRA_MODE=live)")
+    sub.add_parser("live", help="Live trading mode (requires QUANTLAXMI_MODE=live)")
 
     args = parser.parse_args()
 

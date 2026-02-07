@@ -17,7 +17,7 @@ import logging
 import math
 from dataclasses import dataclass, field, asdict
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 

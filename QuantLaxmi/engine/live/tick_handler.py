@@ -23,7 +23,7 @@ from typing import Any
 
 import numpy as np
 
-from core.data.zerodha import KiteTick
+from core.market.zerodha import KiteTick
 from core.features.microstructure import tick_entropy, vpin_from_ticks
 
 from engine.live.event_bus import EventBus, EventType

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core.core.timeguard import LookaheadError
+from core.base.timeguard import LookaheadError
 from core.features import RSI, BollingerBands, CyclicalTime, HistoricalReturns
 from core.pipeline.config import PipelineConfig
 from core.pipeline.engine import EngineResult, ResearchEngine

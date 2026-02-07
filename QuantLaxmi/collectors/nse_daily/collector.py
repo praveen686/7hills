@@ -244,7 +244,7 @@ class NSEDailyCollector:
     def _ingest(self, d: date) -> None:
         """Convert downloaded files to hive-partitioned parquet."""
         try:
-            from core.data.nse_convert import convert_nse_day
+            from core.market.nse_convert import convert_nse_day
 
             results = convert_nse_day(d)
             if results:

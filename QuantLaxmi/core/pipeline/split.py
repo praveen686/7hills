@@ -16,7 +16,7 @@ from typing import Iterator, NamedTuple
 import numpy as np
 import pandas as pd
 
-from core.core.timeguard import LookaheadError, TimeGuard
+from core.base.timeguard import LookaheadError, TimeGuard
 
 
 class SplitResult(NamedTuple):

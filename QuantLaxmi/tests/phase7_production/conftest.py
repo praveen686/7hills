@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.state import BrahmastraState, Position, ClosedTrade
+from engine.state import PortfolioState, Position, ClosedTrade
 from engine.live.event_log import EventLogWriter
 from core.events.envelope import EventEnvelope
 
@@ -158,15 +158,15 @@ def seeded_prices_500() -> np.ndarray:
 # -----------------------------------------------------------------------
 
 @pytest.fixture
-def fresh_state() -> BrahmastraState:
-    """Fresh BrahmastraState with default equity."""
-    return BrahmastraState()
+def fresh_state() -> PortfolioState:
+    """Fresh PortfolioState with default equity."""
+    return PortfolioState()
 
 
 @pytest.fixture
-def state_with_positions() -> BrahmastraState:
+def state_with_positions() -> PortfolioState:
     """State with 3 active positions of varying age."""
-    state = BrahmastraState()
+    state = PortfolioState()
     # Fresh position (today)
     state.open_position(Position(
         strategy_id="s5_hawkes", symbol="NIFTY", direction="long",

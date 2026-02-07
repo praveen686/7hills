@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.core.timeguard import LookaheadError
+from core.base.timeguard import LookaheadError
 from core.features import (
     RSI,
     ATR,

@@ -1,7 +1,7 @@
 """State manager — unified view of all strategy and portfolio state.
 
 Reads and aggregates:
-  1. The main brahmastra_state.json (portfolio-level equity, positions, trades).
+  1. The portfolio state JSON (portfolio-level equity, positions, trades).
   2. All per-strategy state JSON files from data/strategy_state/.
   3. Engine-level real-time state (risk snapshots, signal history).
 
@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from engine.state import BrahmastraState, DEFAULT_STATE_FILE
+from engine.state import PortfolioState, DEFAULT_STATE_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +89,12 @@ class CombinedState:
 
 
 class StateManager:
-    """Unified state aggregator for the BRAHMASTRA system.
+    """Unified state aggregator for the QuantLaxmi Engine.
 
     Parameters
     ----------
     state_file : Path
-        Path to the main brahmastra_state.json.
+        Path to the portfolio state JSON file.
     strategy_state_dir : Path
         Directory containing per-strategy JSON state files.
     reload_interval : float
@@ -112,7 +112,7 @@ class StateManager:
         self._reload_interval = reload_interval
 
         # Cached state
-        self._brahmastra_state: BrahmastraState | None = None
+        self._portfolio_state: PortfolioState | None = None
         self._strategy_states: dict[str, StrategyStateView] = {}
         self._last_reload: float = 0.0
 
@@ -164,13 +164,13 @@ class StateManager:
 
     def _reload_sync(self) -> None:
         """Synchronous reload (runs in executor)."""
-        # 1. Main Brahmastra state
+        # 1. Main portfolio state
         try:
-            self._brahmastra_state = BrahmastraState.load(self._state_file)
+            self._portfolio_state = PortfolioState.load(self._state_file)
         except Exception as e:
-            logger.warning("Failed to load Brahmastra state: %s", e)
-            if self._brahmastra_state is None:
-                self._brahmastra_state = BrahmastraState()
+            logger.warning("Failed to load portfolio state: %s", e)
+            if self._portfolio_state is None:
+                self._portfolio_state = PortfolioState()
 
         # 2. Per-strategy state files
         self._strategy_states.clear()
@@ -251,7 +251,7 @@ class StateManager:
 
         This is the main API entry point for the dashboard / REST endpoint.
         """
-        state = self._brahmastra_state or BrahmastraState()
+        state = self._portfolio_state or PortfolioState()
 
         positions = [p.to_dict() for p in state.active_positions()]
 
@@ -291,8 +291,8 @@ class StateManager:
     def list_strategies(self) -> list[str]:
         """List all known strategy IDs."""
         ids = set(self._strategy_states.keys())
-        if self._brahmastra_state:
-            ids.update(self._brahmastra_state.strategy_equity.keys())
+        if self._portfolio_state:
+            ids.update(self._portfolio_state.strategy_equity.keys())
         return sorted(ids)
 
     # ------------------------------------------------------------------

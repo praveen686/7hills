@@ -13,7 +13,7 @@ import logging
 import math
 from datetime import date, timedelta
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 from core.strategy.base import BaseStrategy
 from core.strategy.protocol import Signal
 

@@ -21,7 +21,7 @@ from datetime import date
 
 from strategies.s1_vrp.options import run_multi_index_options_backtest
 from strategies.s1_vrp.density import run_multi_index_density_backtest
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 def _format_density_results(results: dict) -> str:
@@ -145,7 +145,7 @@ def run_sweep(store: MarketDataStore, start: date, end: date) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S1 VRP-RNDR Research")
     parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD)")

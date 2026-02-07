@@ -550,7 +550,7 @@ def _run_s5(store, start: date, end: date, p: dict) -> dict:
     cost_bps = float(p.get("cost_bps", 5.0))
     token = int(p.get("token", 256265))  # NIFTY
 
-    from strategies.s5_tick_microstructure import _load_day_data, _backtest_feature
+    from strategies.s5_hawkes.research import _load_day_data, _backtest_feature
 
     dates = store.available_dates("ticks")
     dates = sorted(d for d in dates if start <= d <= end)
@@ -589,7 +589,7 @@ def _run_s6(store, start: date, end: date, p: dict) -> dict:
     train_window = int(p.get("train_window", 60))
     test_window = int(p.get("test_window", 5))
 
-    from strategies.s6_multi_factor import _build_feature_matrix, _walk_forward_backtest
+    from strategies.s6_multi_factor.research import _build_feature_matrix, _walk_forward_backtest
 
     X, y, feature_names = _build_feature_matrix(
         store, start, end, target_index=target_index,
@@ -614,7 +614,7 @@ def _run_s6(store, start: date, end: date, p: dict) -> dict:
 
 def _run_s7(store, start: date, end: date, p: dict) -> dict:
     """S7 Regime Switch: entropy/VPIN regime detection with sub-strategies."""
-    from strategies.s7_regime_switch import backtest_regime_switch
+    from strategies.s7_regime.research import backtest_regime_switch
 
     symbol = p.get("symbol", "NIFTY")
     lookback = int(p.get("lookback", 100))
@@ -643,7 +643,7 @@ def _run_s8(store, start: date, end: date, p: dict) -> dict:
 
 def _run_s9(store, start: date, end: date, p: dict) -> dict:
     """S9 Cross-Sectional Momentum: weekly rebalance stock portfolio."""
-    from research.s9_momentum import backtest_momentum
+    from strategies.s9_momentum.research import backtest_momentum
 
     top_n = int(p.get("top_n", 5))
     cost_bps = float(p.get("cost_bps", 10.0))
@@ -653,7 +653,7 @@ def _run_s9(store, start: date, end: date, p: dict) -> dict:
 
 def _run_s10(store, start: date, end: date, p: dict) -> dict:
     """S10 Gamma Scalping: buy straddles in low-IV with actual option prices."""
-    from strategies.s10_gamma_scalp import backtest_gamma_scalp
+    from strategies.s10_gamma_scalp.research import backtest_gamma_scalp
 
     symbol = p.get("symbol", "NIFTY")
     iv_pctile_threshold = float(p.get("iv_pctile_threshold", 0.20))
@@ -667,7 +667,7 @@ def _run_s10(store, start: date, end: date, p: dict) -> dict:
 
 def _run_s11(store, start: date, end: date, p: dict) -> dict:
     """S11 Statistical Pairs: cointegration-based spread trading."""
-    from strategies.s11_pairs import backtest_pairs
+    from strategies.s11_pairs.research import backtest_pairs
 
     lookback = int(p.get("lookback", 60))
     z_entry = float(p.get("z_entry", 2.0))

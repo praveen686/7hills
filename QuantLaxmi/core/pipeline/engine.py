@@ -30,8 +30,8 @@ from sklearn.metrics import (
 
 from core.backtest.costs import CostModel
 from core.backtest.portfolio import BacktestResult, run_backtest
-from core.core.timeguard import TimeGuard
-from core.core.types import OHLCV
+from core.base.timeguard import TimeGuard
+from core.base.types import OHLCV
 from core.features.base import Feature
 from core.features.matrix import FeatureMatrix
 from core.models.factory import ModelFactory

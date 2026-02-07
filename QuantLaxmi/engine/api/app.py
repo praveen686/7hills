@@ -1,7 +1,7 @@
-"""BRAHMASTRA FastAPI application.
+"""QuantLaxmi Engine FastAPI application.
 
 Main entry point for the API server.  Initialises shared services
-(MarketDataStore, BrahmastraState, StrategyRegistry, StrategyReader)
+(MarketDataStore, PortfolioState, StrategyRegistry, StrategyReader)
 on startup and tears them down on shutdown via the ASGI lifespan
 protocol.
 
@@ -19,7 +19,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from engine.state import BrahmastraState, DEFAULT_STATE_FILE
+from engine.state import PortfolioState, DEFAULT_STATE_FILE
 from engine.services.strategy_reader import StrategyReader
 from engine.services.market_data import MarketDataService
 from engine.api.routes import portfolio, strategies, backtest, risk, market, research, signals, why_panel, replay, diagnostics
@@ -31,7 +31,7 @@ from engine.services.trade_analytics import TradeAnalyticsService
 from engine.services.missed_opportunity import MissedOpportunityService
 from engine.services.ars_surface import ARSSurfaceService
 
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 from core.strategy.registry import StrategyRegistry
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Initialise shared state on startup; clean up on shutdown."""
-    logger.info("BRAHMASTRA API starting up...")
+    logger.info("QuantLaxmi Engine API starting up...")
 
     # 1. Load portfolio state
     state_path = Path(
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if hasattr(app.state, "state_file")
         else DEFAULT_STATE_FILE
     )
-    app.state.engine = BrahmastraState.load(state_path)
+    app.state.engine = PortfolioState.load(state_path)
     app.state.state_path = state_path
     logger.info(
         "Loaded state: equity=%.4f  positions=%d  trades=%d",
@@ -107,12 +107,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 7. WS connection manager
     app.state.ws_manager = ws_module.manager
 
-    logger.info("BRAHMASTRA API ready.")
+    logger.info("QuantLaxmi Engine API ready.")
 
     yield  # ---- application runs ----
 
     # Shutdown
-    logger.info("BRAHMASTRA API shutting down...")
+    logger.info("QuantLaxmi Engine API shutting down...")
     market_svc.close()
     logger.info("Shutdown complete.")
 
@@ -130,16 +130,16 @@ def create_app(
     Parameters
     ----------
     state_file : str | Path, optional
-        Path to the Brahmastra state JSON file.
-        Defaults to ``data/brahmastra_state.json``.
+        Path to the portfolio state JSON file.
+        Defaults to ``data/state/portfolio.json``.
     allowed_origins : list[str], optional
         CORS allowed origins.  Defaults to permissive local development
         origins.
     """
     application = FastAPI(
-        title="BRAHMASTRA",
+        title="QuantLaxmi Engine",
         description=(
-            "BRAHMASTRA Trading System API -- India FnO portfolio management, "
+            "QuantLaxmi Engine API -- India FnO portfolio management, "
             "strategy monitoring, backtesting, risk analytics, and real-time "
             "market data."
         ),

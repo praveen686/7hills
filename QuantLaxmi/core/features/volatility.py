@@ -7,8 +7,8 @@ Contains five estimators with different statistical properties:
   - Yang-Zhang (2000) — drift-independent, best for opening gaps
   - Vol-of-vol — second-order volatility dynamics
 
-For option-chain IV computation, use apps.india_fno.iv_engine (GPU)
-or apps.india_fno.sanos (LP-calibrated arbitrage-free surface).
+For option-chain IV computation, use core.pricing.iv_engine (GPU)
+or core.pricing.sanos (LP-calibrated arbitrage-free surface).
 """
 
 from __future__ import annotations

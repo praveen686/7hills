@@ -29,7 +29,7 @@ from datetime import date, timedelta
 import numpy as np
 
 from strategies.s9_momentum.data import is_trading_day
-from core.data.store import MarketDataStore
+from core.market.store import MarketDataStore
 
 
 SYMBOLS = ["NIFTY", "BANKNIFTY"]
@@ -463,7 +463,7 @@ def run_sweep(store: MarketDataStore, start: date, end: date) -> None:
 
 
 def main() -> None:
-    from research.utils import tee_to_results
+    from strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(description="S10 Gamma Scalp Research")
     parser.add_argument("--start", default=None)

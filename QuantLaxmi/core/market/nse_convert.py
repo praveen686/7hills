@@ -9,10 +9,10 @@ Output layout (in MARKET_DIR):
   ... (23 categories total)
 
 Usage:
-  python -m qlx.data.nse_convert                        # convert all dates
-  python -m qlx.data.nse_convert --dates 2026-02-05     # specific date(s)
-  python -m qlx.data.nse_convert --dry-run              # show what would be done
-  python -m qlx.data.nse_convert --force                # re-convert existing
+  python -m core.market.nse_convert                        # convert all dates
+  python -m core.market.nse_convert --dates 2026-02-05     # specific date(s)
+  python -m core.market.nse_convert --dry-run              # show what would be done
+  python -m core.market.nse_convert --force                # re-convert existing
 """
 
 from __future__ import annotations

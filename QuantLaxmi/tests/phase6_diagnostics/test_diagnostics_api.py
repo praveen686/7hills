@@ -19,7 +19,7 @@ from engine.api.routes.diagnostics import router
 from engine.services.ars_surface import ARSSurfaceService
 from engine.services.missed_opportunity import MissedOpportunityService
 from engine.services.trade_analytics import TradeAnalyticsService
-from engine.state import BrahmastraState, ClosedTrade
+from engine.state import PortfolioState, ClosedTrade
 from core.events.envelope import EventEnvelope
 from core.events.serde import serialize_envelope
 from core.events.types import EventType
@@ -43,7 +43,7 @@ def _make_test_app(tmp_dir: Path | None = None) -> FastAPI:
     app.include_router(router)
 
     # Mock state with one closed trade
-    state = BrahmastraState()
+    state = PortfolioState()
     state.closed_trades = [
         ClosedTrade(
             strategy_id="s1",

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from core.core.types import OHLCV
+from core.base.types import OHLCV
 
 # ---------------------------------------------------------------------------
 # Column name mappings for common data sources

@@ -26,7 +26,7 @@ from kiteconnect import KiteConnect
 
 logger = logging.getLogger(__name__)
 
-TOKEN_CACHE = Path("data/zerodha_session.json")
+TOKEN_CACHE = Path("data/state/zerodha_session.json")
 
 
 def _load_env() -> dict[str, str]:
