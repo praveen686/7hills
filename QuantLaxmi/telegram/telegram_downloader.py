@@ -10,13 +10,13 @@ from telethon import TelegramClient, events
 from dotenv import load_dotenv
 
 # Load credentials from .env
-load_dotenv(Path(__file__).parent.parent / "qlxr_vault" / ".env")
+load_dotenv(Path(__file__).parent.parent / "vault" / ".env")
 
 API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 TELEGRAM_PHONE = os.getenv("TELEGRAM_PHONE") or os.getenv("ph_number_telegram")
 CHANNEL_NAME = "nfo_data"
-DOWNLOAD_DIR = Path("/home/ubuntu/Desktop/7hills/QuantLaxmi/common/qlxr_data/telegram_source_files/india_tick_data")
+DOWNLOAD_DIR = Path("/home/ubuntu/Desktop/7hills/QuantLaxmi/data/telegram_source_files/india_tick_data")
 
 # Configuration constants
 DOWNLOAD_TIMEOUT = 600  # 10 minutes per file

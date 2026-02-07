@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 _DATA_ROOT = Path(
     os.environ.get(
         "QLX_DATA_ROOT",
-        "/home/ubuntu/Desktop/7hills/QuantLaxmi/common/qlxr_data",
+        "/home/ubuntu/Desktop/7hills/QuantLaxmi/data",
     )
 )
 

@@ -8,7 +8,7 @@
 set -euo pipefail
 cd /home/ubuntu/Desktop/7hills/QuantLaxmi
 
-VENV="/home/ubuntu/Desktop/7hills/QuantLaxmi/common/qlxr_env/bin/python3"
+VENV="/home/ubuntu/Desktop/7hills/QuantLaxmi/env/bin/python3"
 LOG="data/nse_daily.log"
 mkdir -p data
 

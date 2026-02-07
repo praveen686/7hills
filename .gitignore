@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 venv/
 qlxr_env/
+env/
 .pytest_cache/
 .coverage
 
@@ -63,6 +64,7 @@ credentials.json
 secrets.toml
 tokens.txt
 qlxr_vault/
+vault/
 
 # === IDE / OS ===
 .idea/
