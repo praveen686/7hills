@@ -1,0 +1,29 @@
+Auto-detected date range: 2025-08-06 to 2026-02-06
+
+======================================================================
+S4 IV Mean-Reversion: 2025-08-06 to 2026-02-06
+  iv_lookback=30, entry_pctile=0.8
+======================================================================
+
+  Building IV series for 5 indices (5 workers)...
+    FINNIFTY        122 days, 121 SANOS OK (104.1s)
+    NIFTY           122 days, 122 SANOS OK (110.3s)
+    MIDCPNIFTY      122 days, 122 SANOS OK (126.2s)
+    NIFTYNXT50      122 days, 121 SANOS OK (144.5s)
+    BANKNIFTY       122 days, 122 SANOS OK (145.4s)
+  All IV series built in 145.4s
+
+  (145.4s)
+Multi-Index IV Mean-Reversion — Backtest Comparison
+================================================================================
+
+  Symbol        Days  Signals  Trades   Return  Sharpe   MaxDD  WinRate
+  ---------------------------------------------------------------------------
+  BANKNIFTY      122        7       7   +8.91%    3.07   2.50%   71.4%
+  FINNIFTY       122        7       7   +2.83%    1.40   1.39%   57.1%
+  MIDCPNIFTY     122        7       7   +0.31%    0.09   7.94%   71.4%
+  NIFTY          122       10      10   +3.77%    1.42   4.15%   50.0%
+  NIFTYNXT50     122        5       5   -7.37%   -2.89   7.37%    0.0%
+  ---------------------------------------------------------------------------
+  TOTAL            -        -      36   +1.69% (avg)
+

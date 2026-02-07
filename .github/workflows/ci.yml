@@ -1,0 +1,105 @@
+name: QuantLaxmi CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------
+  # 1. Lint (fast gate)
+  # ---------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff
+      - run: ruff check QuantLaxmi --select=E,F,W --ignore=E501
+
+  # ---------------------------------------------------------------
+  # 2. Unit tests (excludes slow / integration)
+  # ---------------------------------------------------------------
+  unit-tests:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install pytest numpy pandas scipy torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e QuantLaxmi
+      - name: Run unit tests
+        run: |
+          cd QuantLaxmi
+          python -m pytest tests/ -v --tb=short -m "not slow" -q
+
+  # ---------------------------------------------------------------
+  # 3a. Parity gate (E2E determinism + SANOS)
+  # ---------------------------------------------------------------
+  parity-gate:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install pytest numpy pandas scipy torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e QuantLaxmi
+      - name: Parity gate
+        run: |
+          cd QuantLaxmi
+          python -m pytest tests/phase7_production/test_e2e_determinism.py tests/phase7_production/test_sanos_determinism.py -v --tb=short -q
+
+  # ---------------------------------------------------------------
+  # 3b. Missingness gate
+  # ---------------------------------------------------------------
+  missingness-gate:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install pytest numpy pandas scipy torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e QuantLaxmi
+      - name: Missingness gate
+        run: |
+          cd QuantLaxmi
+          python -m pytest tests/phase7_production/test_missingness.py -v --tb=short -q
+
+  # ---------------------------------------------------------------
+  # 4. Deploy gate (main only — full suite)
+  # ---------------------------------------------------------------
+  deploy-gate:
+    if: github.ref == 'refs/heads/main'
+    needs: [parity-gate, missingness-gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install pytest numpy pandas scipy torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e QuantLaxmi
+      - name: Full deploy gate
+        run: |
+          cd QuantLaxmi
+          python -m pytest tests/ -v --tb=short -q

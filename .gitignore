@@ -16,6 +16,8 @@ qlxr_env/
 
 # === Node ===
 node_modules/
+.next/
+tsconfig.tsbuildinfo
 
 # === Data & large files ===
 *.parquet
@@ -39,8 +41,8 @@ node_modules/
 **/data/market/
 **/data/telegram_source_files/
 **/data/kite_depth/
-# Legacy data directories
-qlx/qlxleg/**/data/
+# Archive (legacy code)
+QuantLaxmi_archive/
 # Strategy state files and session files
 *_state.json
 *_state.json.bak
