@@ -1,0 +1,41 @@
+{
+  "session_id": "6af802fc-0fb1-4efb-ba02-4f93f4d1fc84",
+  "watermark": "QuantLaxmi-india-session-20260123-041319-6af802fc",
+  "family": "india",
+  "profile": "research",
+  "instruments": [
+    "NIFTY26JAN25300CE",
+    "NIFTY26JAN25300PE"
+  ],
+  "captures": [
+    {
+      "tradingsymbol": "NIFTY26JAN25300CE",
+      "instrument_token": 15025922,
+      "manifest_path": "NIFTY26JAN25300CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25300CE/ticks.jsonl",
+      "ticks_hash": "5a842464fe600e979d059b7c3baca9dffdc1395591a16f955730701f9f62f416",
+      "ticks_written": 11,
+      "has_depth": false
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25300PE",
+      "instrument_token": 15027714,
+      "manifest_path": "NIFTY26JAN25300PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25300PE/ticks.jsonl",
+      "ticks_hash": "ecb377e0a3bd59c726df91e96cca4685b75adec4635f87c1920aa98b3c8f25f6",
+      "ticks_written": 9,
+      "has_depth": false
+    }
+  ],
+  "determinism": {
+    "certified": false,
+    "all_instruments_clean": false,
+    "instrument_hashes": {
+      "NIFTY26JAN25300CE": "5a842464fe600e979d059b7c3baca9dffdc1395591a16f955730701f9f62f416",
+      "NIFTY26JAN25300PE": "ecb377e0a3bd59c726df91e96cca4685b75adec4635f87c1920aa98b3c8f25f6"
+    }
+  },
+  "started_at": "2026-01-23T04:13:19.760089765Z",
+  "finished_at": "2026-01-23T04:13:25.970272111Z",
+  "duration_secs": 6.21
+}

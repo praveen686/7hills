@@ -1,0 +1,24 @@
+{
+  "run_id": "slrt_20260203_184250",
+  "symbol": "BTCUSDT",
+  "mode": "canary",
+  "start_ts_ms": 1770144170550,
+  "allowed_regimes": [
+    "R0",
+    "R1",
+    "R2",
+    "R3"
+  ],
+  "confidence_min": 0.55,
+  "toxicity_max": 1.0,
+  "imbalance_min_abs": 0.05,
+  "require_fti_confirm": false,
+  "cooldown_seconds": 0,
+  "max_entries_per_hour": 9999,
+  "time_stop_seconds": 300,
+  "take_profit_bps": 40.0,
+  "stop_loss_bps": 40.0,
+  "fee_rate": 0.001,
+  "qty": 0.001,
+  "no_flip": true
+}

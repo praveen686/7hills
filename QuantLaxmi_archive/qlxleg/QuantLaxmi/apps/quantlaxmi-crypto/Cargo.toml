@@ -1,0 +1,48 @@
+[package]
+name = "quantlaxmi-crypto"
+version = "0.1.0"
+edition = "2024"
+description = "QuantLaxmi Crypto - Cryptocurrency Trading (Binance)"
+
+[[bin]]
+name = "quantlaxmi-crypto"
+path = "src/main.rs"
+
+[[bin]]
+name = "crypto-paper-tui"
+path = "src/bin/paper_tui.rs"
+
+[[bin]]
+name = "slrt-tui"
+path = "src/bin/slrt_tui.rs"
+
+[dependencies]
+# Crypto runner library (brings all Crypto-specific deps)
+quantlaxmi-runner-crypto = { path = "../../crates/quantlaxmi-runner-crypto" }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Environment
+dotenvy = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+
+# HTTP client for paper trading API
+reqwest = { workspace = true }
+
+# TUI dependencies
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# SLRT TUI dependencies
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+futures = { workspace = true }
+tokio-tungstenite = { workspace = true }
+quantlaxmi-models = { path = "../../crates/quantlaxmi-models" }
+quantlaxmi-paper = { path = "../../crates/quantlaxmi-paper" }

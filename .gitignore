@@ -41,8 +41,6 @@ tsconfig.tsbuildinfo
 **/data/market/
 **/data/telegram_source_files/
 **/data/kite_depth/
-# Archive (legacy code)
-QuantLaxmi_archive/
 # Strategy state files and session files
 *_state.json
 *_state.json.bak

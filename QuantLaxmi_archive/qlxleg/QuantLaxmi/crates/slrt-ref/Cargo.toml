@@ -1,0 +1,30 @@
+[package]
+name = "slrt-ref"
+version = "0.1.0"
+edition = "2024"
+description = "SLRT-GPU v1.1 Phase 1: CPU Reference Implementation"
+authors = ["QuantLaxmi"]
+
+# Phase 1: CPU-only, single-threaded reference implementation
+# No GPU, no ML, no optimization - correctness is everything
+
+[dependencies]
+# Minimal dependencies for correctness-focused reference
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+bitflags = { version = "2.4", features = ["serde"] }
+
+[[bin]]
+name = "slrt-ref-harness"
+path = "src/main.rs"
+
+[[bin]]
+name = "convert-depth"
+path = "src/bin/convert_depth.rs"
+
+[lib]
+name = "slrt_ref"
+path = "src/lib.rs"

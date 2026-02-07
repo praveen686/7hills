@@ -1,0 +1,73 @@
+Triangle Arbitrage — Failed Experiment Report
+===============================================
+Date: 2026-02-03
+
+Objective
+---------
+Determine if triangle arbitrage on Binance spot has exploitable residuals
+after taker fees (3 legs × 0.1% = 30 bps round trip).
+
+Triangles tested:
+  ETH-BTC: BTCUSDT / ETHBTC / ETHUSDT
+  BNB-BTC: BTCUSDT / BNBBTC / BNBUSDT
+  SOL-BTC: BTCUSDT / SOLBTC / SOLUSDT
+
+Data
+----
+Session: f56aea33-fe43-4811-8cbb-d2e77dc22a37
+Duration: 4 hours (14,404 seconds)
+Depth events: 1,557,268
+Trades: 1,063,452
+Status: CERTIFIED (0 gaps)
+Price exponents: auto-fetched from Binance exchangeInfo
+  BTCUSDT: -2, ETHUSDT: -2, BNBUSDT: -2, SOLUSDT: -2
+  ETHBTC: -5, BNBBTC: -6, SOLBTC: -7
+
+Previous Bug
+------------
+Earlier analysis showed 89% hit rate — caused by all cross-pairs using
+price_exponent=-2 instead of correct values (-5/-6/-7). SOLBTC was
+completely zeroed out (stored 0.00 when actual ~0.0014).
+
+Results (Correct Exponents)
+---------------------------
+             HR Gross    HR Net    P99 Gross    Max Gross
+ETH-BTC      21.7%     0.004%     +3.5 bp      +49 bp
+BNB-BTC      32.3%     0.004%     +3.4 bp      +51 bp
+SOL-BTC      23.9%     0.005%     +3.3 bp      +49 bp
+
+Key Findings:
+1. P99 gross is only ~3.5 bps — fee hurdle is 30 bps
+2. Net HR ≈ 0.004% — essentially zero profitable opportunities
+3. Positive runs last ~50-60ms median — too fast for execution
+4. Tight-spread HR >> wide-spread HR — positives are quote staleness
+5. CW + CCW both positive ~1.5% — measurement noise, not real arb
+6. Mean residual is NEGATIVE (-12 to -24 bps) — spread cost dominates
+
+Verdict
+-------
+Triangle arbitrage on Binance spot with taker fees is NOT VIABLE.
+
+Gross residuals are spread artifacts from quote staleness on cross-pairs
+(ETHBTC, BNBBTC, SOLBTC have 4-7 bps median spreads), not real arb.
+
+Even with zero fees, the P99 gross of 3.5 bps with 50ms duration
+makes this unreachable for any non-colocated setup.
+
+What Was Proven
+---------------
++ Price exponent bug discovered and fixed
++ Certified 4-hour multi-symbol capture pipeline works
++ Auto-detection of tick sizes from Binance exchangeInfo
++ Staleness-filtered quote alignment is correct
++ Falsified: "Triangle arb has exploitable residuals on Binance spot"
+
+Files
+-----
+triangle_analysis.py          — Analysis script
+arb_research_skeleton.ipynb   — Original notebook
+session_manifest.json         — Session metadata
+capture_triangles.rs          — Capture binary source
+triangular_data.txt           — Capture job notes
+
+Raw data: data/sessions/triangles/triangles_20260203_182151/

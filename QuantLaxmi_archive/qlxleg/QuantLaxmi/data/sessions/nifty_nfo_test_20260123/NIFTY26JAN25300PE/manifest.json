@@ -1,0 +1,78 @@
+{
+  "run_id": "28872656-463c-4908-a140-01489362f23d",
+  "family": "india",
+  "profile": "research",
+  "watermark": "QuantLaxmi-india-20260123-041101-28872656",
+  "build": {
+    "version": "0.1.0",
+    "git_commit": null,
+    "build_timestamp": "2026-01-23T04:11:01.924512021Z",
+    "rust_version": "",
+    "cargo_lock_hash": null
+  },
+  "environment": {
+    "hostname": "isoula-dhruv",
+    "os": "linux",
+    "started_at": "2026-01-23T04:11:01.924514856Z",
+    "finished_at": "2026-01-23T04:11:01.924802414Z",
+    "duration_secs": 0.0
+  },
+  "inputs": {
+    "universe": null,
+    "quotes": null,
+    "depth_events": null,
+    "trade_events": null,
+    "tick_events": {
+      "path": "data/sessions/nifty_nfo_test_20260123/NIFTY26JAN25300PE/ticks.jsonl",
+      "sha256": "2e449dcb8c05a869c9cf165cfa520e8e25124f2d80dfc8076dd87f8d2cce5fee",
+      "size_bytes": 10887
+    },
+    "orders": null,
+    "config": null
+  },
+  "outputs": {
+    "fills": null,
+    "report": null,
+    "strategy_gates": null,
+    "vectorbt_market": null,
+    "vectorbt_fills": null,
+    "vectorbt_summary": null
+  },
+  "diagnostics": {
+    "gate_decisions": [],
+    "regime_transitions": [
+      {
+        "timestamp": "2026-01-23T04:11:01.924791708Z",
+        "previous_regime": "capture_start",
+        "new_regime": "capture_complete",
+        "confidence": 1.0,
+        "features": {
+          "certified_ticks": 0,
+          "has_depth": false,
+          "instrument_token": 15027714,
+          "price_exponent": -2,
+          "research_ticks": 43,
+          "source": "zerodha_session_capture",
+          "ticks_written": 43,
+          "tradingsymbol": "NIFTY26JAN25300PE"
+        }
+      }
+    ],
+    "context_validation": {
+      "underlying_present": false,
+      "underlying_symbols": [],
+      "options_symbols": [],
+      "history_window_bars": 0,
+      "min_history_required": 0,
+      "validation_passed": false,
+      "validation_errors": []
+    }
+  },
+  "determinism": {
+    "certified": false,
+    "input_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "compared_to": null,
+    "matches_previous": null
+  }
+}

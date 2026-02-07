@@ -1,0 +1,35 @@
+{
+  "schema_version": 9,
+  "quote_schema": "canonical_v1",
+  "state": "BOOTSTRAP",
+  "session_family_id": "perp_BTCUSDT_20260201",
+  "segment_id": "perp_20260201_100810",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "capture_mode": "capture-perp-session",
+  "start_ts": "2026-02-01T10:08:10.189802008Z",
+  "heartbeat_ts": "2026-02-01T10:20:10.191174237Z",
+  "stop_reason": "RUNNING",
+  "events": {
+    "spot_quotes": 0,
+    "perp_quotes": 0,
+    "funding": 0,
+    "depth": 0
+  },
+  "binary_hash": "a85548b647a5cf9eb8904b238c56cf60492837b927f7f67431b107c7f2b68537",
+  "config": {
+    "include_spot": true,
+    "include_depth": true,
+    "price_exponent": -2,
+    "qty_exponent": -8
+  },
+  "trace_binding": null,
+  "strategy_binding": null,
+  "attribution_binding": null,
+  "attribution_summary_binding": null,
+  "router_binding": null,
+  "g2_binding": null,
+  "g3_binding": null
+}

@@ -1,0 +1,80 @@
+{
+  "run_id": "ba8ab756-1f5a-48fa-be12-3dd8455b1c17",
+  "family": "crypto",
+  "profile": "certified",
+  "watermark": "QuantLaxmi-crypto-20260203-222212-ba8ab756",
+  "build": {
+    "version": "0.1.0",
+    "git_commit": null,
+    "build_timestamp": "2026-02-03T22:22:12.351643113Z",
+    "rust_version": "",
+    "cargo_lock_hash": null
+  },
+  "environment": {
+    "hostname": "ip-172-31-36-166",
+    "os": "linux",
+    "started_at": "2026-02-03T22:22:12.351645619Z",
+    "finished_at": "2026-02-03T22:22:13.455984036Z",
+    "duration_secs": 1.104
+  },
+  "inputs": {
+    "universe": null,
+    "quotes": null,
+    "depth_events": {
+      "path": "data/sessions/triangles/triangles_20260203_182151/BNBUSDT/depth.jsonl",
+      "sha256": "2e0aa554eb6215e8f81923a491ac73272cd5f7eb51194252053700b6ac66365c",
+      "size_bytes": 210409834
+    },
+    "trade_events": null,
+    "tick_events": null,
+    "orders": null,
+    "config": null
+  },
+  "outputs": {
+    "fills": null,
+    "report": null,
+    "strategy_gates": null,
+    "vectorbt_market": null,
+    "vectorbt_fills": null,
+    "vectorbt_summary": null
+  },
+  "diagnostics": {
+    "gate_decisions": [],
+    "regime_transitions": [
+      {
+        "timestamp": "2026-02-03T22:21:54.238544074Z",
+        "previous_regime": "capture_start",
+        "new_regime": "capture_complete",
+        "confidence": 1.0,
+        "features": {
+          "depth_events_written": 255180,
+          "gaps_detected": 0,
+          "integrity_tier": "Certified",
+          "price_exponent": -2,
+          "qty_exponent": -8,
+          "snapshot_written": true,
+          "source": "binance_session_capture",
+          "strict_mode": true,
+          "symbol": "BNBUSDT",
+          "trades_written": 122080
+        }
+      }
+    ],
+    "context_validation": {
+      "underlying_present": false,
+      "underlying_symbols": [],
+      "options_symbols": [],
+      "history_window_bars": 0,
+      "min_history_required": 0,
+      "validation_passed": true,
+      "validation_errors": []
+    }
+  },
+  "determinism": {
+    "certified": true,
+    "input_hash": "70a18cf85d9ee0b81648d0f0d166cf2318ec0c7e34c948a379e6e84e19d4aeef",
+    "output_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "compared_to": null,
+    "matches_previous": null
+  }
+}

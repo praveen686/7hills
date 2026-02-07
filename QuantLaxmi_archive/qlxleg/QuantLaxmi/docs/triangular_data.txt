@@ -1,0 +1,83 @@
+Triangle Arbitrage Data Capture
+================================
+
+Capture Session Details
+-----------------------
+Session ID:   f56aea33-fe43-4811-8cbb-d2e77dc22a37
+PID:          589672
+Started:      2026-02-03 18:21:51 UTC
+Duration:     4 hours (14400 seconds)
+ETA:          ~22:22 UTC
+Output Dir:   data/sessions/triangles/triangles_20260203_182151/
+Log File:     data/sessions/capture_triangles.log
+
+Symbols Captured (7)
+--------------------
+USDT Pairs (price_exp=-2):
+  - BTCUSDT
+  - ETHUSDT
+  - BNBUSDT
+  - SOLUSDT
+
+BTC Cross Pairs (variable precision):
+  - ETHBTC   (price_exp=-5, tick_size=0.00001)
+  - BNBBTC   (price_exp=-6, tick_size=0.000001)
+  - SOLBTC   (price_exp=-7, tick_size=0.0000001)
+
+Triangle Combinations
+---------------------
+1. BTC-ETH Triangle:
+   CW:  USDT -> BTC -> ETH -> USDT  (buy BTCUSDT, sell ETHBTC, sell ETHUSDT)
+   CCW: USDT -> ETH -> BTC -> USDT  (buy ETHUSDT, buy ETHBTC, sell BTCUSDT)
+
+2. BTC-BNB Triangle:
+   CW:  USDT -> BTC -> BNB -> USDT  (buy BTCUSDT, sell BNBBTC, sell BNBUSDT)
+   CCW: USDT -> BNB -> BTC -> USDT  (buy BNBUSDT, buy BNBBTC, sell BTCUSDT)
+
+3. BTC-SOL Triangle:
+   CW:  USDT -> BTC -> SOL -> USDT  (buy BTCUSDT, sell SOLBTC, sell SOLUSDT)
+   CCW: USDT -> SOL -> BTC -> USDT  (buy SOLUSDT, buy SOLBTC, sell BTCUSDT)
+
+Log-Price Residual Formula
+--------------------------
+For CW direction (using ETH triangle as example):
+  epsilon_cw = log(ETHUSDT_bid) - log(BTCUSDT_ask) - log(ETHBTC_ask)
+
+For CCW direction:
+  epsilon_ccw = log(BTCUSDT_bid) + log(ETHBTC_bid) - log(ETHUSDT_ask)
+
+Arbitrage signal when |epsilon| > threshold (typically 10-20 bps after fees)
+
+Monitor Commands
+----------------
+# Check if still running
+ps -p 589672
+
+# View live log
+tail -f data/sessions/capture_triangles.log
+
+# Check progress
+tail -20 data/sessions/capture_triangles.log
+
+Run Command (for future captures)
+---------------------------------
+# 2-hour capture (default)
+./target/release/capture_triangles
+
+# 4-hour capture
+./target/release/capture_triangles --duration 14400
+
+# Custom output directory
+./target/release/capture_triangles --duration 7200 --out-dir data/sessions/custom_dir
+
+Binary Location
+---------------
+./target/release/capture_triangles
+Source: crates/quantlaxmi-runner-crypto/src/bin/capture_triangles.rs
+
+Notes
+-----
+- Price exponents are auto-fetched from Binance exchangeInfo API
+- Data format: JSONL with integer prices (apply 10^exp to convert)
+- Session is CERTIFIED if 0 sequence gaps detected
+- qty_exponent is -8 for all symbols (satoshi precision)

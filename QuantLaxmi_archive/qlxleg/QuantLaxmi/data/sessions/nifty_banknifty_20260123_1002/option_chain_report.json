@@ -1,0 +1,420 @@
+{
+  "atm_spreads": [
+    {
+      "avg_spread_bps": 21.407123290149826,
+      "max_spread_bps": 34.042553191489844,
+      "min_spread_bps": 6.319115323854301,
+      "option_type": "PE",
+      "strike": 25200,
+      "symbol": "NIFTY26JAN25200PE",
+      "tick_count": 1326
+    },
+    {
+      "avg_spread_bps": 18.982378054967707,
+      "max_spread_bps": 29.577048210588583,
+      "min_spread_bps": 4.718093890068144,
+      "option_type": "CE",
+      "strike": 25350,
+      "symbol": "NIFTY26JAN25350CE",
+      "tick_count": 1309
+    },
+    {
+      "avg_spread_bps": 19.046434100596073,
+      "max_spread_bps": 34.383954154727796,
+      "min_spread_bps": 2.2145941756178216,
+      "option_type": "PE",
+      "strike": 25500,
+      "symbol": "NIFTY26JAN25500PE",
+      "tick_count": 996
+    },
+    {
+      "avg_spread_bps": 28.791844138107802,
+      "max_spread_bps": 82.55257813011949,
+      "min_spread_bps": 6.495615459564793,
+      "option_type": "PE",
+      "strike": 59300,
+      "symbol": "BANKNIFTY26JAN59300PE",
+      "tick_count": 1346
+    },
+    {
+      "avg_spread_bps": 32.67413061074139,
+      "max_spread_bps": 60.33717834960031,
+      "min_spread_bps": 2.91502696400008,
+      "option_type": "PE",
+      "strike": 58800,
+      "symbol": "BANKNIFTY26JAN58800PE",
+      "tick_count": 1142
+    },
+    {
+      "avg_spread_bps": 19.911004740775066,
+      "max_spread_bps": 32.449972958357094,
+      "min_spread_bps": 4.39850450846687,
+      "option_type": "PE",
+      "strike": 25300,
+      "symbol": "NIFTY26JAN25300PE",
+      "tick_count": 1126
+    },
+    {
+      "avg_spread_bps": 18.55012513418409,
+      "max_spread_bps": 26.578073089701377,
+      "min_spread_bps": 2.9748624126124024,
+      "option_type": "PE",
+      "strike": 25400,
+      "symbol": "NIFTY26JAN25400PE",
+      "tick_count": 1305
+    },
+    {
+      "avg_spread_bps": 33.15657642520199,
+      "max_spread_bps": 53.491827637444615,
+      "min_spread_bps": 2.8981307056954857,
+      "option_type": "PE",
+      "strike": 58900,
+      "symbol": "BANKNIFTY26JAN58900PE",
+      "tick_count": 1337
+    },
+    {
+      "avg_spread_bps": 30.37837868243457,
+      "max_spread_bps": 56.610056610058116,
+      "min_spread_bps": 7.108583614714363,
+      "option_type": "PE",
+      "strike": 59100,
+      "symbol": "BANKNIFTY26JAN59100PE",
+      "tick_count": 1311
+    },
+    {
+      "avg_spread_bps": 18.889629356786624,
+      "max_spread_bps": 29.798185019638794,
+      "min_spread_bps": 2.7037988373671147,
+      "option_type": "CE",
+      "strike": 25200,
+      "symbol": "NIFTY26JAN25200CE",
+      "tick_count": 1316
+    },
+    {
+      "avg_spread_bps": 34.750723521842886,
+      "max_spread_bps": 72.06890490420147,
+      "min_spread_bps": 15.291981267322079,
+      "option_type": "CE",
+      "strike": 58800,
+      "symbol": "BANKNIFTY26JAN58800CE",
+      "tick_count": 1039
+    },
+    {
+      "avg_spread_bps": 20.255465585263092,
+      "max_spread_bps": 36.77537985096249,
+      "min_spread_bps": 3.716781267423257,
+      "option_type": "CE",
+      "strike": 25100,
+      "symbol": "NIFTY26JAN25100CE",
+      "tick_count": 1263
+    },
+    {
+      "avg_spread_bps": 17.950288702087125,
+      "max_spread_bps": 25.63280999679626,
+      "min_spread_bps": 3.282455276545738,
+      "option_type": "CE",
+      "strike": 25250,
+      "symbol": "NIFTY26JAN25250CE",
+      "tick_count": 1347
+    },
+    {
+      "avg_spread_bps": 30.274549689532126,
+      "max_spread_bps": 54.321776641635665,
+      "min_spread_bps": 3.4716195105024386,
+      "option_type": "CE",
+      "strike": 59200,
+      "symbol": "BANKNIFTY26JAN59200CE",
+      "tick_count": 1131
+    },
+    {
+      "avg_spread_bps": 19.174011032101383,
+      "max_spread_bps": 29.154518950437318,
+      "min_spread_bps": 2.50031253906653,
+      "option_type": "PE",
+      "strike": 25450,
+      "symbol": "NIFTY26JAN25450PE",
+      "tick_count": 1338
+    },
+    {
+      "avg_spread_bps": 18.72337035552213,
+      "max_spread_bps": 29.319371727748216,
+      "min_spread_bps": 4.167534903104577,
+      "option_type": "CE",
+      "strike": 25300,
+      "symbol": "NIFTY26JAN25300CE",
+      "tick_count": 1129
+    },
+    {
+      "avg_spread_bps": 29.36018115416535,
+      "max_spread_bps": 76.17086978898587,
+      "min_spread_bps": 6.34719136781998,
+      "option_type": "CE",
+      "strike": 59300,
+      "symbol": "BANKNIFTY26JAN59300CE",
+      "tick_count": 1353
+    },
+    {
+      "avg_spread_bps": 28.60931738397221,
+      "max_spread_bps": 51.85825410544463,
+      "min_spread_bps": 14.357501794686907,
+      "option_type": "CE",
+      "strike": 25550,
+      "symbol": "NIFTY26JAN25550CE",
+      "tick_count": 1296
+    },
+    {
+      "avg_spread_bps": 29.69059023218342,
+      "max_spread_bps": 50.03573981415215,
+      "min_spread_bps": 9.213759213759563,
+      "option_type": "PE",
+      "strike": 59200,
+      "symbol": "BANKNIFTY26JAN59200PE",
+      "tick_count": 1139
+    },
+    {
+      "avg_spread_bps": 38.83150912447727,
+      "max_spread_bps": 64.503889205084,
+      "min_spread_bps": 8.525149190111554,
+      "option_type": "PE",
+      "strike": 58600,
+      "symbol": "BANKNIFTY26JAN58600PE",
+      "tick_count": 1259
+    },
+    {
+      "avg_spread_bps": 20.000492445425717,
+      "max_spread_bps": 34.26613363792086,
+      "min_spread_bps": 5.2700922266136665,
+      "option_type": "PE",
+      "strike": 25250,
+      "symbol": "NIFTY26JAN25250PE",
+      "tick_count": 1334
+    },
+    {
+      "avg_spread_bps": 26.879850436827915,
+      "max_spread_bps": 40.84411164057337,
+      "min_spread_bps": 9.741841207987756,
+      "option_type": "PE",
+      "strike": 25100,
+      "symbol": "NIFTY26JAN25100PE",
+      "tick_count": 1322
+    },
+    {
+      "avg_spread_bps": 19.112681144771635,
+      "max_spread_bps": 26.437541308658048,
+      "min_spread_bps": 2.354880489814339,
+      "option_type": "CE",
+      "strike": 25150,
+      "symbol": "NIFTY26JAN25150CE",
+      "tick_count": 980
+    },
+    {
+      "avg_spread_bps": 31.83484715016348,
+      "max_spread_bps": 45.3286325862506,
+      "min_spread_bps": 7.572889057175599,
+      "option_type": "CE",
+      "strike": 59400,
+      "symbol": "BANKNIFTY26JAN59400CE",
+      "tick_count": 1287
+    },
+    {
+      "avg_spread_bps": 45.932362592144,
+      "max_spread_bps": 175.73185890017575,
+      "min_spread_bps": 10.775032709919675,
+      "option_type": "CE",
+      "strike": 58700,
+      "symbol": "BANKNIFTY26JAN58700CE",
+      "tick_count": 1007
+    },
+    {
+      "avg_spread_bps": 28.0053444108214,
+      "max_spread_bps": 41.0737861229273,
+      "min_spread_bps": 5.635390250774546,
+      "option_type": "CE",
+      "strike": 59100,
+      "symbol": "BANKNIFTY26JAN59100CE",
+      "tick_count": 1266
+    },
+    {
+      "avg_spread_bps": 37.011174848039886,
+      "max_spread_bps": 69.3222417746494,
+      "min_spread_bps": 16.99235344095157,
+      "option_type": "CE",
+      "strike": 58900,
+      "symbol": "BANKNIFTY26JAN58900CE",
+      "tick_count": 1111
+    },
+    {
+      "avg_spread_bps": 20.68213079256312,
+      "max_spread_bps": 30.97573567372147,
+      "min_spread_bps": 1.7124753831667563,
+      "option_type": "CE",
+      "strike": 25050,
+      "symbol": "NIFTY26JAN25050CE",
+      "tick_count": 1035
+    },
+    {
+      "avg_spread_bps": 27.727975117353353,
+      "max_spread_bps": 44.12575841147333,
+      "min_spread_bps": 3.267439960791463,
+      "option_type": "CE",
+      "strike": 59500,
+      "symbol": "BANKNIFTY26JAN59500CE",
+      "tick_count": 1295
+    },
+    {
+      "avg_spread_bps": 22.194547916112196,
+      "max_spread_bps": 37.38317757009399,
+      "min_spread_bps": 7.96495420151402,
+      "option_type": "CE",
+      "strike": 25450,
+      "symbol": "NIFTY26JAN25450CE",
+      "tick_count": 1314
+    },
+    {
+      "avg_spread_bps": 27.566550280086318,
+      "max_spread_bps": 41.26902244003007,
+      "min_spread_bps": 3.8468936333904535,
+      "option_type": "CE",
+      "strike": 59000,
+      "symbol": "BANKNIFTY26JAN59000CE",
+      "tick_count": 1376
+    },
+    {
+      "avg_spread_bps": 18.731902025986297,
+      "max_spread_bps": 28.09552478426605,
+      "min_spread_bps": 3.7857278061694455,
+      "option_type": "PE",
+      "strike": 25350,
+      "symbol": "NIFTY26JAN25350PE",
+      "tick_count": 1313
+    },
+    {
+      "avg_spread_bps": 28.086327769008726,
+      "max_spread_bps": 68.2939167825974,
+      "min_spread_bps": 2.0050125313287768,
+      "option_type": "PE",
+      "strike": 59000,
+      "symbol": "BANKNIFTY26JAN59000PE",
+      "tick_count": 1363
+    },
+    {
+      "avg_spread_bps": 21.427030751394607,
+      "max_spread_bps": 48.90861335023878,
+      "min_spread_bps": 1.736563341146289,
+      "option_type": "PE",
+      "strike": 25550,
+      "symbol": "NIFTY26JAN25550PE",
+      "tick_count": 1120
+    },
+    {
+      "avg_spread_bps": 36.80282814273105,
+      "max_spread_bps": 81.80300500834686,
+      "min_spread_bps": 16.70843776106934,
+      "option_type": "PE",
+      "strike": 59600,
+      "symbol": "BANKNIFTY26JAN59600PE",
+      "tick_count": 1011
+    },
+    {
+      "avg_spread_bps": 29.067061071363117,
+      "max_spread_bps": 51.85825410544463,
+      "min_spread_bps": 12.36858379715628,
+      "option_type": "PE",
+      "strike": 25050,
+      "symbol": "NIFTY26JAN25050PE",
+      "tick_count": 1244
+    },
+    {
+      "avg_spread_bps": 58.89735521985696,
+      "max_spread_bps": 139.5250510887179,
+      "min_spread_bps": 21.458433534352665,
+      "option_type": "CE",
+      "strike": 58600,
+      "symbol": "BANKNIFTY26JAN58600CE",
+      "tick_count": 762
+    },
+    {
+      "avg_spread_bps": 28.72398532146208,
+      "max_spread_bps": 49.50767368942186,
+      "min_spread_bps": 3.8160656363298124,
+      "option_type": "PE",
+      "strike": 59500,
+      "symbol": "BANKNIFTY26JAN59500PE",
+      "tick_count": 1247
+    },
+    {
+      "avg_spread_bps": 31.38010317597231,
+      "max_spread_bps": 78.75492218263514,
+      "min_spread_bps": 3.7320395596201807,
+      "option_type": "CE",
+      "strike": 59600,
+      "symbol": "BANKNIFTY26JAN59600CE",
+      "tick_count": 1135
+    },
+    {
+      "avg_spread_bps": 23.620010844038752,
+      "max_spread_bps": 36.86635944700513,
+      "min_spread_bps": 7.791195948577662,
+      "option_type": "PE",
+      "strike": 25150,
+      "symbol": "NIFTY26JAN25150PE",
+      "tick_count": 958
+    },
+    {
+      "avg_spread_bps": 24.276721433913192,
+      "max_spread_bps": 41.987403778867936,
+      "min_spread_bps": 10.632642211590484,
+      "option_type": "CE",
+      "strike": 25500,
+      "symbol": "NIFTY26JAN25500CE",
+      "tick_count": 989
+    },
+    {
+      "avg_spread_bps": 34.08613648991677,
+      "max_spread_bps": 55.44554455445605,
+      "min_spread_bps": 15.000535733418808,
+      "option_type": "PE",
+      "strike": 59400,
+      "symbol": "BANKNIFTY26JAN59400PE",
+      "tick_count": 1209
+    },
+    {
+      "avg_spread_bps": 20.459938961151916,
+      "max_spread_bps": 31.104199066874465,
+      "min_spread_bps": 6.633499170812226,
+      "option_type": "CE",
+      "strike": 25400,
+      "symbol": "NIFTY26JAN25400CE",
+      "tick_count": 1252
+    },
+    {
+      "avg_spread_bps": 39.9168910051787,
+      "max_spread_bps": 105.44815465729384,
+      "min_spread_bps": 10.554089709762934,
+      "option_type": "PE",
+      "strike": 58700,
+      "symbol": "BANKNIFTY26JAN58700PE",
+      "tick_count": 1277
+    }
+  ],
+  "expiries": [
+    {
+      "call_strikes": 22,
+      "expiry": "26JAN",
+      "missing_calls": 340,
+      "missing_puts": 340,
+      "put_strikes": 22,
+      "strike_range": [
+        25050,
+        59600
+      ],
+      "total_strikes": 22
+    }
+  ],
+  "total_events": 53015,
+  "underlying_estimates": {
+    "BANKNIFTY": 59400.0,
+    "NIFTY": 25100.0
+  },
+  "unique_symbols": 44
+}
