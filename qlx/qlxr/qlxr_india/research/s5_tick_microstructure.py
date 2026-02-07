@@ -457,6 +457,7 @@ def _backtest_feature(
         "win_rate": wins / len(trades),
         "avg_ret_pct": float(np.mean(trade_rets)) * 100,
         "direction": dom_dir,
+        "daily_returns": daily_pnl,
     }
 
 

@@ -65,6 +65,7 @@ class MonthlyReturnOut(BaseModel):
 
 class BacktestResultOut(BaseModel):
     total_return: float | None = None
+    cagr: float | None = None
     sharpe_ratio: float | None = None
     sortino_ratio: float | None = None
     max_drawdown: float | None = None
@@ -229,12 +230,14 @@ def _run_s1(store, start: date, end: date, p: dict) -> dict:
                 best = r
         if best is None:
             return {"trades": 0, "total_return_pct": 0, "sharpe": 0, "max_dd_pct": 0, "win_rate": 0}
+        daily_rets = _trades_to_daily_returns(best.daily, best.trades, "pnl_on_risk", pct=False)
         return {
             "trades": best.n_signals,
             "total_return_pct": best.total_return_on_risk_pct,
             "sharpe": best.sharpe,
             "max_dd_pct": best.max_dd_pct,
             "win_rate": best.win_rate,
+            "daily_returns": daily_rets,
         }
     else:
         from strategies.s1_vrp.density import run_multi_index_density_backtest
@@ -247,12 +250,14 @@ def _run_s1(store, start: date, end: date, p: dict) -> dict:
                 best = r
         if best is None:
             return {"trades": 0, "total_return_pct": 0, "sharpe": 0, "max_dd_pct": 0, "win_rate": 0}
+        daily_rets = _trades_to_daily_returns(best.daily, best.trades, "pnl_pct", pct=True)
         return {
             "trades": best.n_signals,
             "total_return_pct": best.total_return_pct,
             "sharpe": best.sharpe,
             "max_dd_pct": best.max_dd_pct,
             "win_rate": best.win_rate,
+            "daily_returns": daily_rets,
         }
 
 
@@ -467,12 +472,14 @@ def _run_s4(store, start: date, end: date, p: dict) -> dict:
     if best_result is None:
         return {"trades": 0, "total_return_pct": 0, "sharpe": 0, "max_dd_pct": 0, "win_rate": 0}
 
+    daily_rets = _trades_to_daily_returns(best_result.daily, best_result.trades, "pnl_pct", pct=True)
     return {
         "trades": best_result.n_signals,
         "total_return_pct": best_result.total_return_pct,
         "sharpe": best_result.sharpe,
         "max_dd_pct": best_result.max_dd_pct,
         "win_rate": best_result.win_rate,
+        "daily_returns": daily_rets,
     }
 
 
@@ -545,6 +552,7 @@ def _run_s6(store, start: date, end: date, p: dict) -> dict:
         "sharpe": result.get("sharpe", 0),
         "max_dd_pct": abs(result.get("max_dd", 0)) * 100,
         "win_rate": result.get("hit_rate", 0),
+        "daily_returns": result.get("daily_returns", []),
     }
 
 
@@ -633,6 +641,31 @@ _STRATEGY_RUNNERS = {
 # ------------------------------------------------------------------
 # Utilities
 # ------------------------------------------------------------------
+
+def _trades_to_daily_returns(
+    daily_obs: list, trades: list, pnl_field: str = "pnl_pct", *, pct: bool = True,
+) -> list[float]:
+    """Convert a list of trade objects to a daily return series.
+
+    Maps each trade's PnL to its exit_date, sums per date, fills zeros
+    for non-trade dates.  Uses the ``daily`` observation list for date alignment.
+
+    Args:
+        daily_obs: List of day observation objects (must have .date attribute).
+        trades: List of trade objects (must have .exit_date and the pnl_field).
+        pnl_field: Attribute name on each trade holding the PnL value.
+        pct: If True, the pnl_field is in percentage (divide by 100 to get fraction).
+    """
+    dates = [obs.date for obs in daily_obs]
+    date_pnl: dict[date, float] = {}
+    for t in trades:
+        d = t.exit_date
+        pnl = getattr(t, pnl_field, 0)
+        if pct:
+            pnl = pnl / 100  # convert percentage to fraction
+        date_pnl[d] = date_pnl.get(d, 0.0) + pnl
+    return [date_pnl.get(d, 0.0) for d in dates]
+
 
 def _safe(v: float, decimals: int = 6) -> float | None:
     """Sanitize float for JSON (handle inf/nan)."""
@@ -786,8 +819,16 @@ def _build_equity_curve(
 
     avg_trade_pnl = total_return_pct / n_trades / 100 if n_trades > 0 else 0
 
+    # CAGR: annualized compound growth rate
+    n_years = len(equity_curve) / 252 if equity_curve else 0
+    if n_years > 0.01 and final_equity > 0 and initial_capital > 0:
+        cagr = (final_equity / initial_capital) ** (1 / n_years) - 1
+    else:
+        cagr = 0
+
     return {
         "total_return": _safe(total_return_pct / 100),
+        "cagr": _safe(cagr, 6),
         "sharpe_ratio": _safe(sharpe, 4),
         "sortino_ratio": _safe(sortino, 4),
         "max_drawdown": _safe(max_dd_pct / 100),
@@ -808,27 +849,32 @@ def _generate_trading_dates(
 ) -> list[date]:
     """Generate list of trading dates between start and end.
 
-    If store is available, uses actual available dates. Otherwise generates
-    business days (Mon-Fri).
+    When target_count > 0 (i.e. we have daily_returns to align), prefer
+    the data source whose count is closest.  Falls back to business days.
     """
-    if store is not None:
-        try:
-            # Try nse_index_close as it has the widest date coverage
-            available = store.available_dates("nse_index_close")
-            dates = sorted(d for d in available if start <= d <= end)
-            if dates:
-                return dates
-        except Exception:
-            pass
-
-    # Fallback: generate business days
-    dates: list[date] = []
+    # Always generate business days as baseline
+    biz_dates: list[date] = []
     d = start
     while d <= end:
         if d.weekday() < 5:  # Mon-Fri
-            dates.append(d)
+            biz_dates.append(d)
         d += timedelta(days=1)
-    return dates
+
+    if store is not None:
+        try:
+            available = store.available_dates("nse_index_close")
+            store_dates = sorted(d for d in available if start <= d <= end)
+            if store_dates:
+                # If we have a target count, pick whichever source is closer
+                if target_count > 0:
+                    store_diff = abs(len(store_dates) - target_count)
+                    biz_diff = abs(len(biz_dates) - target_count)
+                    return store_dates if store_diff <= biz_diff else biz_dates
+                return store_dates
+        except Exception:
+            pass
+
+    return biz_dates
 
 
 # ------------------------------------------------------------------

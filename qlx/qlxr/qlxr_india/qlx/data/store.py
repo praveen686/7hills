@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import date
 from pathlib import Path
 
@@ -48,6 +49,7 @@ class MarketDataStore:
     def __init__(self, market_dir: str | Path | None = None):
         self.market_dir = Path(market_dir) if market_dir else MARKET_DIR
         self._con = duckdb.connect()
+        self._lock = threading.Lock()
         self._register_views()
 
     def _register_views(self) -> None:
@@ -105,13 +107,15 @@ class MarketDataStore:
 
     def sql(self, query: str, params: list | None = None) -> pd.DataFrame:
         """Execute arbitrary SQL and return a DataFrame."""
-        if params:
-            return self._con.execute(query, params).fetchdf()
-        return self._con.execute(query).fetchdf()
+        with self._lock:
+            if params:
+                return self._con.execute(query, params).fetchdf()
+            return self._con.execute(query).fetchdf()
 
     def explain(self, query: str) -> str:
         """Return the query plan (useful for checking pushdown)."""
-        return self._con.execute(f"EXPLAIN {query}").fetchone()[0]
+        with self._lock:
+            return self._con.execute(f"EXPLAIN {query}").fetchone()[0]
 
     # ------------------------------------------------------------------
     # Convenience getters
@@ -158,25 +162,26 @@ class MarketDataStore:
         bfo_names = {"SENSEX", "BANKEX", "SENSEX50"}
         table = "bfo_1min" if name.upper() in bfo_names else "nfo_1min"
 
-        if expiry is None:
-            # Find nearest expiry
-            expiry_q = self._con.execute(
-                f"SELECT DISTINCT expiry FROM {table} "
-                f"WHERE date={d_str!r} AND name={name!r} "
-                f"AND instrument_type IN ('CE', 'PE') "
-                f"ORDER BY expiry LIMIT 1"
-            ).fetchone()
-            if not expiry_q:
-                return pd.DataFrame()
-            expiry = str(expiry_q[0])
+        with self._lock:
+            if expiry is None:
+                # Find nearest expiry
+                expiry_q = self._con.execute(
+                    f"SELECT DISTINCT expiry FROM {table} "
+                    f"WHERE date={d_str!r} AND name={name!r} "
+                    f"AND instrument_type IN ('CE', 'PE') "
+                    f"ORDER BY expiry LIMIT 1"
+                ).fetchone()
+                if not expiry_q:
+                    return pd.DataFrame()
+                expiry = str(expiry_q[0])
 
-        return self._con.execute(
-            f"SELECT date, strike, instrument_type, open, high, low, close, volume, oi, symbol "
-            f"FROM {table} "
-            f"WHERE date={d_str!r} AND name={name!r} AND expiry={expiry!r} "
-            f"AND instrument_type IN ('CE', 'PE') "
-            f"ORDER BY date, strike, instrument_type"
-        ).fetchdf()
+            return self._con.execute(
+                f"SELECT date, strike, instrument_type, open, high, low, close, volume, oi, symbol "
+                f"FROM {table} "
+                f"WHERE date={d_str!r} AND name={name!r} AND expiry={expiry!r} "
+                f"AND instrument_type IN ('CE', 'PE') "
+                f"ORDER BY date, strike, instrument_type"
+            ).fetchdf()
 
     def get_symbol_bars(
         self,
@@ -196,12 +201,13 @@ class MarketDataStore:
             Source table ("nfo_1min" or "bfo_1min").
         """
         d_str = d.isoformat()
-        return self._con.execute(
-            f"SELECT date, open, high, low, close, volume, oi "
-            f"FROM {table} "
-            f"WHERE date={d_str!r} AND symbol={symbol!r} "
-            f"ORDER BY date"
-        ).fetchdf()
+        with self._lock:
+            return self._con.execute(
+                f"SELECT date, open, high, low, close, volume, oi "
+                f"FROM {table} "
+                f"WHERE date={d_str!r} AND symbol={symbol!r} "
+                f"ORDER BY date"
+            ).fetchdf()
 
     def get_ticks(
         self,
@@ -218,19 +224,21 @@ class MarketDataStore:
             Trading date.
         """
         d_str = d.isoformat()
-        return self._con.execute(
-            f"SELECT timestamp, ltp, volume, oi "
-            f"FROM ticks "
-            f"WHERE date={d_str!r} AND instrument_token={instrument_token} "
-            f"ORDER BY timestamp"
-        ).fetchdf()
+        with self._lock:
+            return self._con.execute(
+                f"SELECT timestamp, ltp, volume, oi "
+                f"FROM ticks "
+                f"WHERE date={d_str!r} AND instrument_token={instrument_token} "
+                f"ORDER BY timestamp"
+            ).fetchdf()
 
     def get_instruments(self, d: date) -> pd.DataFrame:
         """Get instrument master for a date."""
         d_str = d.isoformat()
-        return self._con.execute(
-            f"SELECT * FROM instruments WHERE date={d_str!r}"
-        ).fetchdf()
+        with self._lock:
+            return self._con.execute(
+                f"SELECT * FROM instruments WHERE date={d_str!r}"
+            ).fetchdf()
 
     def resolve_token(
         self,
@@ -239,20 +247,22 @@ class MarketDataStore:
     ) -> int | None:
         """Look up instrument_token for a tradingsymbol on a date."""
         d_str = d.isoformat()
-        row = self._con.execute(
-            f"SELECT instrument_token FROM instruments "
-            f"WHERE date={d_str!r} AND tradingsymbol={tradingsymbol!r} "
-            f"LIMIT 1"
-        ).fetchone()
-        return row[0] if row else None
+        with self._lock:
+            row = self._con.execute(
+                f"SELECT instrument_token FROM instruments "
+                f"WHERE date={d_str!r} AND tradingsymbol={tradingsymbol!r} "
+                f"LIMIT 1"
+            ).fetchone()
+            return row[0] if row else None
 
     def get_underlyings(self, d: date, table: str = "nfo_1min") -> list[str]:
         """List unique underlying names available on a date."""
         d_str = d.isoformat()
-        rows = self._con.execute(
-            f"SELECT DISTINCT name FROM {table} WHERE date={d_str!r} ORDER BY name"
-        ).fetchall()
-        return [r[0] for r in rows]
+        with self._lock:
+            rows = self._con.execute(
+                f"SELECT DISTINCT name FROM {table} WHERE date={d_str!r} ORDER BY name"
+            ).fetchall()
+            return [r[0] for r in rows]
 
     # ------------------------------------------------------------------
     # Ingestion hook

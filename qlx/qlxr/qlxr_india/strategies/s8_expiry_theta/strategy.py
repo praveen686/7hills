@@ -537,6 +537,7 @@ def backtest_expiry_theta(
         "avg_cost_pts": round(float(np.mean([t.cost_pts for t in trades])), 2) if trades else 0,
         "total_cost_pct": round(sum(t.cost_pts for t in trades) / (trades[0].spot if trades else 1) * 100, 4) if trades else 0,
         "trade_details": trades,
+        "daily_returns": pnls if trades else [],
     }
 
 

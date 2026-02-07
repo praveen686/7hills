@@ -208,6 +208,7 @@ def _walk_forward_backtest(
         "max_dd": float(max_dd),
         "importances": importances,
         "feature_names": list(X.columns),
+        "daily_returns": strategy_returns.tolist(),
     }
 
 

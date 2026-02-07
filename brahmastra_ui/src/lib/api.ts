@@ -247,7 +247,7 @@ export async function runBacktest(
         total_trades: nested.n_trades as number | undefined,
         avg_trade_pnl: nested.avg_trade_pnl != null ? (nested.avg_trade_pnl as number) * 100 : undefined,
         final_equity: nested.final_equity as number | undefined,
-        cagr: undefined,
+        cagr: nested.cagr != null ? (nested.cagr as number) * 100 : undefined,
         equity_curve: nested.equity_curve as BacktestResult["equity_curve"],
         drawdown_curve: nested.drawdown_curve as BacktestResult["drawdown_curve"],
         monthly_returns: nested.monthly_returns as BacktestResult["monthly_returns"],
