@@ -70,14 +70,14 @@ def compute_metrics(
     # Annualised
     n_years = n / periods_per_year
     ann_return = float((1 + total_return) ** (1 / max(n_years, 1e-9)) - 1)
-    ann_vol = float(returns.std() * np.sqrt(periods_per_year))
+    ann_vol = float(returns.std(ddof=1) * np.sqrt(periods_per_year))
 
-    # Sharpe
-    sharpe = ann_return / ann_vol if ann_vol > 0 else 0.0
+    # Sharpe (arithmetic: mean/std * sqrt(N) — standard in quant finance)
+    sharpe = float(returns.mean() / returns.std(ddof=1) * np.sqrt(periods_per_year)) if ann_vol > 0 else 0.0
 
     # Sortino
     downside = returns[returns < 0]
-    downside_vol = float(downside.std() * np.sqrt(periods_per_year)) if len(downside) > 0 else 0.0
+    downside_vol = float(downside.std(ddof=1) * np.sqrt(periods_per_year)) if len(downside) > 1 else 0.0
     sortino = ann_return / downside_vol if downside_vol > 0 else (float("inf") if ann_return > 0 else 0.0)
 
     # Drawdown

@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
-from apps.india_fno.density_strategy import (
+from strategies.s1_vrp.density import (
     DEFAULT_COST_BPS,
     DEFAULT_ENTRY_PCTILE,
     DEFAULT_EXIT_PCTILE,

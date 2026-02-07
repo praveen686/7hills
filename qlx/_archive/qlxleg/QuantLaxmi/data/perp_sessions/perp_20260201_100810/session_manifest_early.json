@@ -1,0 +1,14 @@
+{
+  "session_id": "3b8dd419-e018-4c84-b9fe-079681037a3a",
+  "start_time_utc": "2026-02-01T10:08:10.190002963+00:00",
+  "intended_duration_secs": 7200,
+  "include_trades": true,
+  "include_depth": true,
+  "include_spot": true,
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "status": "in_progress",
+  "api_key_present": true
+}

@@ -74,7 +74,7 @@ class Microstructure(Feature):
         # Rolling sigma for BVC
         sigma = np.full(n, 0.01)
         for i in range(20, n):
-            s = np.std(log_ret[i - 20 : i])
+            s = np.std(log_ret[i - 20 : i], ddof=1)
             if s > 1e-8:
                 sigma[i] = s
 
@@ -99,7 +99,7 @@ class Microstructure(Feature):
         for i in range(self.window, n):
             sv = signed_vol[i - self.window : i]
             ret = log_ret[i - self.window : i]
-            var_sv = np.var(sv)
+            var_sv = np.var(sv, ddof=1)
             if var_sv > 1e-20:
                 kl[i] = np.cov(ret, sv)[0, 1] / var_sv
         out["kyles_lambda"] = kl
@@ -186,7 +186,7 @@ def vpin_from_ticks(
 
     sigma = np.full(n, 0.01)
     for i in range(sigma_window, n):
-        s = np.std(log_ret[i - sigma_window : i])
+        s = np.std(log_ret[i - sigma_window : i], ddof=1)
         if s > 1e-8:
             sigma[i] = s
 
@@ -310,7 +310,7 @@ def trade_arrival_hawkes(
     n_bins = max(int(ts[-1] / bin_size), 5)
     counts = np.histogram(ts, bins=n_bins)[0].astype(float)
     mean_c = np.mean(counts)
-    var_c = np.var(counts)
+    var_c = np.var(counts, ddof=1)
 
     if mean_c > 0:
         ratio = var_c / mean_c

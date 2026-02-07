@@ -60,6 +60,7 @@ def run_backtest(
     short_entry_th: float = -0.01,
     short_exit_th: float = 0.0,
     initial_capital: float = 1.0,
+    execution_delay: int = 1,
 ) -> BacktestResult:
     """Run a vectorised long/short backtest with transaction costs.
 
@@ -79,6 +80,9 @@ def run_backtest(
         Enter short when prediction < this.
     short_exit_th : float
         Exit short when prediction > this.
+    execution_delay : int
+        Number of bars to delay execution (default 1 = T+1).
+        Signal at bar i becomes position at bar i + execution_delay.
     """
     assert prices.index.equals(predictions.index), "prices and predictions must share index"
 
@@ -86,38 +90,42 @@ def run_backtest(
     pred = predictions.values.astype(np.float64)
     n = len(px)
 
-    # Position: +1 long, -1 short, 0 flat
+    # First compute desired positions from predictions (no delay)
+    desired_position = np.zeros(n, dtype=np.int8)
+    for i in range(1, n):
+        prev_des = desired_position[i - 1]
+
+        if prev_des == 0:
+            if pred[i] > long_entry_th:
+                desired_position[i] = 1
+            elif pred[i] < short_entry_th:
+                desired_position[i] = -1
+            else:
+                desired_position[i] = 0
+        elif prev_des == 1:
+            if pred[i] < long_exit_th:
+                desired_position[i] = 0
+            else:
+                desired_position[i] = 1
+        elif prev_des == -1:
+            if pred[i] > short_exit_th:
+                desired_position[i] = 0
+            else:
+                desired_position[i] = -1
+
+    # Apply execution delay: shift desired positions forward
     position = np.zeros(n, dtype=np.int8)
+    if execution_delay > 0:
+        position[execution_delay:] = desired_position[:-execution_delay]
+    else:
+        position = desired_position
+
+    # Compute costs from position changes
     costs_arr = np.zeros(n, dtype=np.float64)
     one_way = cost_model.one_way_frac
-
-    # --- determine position at each bar ---
     for i in range(1, n):
-        prev_pos = position[i - 1]
-
-        if prev_pos == 0:
-            if pred[i] > long_entry_th:
-                position[i] = 1
-                costs_arr[i] = one_way
-            elif pred[i] < short_entry_th:
-                position[i] = -1
-                costs_arr[i] = one_way
-            else:
-                position[i] = 0
-
-        elif prev_pos == 1:
-            if pred[i] < long_exit_th:
-                position[i] = 0
-                costs_arr[i] = one_way  # closing cost
-            else:
-                position[i] = 1
-
-        elif prev_pos == -1:
-            if pred[i] > short_exit_th:
-                position[i] = 0
-                costs_arr[i] = one_way
-            else:
-                position[i] = -1
+        if position[i] != position[i - 1]:
+            costs_arr[i] = one_way
 
     # --- compute returns ---
     price_returns = np.diff(px) / px[:-1]
@@ -247,18 +255,18 @@ def _extract_trades(
 
 
 def _sharpe(returns: pd.Series, periods_per_year: float = 252.0) -> float:
-    if len(returns) < 2 or returns.std() == 0:
+    if len(returns) < 2 or returns.std(ddof=1) == 0:
         return 0.0
-    return float(returns.mean() / returns.std() * np.sqrt(periods_per_year))
+    return float(returns.mean() / returns.std(ddof=1) * np.sqrt(periods_per_year))
 
 
 def _sortino(returns: pd.Series, periods_per_year: float = 252.0) -> float:
     if len(returns) < 2:
         return 0.0
     downside = returns[returns < 0]
-    if len(downside) == 0 or downside.std() == 0:
+    if len(downside) < 2 or downside.std(ddof=1) == 0:
         return float("inf") if returns.mean() > 0 else 0.0
-    return float(returns.mean() / downside.std() * np.sqrt(periods_per_year))
+    return float(returns.mean() / downside.std(ddof=1) * np.sqrt(periods_per_year))
 
 
 def _max_drawdown(equity: pd.Series) -> float:

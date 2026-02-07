@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
-from apps.india_fno.iv_mean_revert import (
+from strategies.s4_iv_mr.engine import (
     BacktestResult,
     DayObs,
     Trade,

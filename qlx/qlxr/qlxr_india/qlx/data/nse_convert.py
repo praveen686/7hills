@@ -1,6 +1,6 @@
 """Convert NSE daily files to hive-partitioned Parquet.
 
-Source layout (from apps.nse_daily collector):
+Source layout (from collectors.nse_daily):
   data/nse/daily/YYYY-MM-DD/<23 file types>
 
 Output layout (in MARKET_DIR):
@@ -44,7 +44,7 @@ _DATA_ROOT = Path(
     )
 )
 
-# NSE daily source files (from apps.nse_daily collector)
+# NSE daily source files (from collectors.nse_daily)
 NSE_SOURCE_DIR = Path(
     os.environ.get(
         "QLX_NSE_DAILY_DIR",

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from apps.india_fno.paper_state import (
+from _archive.india_fno_legacy.paper_state import (
     ClosedTrade,
     IVObservation,
     PaperPosition,

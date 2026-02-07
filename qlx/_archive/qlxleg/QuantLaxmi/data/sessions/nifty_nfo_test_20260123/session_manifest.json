@@ -1,0 +1,96 @@
+{
+  "session_id": "5897a689-4eee-413e-8bd5-63db739803c6",
+  "watermark": "QuantLaxmi-india-session-20260123-041030-5897a689",
+  "family": "india",
+  "profile": "research",
+  "instruments": [
+    "NIFTY26JAN25250CE",
+    "NIFTY26JAN25250PE",
+    "NIFTY26JAN25300CE",
+    "NIFTY26JAN25300PE",
+    "NIFTY26JAN25350CE",
+    "NIFTY26JAN25350PE",
+    "NIFTY26JANFUT"
+  ],
+  "captures": [
+    {
+      "tradingsymbol": "NIFTY26JAN25250CE",
+      "instrument_token": 15025410,
+      "manifest_path": "NIFTY26JAN25250CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25250CE/ticks.jsonl",
+      "ticks_hash": "e1b5781f1a70d0f3cfe89dbd363493456da4a937eb35861558333fdabd2be08f",
+      "ticks_written": 46,
+      "has_depth": false
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25250PE",
+      "instrument_token": 15025666,
+      "manifest_path": "NIFTY26JAN25250PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25250PE/ticks.jsonl",
+      "ticks_hash": "99e0489e7931d6f7ae999e3f5c3b3c8698c5c83e97a6c3f396d5a381975dac64",
+      "ticks_written": 48,
+      "has_depth": false
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25300CE",
+      "instrument_token": 15025922,
+      "manifest_path": "NIFTY26JAN25300CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25300CE/ticks.jsonl",
+      "ticks_hash": "dbfc86aaa38e832339cf5f60461a296d410f4e249e1eb7c38c0e23f42be4b6ed",
+      "ticks_written": 39,
+      "has_depth": false
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25300PE",
+      "instrument_token": 15027714,
+      "manifest_path": "NIFTY26JAN25300PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25300PE/ticks.jsonl",
+      "ticks_hash": "2e449dcb8c05a869c9cf165cfa520e8e25124f2d80dfc8076dd87f8d2cce5fee",
+      "ticks_written": 43,
+      "has_depth": false
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25350CE",
+      "instrument_token": 15027970,
+      "manifest_path": "NIFTY26JAN25350CE/manifest.json",
+      "ticks_file": "NIFTY26JAN25350CE/ticks.jsonl",
+      "ticks_hash": "d739e7d3257668d151e6dab5d7bdfb6fec9ff0eeb3fd455e5a94a4478e9e94f1",
+      "ticks_written": 49,
+      "has_depth": false
+    },
+    {
+      "tradingsymbol": "NIFTY26JAN25350PE",
+      "instrument_token": 15028226,
+      "manifest_path": "NIFTY26JAN25350PE/manifest.json",
+      "ticks_file": "NIFTY26JAN25350PE/ticks.jsonl",
+      "ticks_hash": "31aa36ff4239a5f4b19116f70353c28949805047515fe8a34039f49194be6154",
+      "ticks_written": 49,
+      "has_depth": false
+    },
+    {
+      "tradingsymbol": "NIFTY26JANFUT",
+      "instrument_token": 12602626,
+      "manifest_path": "NIFTY26JANFUT/manifest.json",
+      "ticks_file": "NIFTY26JANFUT/ticks.jsonl",
+      "ticks_hash": "80aa15e0f95668f7be096288345256b35438ff40132e953a4fe5038d5b4c5895",
+      "ticks_written": 42,
+      "has_depth": false
+    }
+  ],
+  "determinism": {
+    "certified": false,
+    "all_instruments_clean": false,
+    "instrument_hashes": {
+      "NIFTY26JAN25250CE": "e1b5781f1a70d0f3cfe89dbd363493456da4a937eb35861558333fdabd2be08f",
+      "NIFTY26JANFUT": "80aa15e0f95668f7be096288345256b35438ff40132e953a4fe5038d5b4c5895",
+      "NIFTY26JAN25300CE": "dbfc86aaa38e832339cf5f60461a296d410f4e249e1eb7c38c0e23f42be4b6ed",
+      "NIFTY26JAN25250PE": "99e0489e7931d6f7ae999e3f5c3b3c8698c5c83e97a6c3f396d5a381975dac64",
+      "NIFTY26JAN25300PE": "2e449dcb8c05a869c9cf165cfa520e8e25124f2d80dfc8076dd87f8d2cce5fee",
+      "NIFTY26JAN25350CE": "d739e7d3257668d151e6dab5d7bdfb6fec9ff0eeb3fd455e5a94a4478e9e94f1",
+      "NIFTY26JAN25350PE": "31aa36ff4239a5f4b19116f70353c28949805047515fe8a34039f49194be6154"
+    }
+  },
+  "started_at": "2026-01-23T04:10:30.972111977Z",
+  "finished_at": "2026-01-23T04:11:01.919987909Z",
+  "duration_secs": 30.947
+}

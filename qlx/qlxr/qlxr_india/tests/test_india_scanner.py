@@ -9,16 +9,16 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from apps.india_scanner.costs import DEFAULT_COSTS, IndiaCostModel
-from apps.india_scanner.scanner import format_scan_results, run_daily_scan
-from apps.india_scanner.signals import CompositeSignal
-from apps.india_scanner.state import (
+from strategies.s9_momentum.costs import DEFAULT_COSTS, IndiaCostModel
+from strategies.s9_momentum.scanner import format_scan_results, run_daily_scan
+from strategies.s9_momentum.signals import CompositeSignal
+from _archive.india_scanner_legacy.state import (
     ClosedPosition,
     PaperPosition,
     ScannerState,
     compute_performance,
 )
-from apps.india_scanner.universe import FNO_UNIVERSE, get_fno_symbols, get_lot_size
+from strategies.s9_momentum.universe import FNO_UNIVERSE, get_fno_symbols, get_lot_size
 
 
 # ---------------------------------------------------------------------------

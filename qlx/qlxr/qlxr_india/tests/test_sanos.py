@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from apps.india_fno.sanos import (
+from qlx.pricing.sanos import (
     SANOSResult,
     bs_call,
     bs_call_vega,

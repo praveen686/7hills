@@ -12,7 +12,7 @@ import math
 import numpy as np
 import pytest
 
-from apps.india_fno.risk_neutral import (
+from qlx.pricing.risk_neutral import (
     DensitySnapshot,
     compute_moments,
     compute_snapshot,
@@ -23,7 +23,7 @@ from apps.india_fno.risk_neutral import (
     shannon_entropy,
     tail_weights,
 )
-from apps.india_fno.sanos import SANOSResult, bs_call, fit_sanos
+from qlx.pricing.sanos import SANOSResult, bs_call, fit_sanos
 
 
 # ---------------------------------------------------------------------------

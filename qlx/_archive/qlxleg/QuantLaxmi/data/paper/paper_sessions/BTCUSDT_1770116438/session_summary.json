@@ -1,0 +1,11 @@
+{
+  "symbol": "BTCUSDT",
+  "started_at": "2026-02-03T11:00:38.502427521Z",
+  "ended_at": "2026-02-03T18:36:39.421722074Z",
+  "initial_capital": 10000.0,
+  "final_position": 0.0,
+  "realized_pnl": 0.0,
+  "total_fills": 0,
+  "depth_events_processed": 547190,
+  "shutdown_reason": "SIGTERM"
+}

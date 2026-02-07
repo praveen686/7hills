@@ -1,0 +1,155 @@
+{
+  "session_id": "3a33d42c-c4bb-4c22-8c5d-d33f60cefa35",
+  "watermark": "QuantLaxmi-crypto-session-20260122-160800-3a33d42c",
+  "family": "crypto",
+  "profile": "certified",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "ETHBTC",
+    "BNBBTC",
+    "SOLBTC"
+  ],
+  "captures": [
+    {
+      "symbol": "BTCUSDT",
+      "manifest_path": "BTCUSDT/manifest.json",
+      "depth_file": "BTCUSDT/depth.jsonl",
+      "depth_hash": "9c0110640d429af11e90d7e9af78b2ab6080d326647c4759e3b15ab93e89141c",
+      "trades_file": "BTCUSDT/trades.jsonl",
+      "trades_hash": "20f906c4a1882020c46fc3e902824df1ff6f2bebc57ad4c3848af52679239b62",
+      "events_written": 22026,
+      "trades_written": 13297,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "ETHUSDT",
+      "manifest_path": "ETHUSDT/manifest.json",
+      "depth_file": "ETHUSDT/depth.jsonl",
+      "depth_hash": "a263f05342fcc87fc4b48aca007bfaca04d5632dd3a72209ea99b42f7c51a291",
+      "trades_file": "ETHUSDT/trades.jsonl",
+      "trades_hash": "e95ec54ba5889e91c873bb48d30ed35b570d853842a96d90ea74c86bcde6ff59",
+      "events_written": 22363,
+      "trades_written": 14463,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "BNBUSDT",
+      "manifest_path": "BNBUSDT/manifest.json",
+      "depth_file": "BNBUSDT/depth.jsonl",
+      "depth_hash": "7c3f56cbf83dd0e9f21467eabef1bd4fc9533cc73774c349d58b55a3926816bf",
+      "trades_file": "BNBUSDT/trades.jsonl",
+      "trades_hash": "b498e8871ac19a7a018bc0a8169350c4d143389c9edebbbc1aada1ab57f1692c",
+      "events_written": 17825,
+      "trades_written": 3680,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "SOLUSDT",
+      "manifest_path": "SOLUSDT/manifest.json",
+      "depth_file": "SOLUSDT/depth.jsonl",
+      "depth_hash": "8480e4f57ab0764facc7c4682aaf0595e9b4c3ecf43e0f2e58d668e66c5fe162",
+      "trades_file": "SOLUSDT/trades.jsonl",
+      "trades_hash": "16d278b635381fccaa51ed9d65bbf32405b8bdeeabd04deb8e456d821bd1b1d1",
+      "events_written": 19274,
+      "trades_written": 5419,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "XRPUSDT",
+      "manifest_path": "XRPUSDT/manifest.json",
+      "depth_file": "XRPUSDT/depth.jsonl",
+      "depth_hash": "b587e6bb1a72c91b5385f85460544d68511b52663bff127963929cd35725f4e2",
+      "trades_file": "XRPUSDT/trades.jsonl",
+      "trades_hash": "f2aad8eede0a4a9c7069c1aa2281efbbc6db914262279bac76c5f1250fb299fb",
+      "events_written": 17810,
+      "trades_written": 3520,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "ETHBTC",
+      "manifest_path": "ETHBTC/manifest.json",
+      "depth_file": "ETHBTC/depth.jsonl",
+      "depth_hash": "e93feb3bfdacc1c6eb2d6885083ebb823ee18d3b1ff5555885156e14460e9b12",
+      "trades_file": "ETHBTC/trades.jsonl",
+      "trades_hash": "11f11d56becc1886771ee89e1a25cdcf9f9110232c5bddd15d619987d65c9dc6",
+      "events_written": 10406,
+      "trades_written": 249,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "BNBBTC",
+      "manifest_path": "BNBBTC/manifest.json",
+      "depth_file": "BNBBTC/depth.jsonl",
+      "depth_hash": "9003c650426c4a6a87a3ce6dbbb050082b7c54a8ee5c86d912a537a6887cd002",
+      "trades_file": "BNBBTC/trades.jsonl",
+      "trades_hash": "371327541a2b3d39d94ae84783b762bee036007347c9c7612b9f2ee25d80746d",
+      "events_written": 9757,
+      "trades_written": 217,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    },
+    {
+      "symbol": "SOLBTC",
+      "manifest_path": "SOLBTC/manifest.json",
+      "depth_file": "SOLBTC/depth.jsonl",
+      "depth_hash": "11de2008a57b34ec0556f98648eb684961dbcdc1b44a40ded59f4823783bf622",
+      "trades_file": "SOLBTC/trades.jsonl",
+      "trades_hash": "64612110775879d04057470bd07398abc95caad01db3a0db66ef140e6dd85c8e",
+      "events_written": 12943,
+      "trades_written": 342,
+      "gaps_detected": 0,
+      "snapshot_written": true
+    }
+  ],
+  "determinism": {
+    "certified": true,
+    "all_symbols_clean": true,
+    "symbol_hashes": {
+      "BNBUSDT": {
+        "depth_hash": "7c3f56cbf83dd0e9f21467eabef1bd4fc9533cc73774c349d58b55a3926816bf",
+        "trades_hash": "b498e8871ac19a7a018bc0a8169350c4d143389c9edebbbc1aada1ab57f1692c"
+      },
+      "SOLBTC": {
+        "depth_hash": "11de2008a57b34ec0556f98648eb684961dbcdc1b44a40ded59f4823783bf622",
+        "trades_hash": "64612110775879d04057470bd07398abc95caad01db3a0db66ef140e6dd85c8e"
+      },
+      "SOLUSDT": {
+        "depth_hash": "8480e4f57ab0764facc7c4682aaf0595e9b4c3ecf43e0f2e58d668e66c5fe162",
+        "trades_hash": "16d278b635381fccaa51ed9d65bbf32405b8bdeeabd04deb8e456d821bd1b1d1"
+      },
+      "BNBBTC": {
+        "depth_hash": "9003c650426c4a6a87a3ce6dbbb050082b7c54a8ee5c86d912a537a6887cd002",
+        "trades_hash": "371327541a2b3d39d94ae84783b762bee036007347c9c7612b9f2ee25d80746d"
+      },
+      "XRPUSDT": {
+        "depth_hash": "b587e6bb1a72c91b5385f85460544d68511b52663bff127963929cd35725f4e2",
+        "trades_hash": "f2aad8eede0a4a9c7069c1aa2281efbbc6db914262279bac76c5f1250fb299fb"
+      },
+      "BTCUSDT": {
+        "depth_hash": "9c0110640d429af11e90d7e9af78b2ab6080d326647c4759e3b15ab93e89141c",
+        "trades_hash": "20f906c4a1882020c46fc3e902824df1ff6f2bebc57ad4c3848af52679239b62"
+      },
+      "ETHBTC": {
+        "depth_hash": "e93feb3bfdacc1c6eb2d6885083ebb823ee18d3b1ff5555885156e14460e9b12",
+        "trades_hash": "11f11d56becc1886771ee89e1a25cdcf9f9110232c5bddd15d619987d65c9dc6"
+      },
+      "ETHUSDT": {
+        "depth_hash": "a263f05342fcc87fc4b48aca007bfaca04d5632dd3a72209ea99b42f7c51a291",
+        "trades_hash": "e95ec54ba5889e91c873bb48d30ed35b570d853842a96d90ea74c86bcde6ff59"
+      }
+    }
+  },
+  "started_at": "2026-01-22T16:08:00.177805661Z",
+  "finished_at": "2026-01-22T16:27:31.656442358Z",
+  "duration_secs": 1171.478
+}

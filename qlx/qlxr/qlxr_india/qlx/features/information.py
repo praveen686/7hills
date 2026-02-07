@@ -108,11 +108,13 @@ def mutual_information(
 
     n_cases = n - word_length - 1
 
-    # Chronological convention: index 0 = oldest
-    # Current move: prices[i+1] > prices[i] → 1, else 0
-    # History: preceding word_length moves
+    # Chronological convention: index 0 = oldest.
+    # The loop iterates over a historical window passed to this function.
+    # prices[i+1] > prices[i] is NOT look-ahead because both indices
+    # are within the already-observed historical window (prices array),
+    # not referencing future data beyond the window boundary.
     for i in range(word_length, word_length + n_cases):
-        # Current move (dependent variable)
+        # Current move (dependent variable) — within the historical window
         current = 1 if prices[i + 1] > prices[i] else 0
         dep_marg[current] += 1
 

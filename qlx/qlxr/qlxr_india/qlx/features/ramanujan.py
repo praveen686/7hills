@@ -215,8 +215,8 @@ class RamanujanPeriodicity(Feature):
 
             # Volume periodicity
             vol_window = volume[i - self.window : i].astype(float)
-            if vol_window.std() > 0:
-                vol_norm = (vol_window - vol_window.mean()) / vol_window.std()
+            if vol_window.std(ddof=1) > 0:
+                vol_norm = (vol_window - vol_window.mean()) / vol_window.std(ddof=1)
                 vol_energies = ramanujan_periodogram(vol_norm, self.max_period)
                 vol_energies[0] = 0
                 vol_period[i] = int(np.argmax(vol_energies)) + 1

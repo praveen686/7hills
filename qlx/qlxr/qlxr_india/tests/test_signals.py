@@ -7,7 +7,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from apps.india_scanner.signals import (
+from strategies.s9_momentum.signals import (
     CompositeSignal,
     DeliverySignal,
     FIIFlowSignal,
