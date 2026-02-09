@@ -102,7 +102,7 @@ def _crra_utility(wealth: float, gamma: float) -> float:
         -W * U''(W) / U'(W) = gamma
     """
     if wealth <= 0:
-        return -1e10  # large negative utility for ruin
+        return float('-inf')  # ruin: utility is -∞
     if abs(gamma - 1.0) < 1e-8:
         return math.log(wealth)
     return (wealth ** (1.0 - gamma)) / (1.0 - gamma)

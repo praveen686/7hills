@@ -1486,10 +1486,14 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Momentum Transformer Backtest")
+    parser.add_argument("--model", choices=["tft", "xtrend", "xtrend-rl"], default="tft",
+                        help="Model architecture: tft (default), xtrend (X-Trend), or xtrend-rl (X-Trend + RL)")
     parser.add_argument("--symbol", default=None,
                         help="Single index name (default: run all 4 indices)")
     parser.add_argument("--start", default="2024-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-02-06", help="End date (YYYY-MM-DD)")
+    parser.add_argument("--loss-mode", choices=["sharpe", "joint_mle"], default="sharpe",
+                        help="X-Trend loss mode: sharpe or joint_mle (MLE + Sharpe)")
     parser.add_argument("--no-torch", action="store_true", help="Force sklearn fallback")
     parser.add_argument("--mega-features", action="store_true",
                         help="Use MegaFeatureBuilder (all data sources)")
@@ -1515,6 +1519,87 @@ def main():
     store = MarketDataStore()
     all_results: dict[str, pd.DataFrame] = {}
 
+    # ------------------------------------------------------------------
+    # X-Trend + RL path: full integrated pipeline
+    # ------------------------------------------------------------------
+    if args.model == "xtrend-rl":
+        from models.rl.integration.pipeline import run_integrated_backtest
+
+        print(f"\n{'='*60}")
+        print(f"X-Trend + RL: Integrated multi-asset backtest")
+        print(f"{'='*60}")
+
+        all_results = run_integrated_backtest(
+            start=args.start,
+            end=args.end,
+        )
+        return all_results
+
+    # ------------------------------------------------------------------
+    # X-Trend path: multi-asset joint training
+    # ------------------------------------------------------------------
+    if args.model == "xtrend":
+        from models.ml.tft.x_trend import run_xtrend_backtest, XTrendConfig
+
+        print(f"\n{'='*60}")
+        print(f"X-Trend: Multi-asset joint backtest")
+        print(f"{'='*60}")
+
+        # Build a multi-asset price DataFrame from Kite spot data
+        price_records: dict[str, list] = {"date": []}
+        _all_dates: set[str] = set()
+        sym_frames: dict[str, pd.DataFrame] = {}
+
+        for symbol in symbols:
+            df = _load_daily_close(symbol, pd.Timestamp(args.start), pd.Timestamp(args.end), store)
+            if df.empty:
+                print(f"  SKIPPED {symbol}: no data")
+                continue
+            df["date"] = pd.to_datetime(df["date"])
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
+            df = df.dropna(subset=["close"]).set_index("date")
+            sym_frames[symbol] = df
+
+        if len(sym_frames) < 2:
+            print("  ERROR: Need at least 2 assets for X-Trend")
+            return all_results
+
+        # Outer-join all assets on date
+        combined = pd.DataFrame()
+        for sym, df in sym_frames.items():
+            combined[sym] = df["close"]
+        combined = combined.sort_index().ffill().dropna()
+        combined = combined.reset_index().rename(columns={"index": "date"})
+
+        x_cfg = XTrendConfig(
+            d_hidden=args.hidden_dim,
+            n_assets=len(sym_frames),
+            train_window=args.train_window if args.train_window != 120 else 252,
+            test_window=args.test_window if args.test_window != 20 else 63,
+            loss_mode=args.loss_mode,
+        )
+
+        xtrend_results = run_xtrend_backtest(
+            combined, list(sym_frames.keys()), x_cfg
+        )
+        all_results = xtrend_results
+
+        for sym, res in all_results.items():
+            print(f"\n  {sym}:")
+            valid = res["strategy_return"].dropna()
+            if len(valid) > 1:
+                sv = np.expm1(valid.values)
+                sharpe = (np.mean(sv) / np.std(sv, ddof=1)) * math.sqrt(252)
+                tr = res["cumulative_pnl"].iloc[-1]
+                print(f"    Sharpe: {sharpe:.4f}, Return: {tr:.2%}, OOS: {len(valid)} days")
+            else:
+                print(f"    Insufficient OOS data")
+
+        return all_results
+
+    # ------------------------------------------------------------------
+    # TFT path (original)
+    # ------------------------------------------------------------------
     for symbol in symbols:
         print(f"\n{'='*60}")
         print(f"Running: {symbol}")

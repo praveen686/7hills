@@ -115,7 +115,7 @@ def _eps_greedy(
 ) -> A:
     """Select action epsilon-greedily from Q(state, .)."""
     if rng.random() < epsilon:
-        return actions[rng.integers(len(actions))]
+        return rng.choice(actions)  # type: ignore[return-value]
     q_vals = np.array([q((state, a)) for a in actions], dtype=np.float64)
     max_q = q_vals.max()
     best = [a for a, qv in zip(actions, q_vals) if np.isclose(qv, max_q)]

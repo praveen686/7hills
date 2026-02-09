@@ -49,6 +49,7 @@ from .markov_process import (
 )
 
 __all__ = [
+    "DEFAULT_TOLERANCE",
     "ValueFunction",
     "ActionValueFunction",
     "policy_evaluation",
@@ -59,7 +60,11 @@ __all__ = [
     "backward_induction",
     "bellman_optimality_operator",
     "bellman_policy_operator",
+    "lstd_prediction",
 ]
+
+# Module-level convergence tolerance (used across all DP algorithms)
+DEFAULT_TOLERANCE: float = 1e-6
 
 # ---------------------------------------------------------------------------
 # Value functions  (Ch 3, §3.4 — state-value and action-value)
@@ -236,7 +241,7 @@ def _compute_action_value_function(
 def policy_evaluation(
     mrp: FiniteMarkovRewardProcess[S],
     gamma: float,
-    tolerance: float = 1e-8,
+    tolerance: float = DEFAULT_TOLERANCE,
     max_iterations: int = 10_000,
 ) -> ValueFunction[S]:
     """Iterative Policy Evaluation for a finite MRP.
@@ -357,7 +362,7 @@ def policy_improvement(
 def policy_iteration(
     mdp: FiniteMarkovDecisionProcess[S, A],
     gamma: float | None = None,
-    tolerance: float = 1e-8,
+    tolerance: float = DEFAULT_TOLERANCE,
     max_iterations: int = 1_000,
     use_direct_solve: bool = False,
 ) -> tuple[ValueFunction[S], DeterministicPolicy[S, A]]:
@@ -487,7 +492,7 @@ def bellman_policy_operator(
 def value_iteration(
     mdp: FiniteMarkovDecisionProcess[S, A],
     gamma: float | None = None,
-    tolerance: float = 1e-8,
+    tolerance: float = DEFAULT_TOLERANCE,
     max_iterations: int = 10_000,
 ) -> tuple[ValueFunction[S], DeterministicPolicy[S, A]]:
     """Value Iteration: iterate the Bellman optimality operator to convergence.
@@ -600,3 +605,66 @@ def backward_induction(
     # Reverse so results[0] = (V_0, π_0), results[-1] = (V_{T-1}, π_{T-1})
     results.reverse()
     return results
+
+
+# ---------------------------------------------------------------------------
+# Least-Squares TD Prediction  (Ch 12 supplement)
+# ---------------------------------------------------------------------------
+
+
+def lstd_prediction(
+    transitions: Sequence[tuple[np.ndarray, float, np.ndarray]],
+    gamma: float,
+    feature_dim: int,
+    epsilon_reg: float = 1e-4,
+) -> np.ndarray:
+    """Least-Squares Temporal Difference (LSTD) prediction.
+
+    Computes the fixed point of projected Bellman equation in a single
+    batch pass — no step-size parameter needed.
+
+    Solves:  w = A^{-1} b   where
+        A = Σ_t φ(s_t) · (φ(s_t) - γ·φ(s_{t+1}))^T
+        b = Σ_t φ(s_t) · r_{t+1}
+
+    The value function approximation is V(s) = φ(s)^T · w.
+
+    This is equivalent to performing TD(0) updates with decreasing
+    step sizes in the limit (Bradtke & Barto, 1996).
+
+    Parameters
+    ----------
+    transitions : sequence of (phi_s, reward, phi_s_next)
+        Each transition is a tuple:
+            phi_s : np.ndarray, shape (feature_dim,) — features of current state
+            reward : float — reward received
+            phi_s_next : np.ndarray, shape (feature_dim,) — features of next state
+    gamma : float
+        Discount factor.
+    feature_dim : int
+        Dimension of the feature vectors.
+    epsilon_reg : float
+        Regularization added to diagonal of A for numerical stability.
+
+    Returns
+    -------
+    w : np.ndarray, shape (feature_dim,)
+        Weight vector for the linear value function V(s) ≈ φ(s)^T · w.
+
+    References
+    ----------
+    Bradtke & Barto (1996), "Linear Least-Squares algorithms for temporal
+    difference learning."
+    Rao & Jelvis, Ch 12 (LSTD supplement).
+    """
+    A = np.eye(feature_dim) * epsilon_reg
+    b = np.zeros(feature_dim)
+
+    for phi_s, reward, phi_s_next in transitions:
+        phi_s = np.asarray(phi_s, dtype=np.float64)
+        phi_s_next = np.asarray(phi_s_next, dtype=np.float64)
+        A += np.outer(phi_s, phi_s - gamma * phi_s_next)
+        b += phi_s * reward
+
+    w = np.linalg.solve(A, b)
+    return w

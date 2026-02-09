@@ -42,6 +42,7 @@ from .markov_process import (
 
 # --- Ch 4-5: Dynamic Programming ---
 from .dynamic_programming import (
+    DEFAULT_TOLERANCE,
     ValueFunction,
     ActionValueFunction,
     policy_evaluation,
@@ -52,6 +53,7 @@ from .dynamic_programming import (
     backward_induction,
     bellman_optimality_operator,
     bellman_policy_operator,
+    lstd_prediction,
 )
 
 # --- Ch 6: Function Approximation ---
@@ -108,6 +110,7 @@ __all__ = [
     "apply_policy",
     "apply_finite_policy",
     # DP
+    "DEFAULT_TOLERANCE",
     "ValueFunction",
     "ActionValueFunction",
     "policy_evaluation",
@@ -118,6 +121,7 @@ __all__ = [
     "backward_induction",
     "bellman_optimality_operator",
     "bellman_policy_operator",
+    "lstd_prediction",
     # Function Approximation
     "FunctionApprox",
     "Tabular",
