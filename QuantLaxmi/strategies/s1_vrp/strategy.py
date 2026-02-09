@@ -39,6 +39,10 @@ class S1VRPStrategy(BaseStrategy):
     On each scan day, calibrates SANOS for each index, computes
     density features (skew premium, left tail, entropy, KL divergence),
     and emits long signals when the composite percentile exceeds threshold.
+
+    Optional: Kelly-Merton position sizing via KellySizer (use_kelly=True).
+    When enabled, conviction is scaled by Kelly optimal fraction adjusted
+    for current drawdown and portfolio heat.
     """
 
     def __init__(
@@ -49,6 +53,9 @@ class S1VRPStrategy(BaseStrategy):
         exit_pctile: float = DEFAULT_EXIT_PCTILE,
         hold_days: int = DEFAULT_HOLD_DAYS,
         phys_window: int = DEFAULT_PHYS_WINDOW,
+        use_kelly: bool = False,
+        kelly_fraction: float = 0.5,
+        kelly_max_position: float = 0.25,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -58,6 +65,26 @@ class S1VRPStrategy(BaseStrategy):
         self._exit_pctile = exit_pctile
         self._hold_days = hold_days
         self._phys_window = phys_window
+        self._use_kelly = use_kelly
+
+        # Kelly-Merton position sizer (lazy init)
+        self._kelly = None
+        if use_kelly:
+            try:
+                from models.rl.agents.kelly_sizer import KellySizer
+                self._kelly = KellySizer(
+                    mode="fractional_kelly",
+                    fraction=kelly_fraction,
+                    max_position_pct=kelly_max_position,
+                    gamma_risk=2.0,
+                )
+                logger.info(
+                    "S1 VRP: Kelly-Merton sizing enabled (f=%.2f, max=%.0f%%)",
+                    kelly_fraction, kelly_max_position * 100,
+                )
+            except ImportError:
+                logger.warning("KellySizer not available, falling back to default sizing")
+                self._use_kelly = False
 
     @property
     def strategy_id(self) -> str:
@@ -242,6 +269,36 @@ class S1VRPStrategy(BaseStrategy):
         # No position — check entry
         if sig_pctile >= self._entry_pctile and composite > 0:
             conviction = min(1.0, abs(composite) / 0.5)
+
+            # Kelly-Merton sizing: scale conviction by optimal position fraction
+            kelly_meta = {}
+            if self._use_kelly and self._kelly is not None:
+                # Estimate expected return and volatility from recent composites
+                recent_composites = composites[-self._lookback:]
+                expected_return = float(np.mean(recent_composites)) * 0.01  # scale
+                vol_estimate = atm_iv if atm_iv > 0 else 0.20
+
+                # Get current drawdown from state
+                dd_key = f"drawdown_{symbol}"
+                drawdown = self.get_state(dd_key, 0.0)
+                heat = sum(
+                    1.0 for s in self._symbols
+                    if self.get_state(f"position_{s}") is not None
+                ) / max(len(self._symbols), 1)
+
+                kelly_size = self._kelly.optimal_size(
+                    expected_return=expected_return,
+                    volatility=vol_estimate,
+                    current_drawdown=drawdown,
+                    portfolio_heat=heat,
+                )
+                conviction = conviction * max(0.1, min(1.0, kelly_size))
+                kelly_meta = {
+                    "kelly_size": round(kelly_size, 4),
+                    "expected_return": round(expected_return, 6),
+                    "vol_estimate": round(vol_estimate, 4),
+                }
+
             self.set_state(pos_key, {
                 "entry_date": d.isoformat(),
                 "entry_spot": spot,
@@ -261,6 +318,7 @@ class S1VRPStrategy(BaseStrategy):
                     "skew_premium": round(skew_premium, 4),
                     "left_tail": round(snap.left_tail, 4),
                     "atm_iv": round(atm_iv, 4),
+                    **kelly_meta,
                 },
             )
 

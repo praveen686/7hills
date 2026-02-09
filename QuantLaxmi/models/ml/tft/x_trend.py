@@ -281,6 +281,37 @@ if HAS_TORCH:
             out = self.norm2(q + out)
             return out.squeeze(1)  # (batch, d_hidden)
 
+        def forward_with_weights(
+            self,
+            query: torch.Tensor,
+            keys: torch.Tensor,
+            values: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Forward pass that also returns cross-attention weights.
+
+            Parameters
+            ----------
+            query : (batch, d_hidden) — target representation
+            keys : (batch, n_context, d_hidden) — context summaries
+            values : (batch, n_context, d_hidden) — context values
+
+            Returns
+            -------
+            output : (batch, d_hidden) — cross-attended representation
+            attn_weights : (batch, n_heads, 1, n_context) — attention weights
+            """
+            # Self-attention on context V
+            v_prime, _ = self.self_attn(values, values, values)
+            v_prime = self.norm1(values + v_prime)
+
+            # Cross-attention with weights
+            q = query.unsqueeze(1)  # (batch, 1, d_hidden)
+            out, attn_weights = self.cross_attn(
+                q, keys, v_prime, need_weights=True, average_attn_weights=False,
+            )
+            out = self.norm2(q + out)
+            return out.squeeze(1), attn_weights  # (batch, d), (batch, n_heads, 1, n_ctx)
+
     class XTrendModel(nn.Module):
         """Full X-Trend architecture.
 
@@ -505,6 +536,58 @@ if HAS_TORCH:
             decoded = self.decoder(h_fused)  # (batch, d)
 
             return decoded
+
+        def extract_hidden_with_attention(
+            self,
+            target_seq: torch.Tensor,
+            context_set: torch.Tensor,
+            target_id: torch.Tensor,
+            context_ids: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            """Return decoder hidden AND cross-attention weights.
+
+            Same as extract_hidden() but uses forward_with_weights() on the
+            CrossAttentionBlock to also return attention weights for Pattern 5
+            (attention reward shaping).
+
+            Returns
+            -------
+            decoded : (batch, d_hidden)
+            attn_weights : (batch, n_heads, 1, n_context)
+            """
+            batch = target_seq.size(0)
+            n_ctx = context_set.size(1)
+            d = self.cfg.d_hidden
+
+            # 1. Entity embeddings
+            s_target = self.entity_embed(target_id)
+
+            # 2. Encode target sequence
+            h_target = self._encode_sequence(target_seq, s_target)
+            h_target_last = h_target[:, -1, :]
+
+            # 3. Encode each context sequence
+            ctx_keys = []
+            ctx_vals = []
+            for c in range(n_ctx):
+                ctx_seq_c = context_set[:, c, :, :]
+                ctx_id_c = context_ids[:, c]
+                s_ctx_c = self.entity_embed(ctx_id_c)
+                h_c = self._encode_sequence(ctx_seq_c, s_ctx_c)
+                ctx_keys.append(h_c[:, -1, :])
+                ctx_vals.append(h_c[:, -1, :])
+
+            K = torch.stack(ctx_keys, dim=1)
+            V = torch.stack(ctx_vals, dim=1)
+
+            # 4. Cross-attention with weights
+            y, attn_weights = self.cross_attn.forward_with_weights(h_target_last, K, V)
+
+            # 5. Decode
+            h_fused = torch.cat([h_target_last, y], dim=-1)
+            decoded = self.decoder(h_fused)
+
+            return decoded, attn_weights
 
         def predict_position(
             self,

@@ -31,7 +31,14 @@ SYMBOLS = ["NIFTY", "BANKNIFTY"]
 
 
 class S10GammaScalpStrategy(BaseStrategy):
-    """S10: Gamma scalping — long realized vol vs implied vol."""
+    """S10: Gamma scalping — long realized vol vs implied vol.
+
+    Optional: Deep Hedging via DeepHedgingAgent (use_deep_hedge=True).
+    When enabled, delta rehedging uses a trained neural network instead
+    of simple delta-neutral rebalancing. The DH agent minimises CVaR
+    of hedging P&L, learning to account for transaction costs and
+    discrete rebalancing.
+    """
 
     def __init__(
         self,
@@ -40,6 +47,7 @@ class S10GammaScalpStrategy(BaseStrategy):
         vrp_threshold: float = -0.02,
         min_dte: int = 14,
         delta_rebalance: float = 0.30,
+        use_deep_hedge: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -48,6 +56,25 @@ class S10GammaScalpStrategy(BaseStrategy):
         self._vrp_threshold = vrp_threshold
         self._min_dte = min_dte
         self._delta_rebal = delta_rebalance
+        self._use_deep_hedge = use_deep_hedge
+
+        # Deep hedging agent (lazy init)
+        self._deep_hedger = None
+        if use_deep_hedge:
+            try:
+                from models.rl.agents.deep_hedger import DeepHedgingAgent
+                self._deep_hedger = DeepHedgingAgent(
+                    n_instruments=1,
+                    state_dim=11,
+                    hidden_dims=(128, 64, 32),
+                    lr=1e-3,
+                    gamma_risk=0.5,
+                    cost_per_trade=0.001,
+                )
+                logger.info("S10 Gamma Scalp: Deep Hedging enabled")
+            except ImportError:
+                logger.warning("DeepHedgingAgent not available, falling back to delta-neutral")
+                self._use_deep_hedge = False
 
     @property
     def strategy_id(self) -> str:
@@ -142,6 +169,21 @@ class S10GammaScalpStrategy(BaseStrategy):
                         "iv_pctile": round(iv_pctile, 3),
                     },
                 )
+
+            # Deep hedging rebalance while in position
+            if self._use_deep_hedge and self._deep_hedger is not None:
+                hedge_ratio = self._get_deep_hedge_action(
+                    spot=spot,
+                    strike=pos.get("atm_strike", spot),
+                    atm_iv=atm_iv,
+                    realized_vol=realized_vol,
+                    dte=dte,
+                    current_delta=pos.get("current_delta", 0.0),
+                )
+                pos["current_delta"] = hedge_ratio
+                pos["hedge_method"] = "deep_hedge"
+                self.set_state(pos_key, pos)
+
             return None  # hold
 
         # Entry conditions
@@ -187,6 +229,56 @@ class S10GammaScalpStrategy(BaseStrategy):
                 "dte": dte,
             },
         )
+
+
+    def _get_deep_hedge_action(
+        self,
+        spot: float,
+        strike: float,
+        atm_iv: float,
+        realized_vol: float,
+        dte: int,
+        current_delta: float,
+    ) -> float:
+        """Get optimal hedge ratio from the DeepHedgingAgent.
+
+        Builds the state dict expected by the agent and returns the
+        hedge ratio in [-1, 1].
+        """
+        T = max(dte, 1) / 365.0
+
+        # BS delta for reference
+        from scipy.stats import norm as _norm
+        d1 = 0.0
+        if atm_iv > 1e-6 and T > 1e-10 and spot > 0 and strike > 0:
+            d1 = (math.log(spot / strike) + (0.065 + 0.5 * atm_iv ** 2) * T) / (
+                atm_iv * math.sqrt(T)
+            )
+        bs_delta = float(_norm.cdf(d1))
+
+        # Gamma
+        gamma = 0.0
+        if atm_iv > 1e-6 and T > 1e-10 and spot > 0:
+            gamma = float(
+                math.exp(-0.5 * d1 ** 2) / (
+                    math.sqrt(2 * math.pi) * spot * atm_iv * math.sqrt(T)
+                )
+            )
+
+        state_dict = {
+            "spot_over_strike": spot / max(strike, 1.0),
+            "time_to_expiry": T,
+            "implied_vol": atm_iv,
+            "realized_vol": realized_vol,
+            "bs_delta": bs_delta,
+            "gamma": gamma,
+            "position_delta": current_delta,
+            "regime_trending": 0.0,
+            "regime_mean_reverting": 0.0,
+            "regime_random": 1.0,
+            "recent_pnl": 0.0,
+        }
+        return float(self._deep_hedger.get_hedge_action(state_dict))
 
 
 def create_strategy() -> S10GammaScalpStrategy:

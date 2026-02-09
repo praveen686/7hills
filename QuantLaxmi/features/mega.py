@@ -226,6 +226,7 @@ class MegaFeatureBuilder:
             ("mktact", self._build_market_activity_features, (start_date, end_date)),
             ("mwpl", self._build_mwpl_stress_features, (ticker, start_date, end_date)),
             ("settle", self._build_settlement_features, (ticker, start_date, end_date)),
+            ("ext_options", self._build_extended_options_features, (ticker, start_date, end_date)),
         ]
 
         for name, fn, args in builders:
@@ -2154,3 +2155,25 @@ class MegaFeatureBuilder:
             result["settle_spread_ma5"] = _sma(vals, 5)
 
         return result
+
+    def _build_extended_options_features(
+        self, ticker: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """16 extended options features from DuckDB via OptionsFeatureBuilder.
+
+        Features: ATM IV, skew, PCR, VRP, gamma exposure, theta rate,
+        max pain, OI walls, z-scores, term structure — all causal.
+        """
+        try:
+            from features.options_features import OptionsFeatureBuilder
+        except ImportError:
+            logger.warning("OptionsFeatureBuilder not available")
+            return pd.DataFrame()
+
+        try:
+            # Get spot series from already-loaded price data if available
+            builder = OptionsFeatureBuilder(market_dir=self._market_dir)
+            return builder.build(ticker, start_date, end_date, store=self.store)
+        except Exception:
+            logger.exception("Extended options features failed for %s", ticker)
+            return pd.DataFrame()

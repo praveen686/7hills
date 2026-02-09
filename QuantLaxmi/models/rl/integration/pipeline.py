@@ -357,6 +357,12 @@ class IntegratedPipeline:
 
             total_reward += ep_reward
 
+            if ep % 50 == 0 or ep == num_episodes - 1:
+                logger.info(
+                    "  RL ep %d/%d: reward=%.4f, steps=%d",
+                    ep, num_episodes, ep_reward, len(states),
+                )
+
         return {
             "n_episodes": num_episodes,
             "avg_reward": total_reward / max(num_episodes, 1),

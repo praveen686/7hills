@@ -102,6 +102,10 @@ def _build_feature_matrix(
     features = pd.concat(feature_dfs, axis=1)
 
     # Target: forward return on target index
+    # At row i, target = (price[i+h] - price[i]) / price[i]
+    # Computed as: pct_change(h) shifted backward by h positions.
+    # NOTE: target[i] uses price[i+h], so the last h training rows
+    # must be PURGED in walk-forward to avoid leaking test data.
     target = pivot[target_index].pct_change(forward_horizon).shift(-forward_horizon)
     target.name = "target"
 
@@ -118,8 +122,17 @@ def _walk_forward_backtest(
     y: pd.Series,
     train_window: int = 60,
     test_window: int = 5,
+    purge_gap: int = 5,
 ) -> dict:
-    """Walk-forward XGBoost backtest."""
+    """Walk-forward XGBoost backtest.
+
+    Parameters
+    ----------
+    purge_gap : int
+        Number of rows to drop from the END of training data to prevent
+        forward-return targets from leaking test-set prices.  Must be
+        >= forward_horizon used in target construction.
+    """
     try:
         from xgboost import XGBRegressor
     except ImportError:
@@ -134,8 +147,12 @@ def _walk_forward_backtest(
 
     i = train_window
     while i + test_window <= n:
-        X_train = X.iloc[i - train_window:i]
-        y_train = y.iloc[i - train_window:i]
+        # Purge last `purge_gap` rows from training to prevent target
+        # look-ahead: target[j] = return(j, j+h), so targets near the
+        # train/test boundary use test-period prices.
+        train_end = i - purge_gap
+        X_train = X.iloc[i - train_window:train_end]
+        y_train = y.iloc[i - train_window:train_end]
         X_test = X.iloc[i:i + test_window]
         y_test = y.iloc[i:i + test_window]
 

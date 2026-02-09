@@ -90,18 +90,31 @@ class MegaFeatureAdapter:
 
         builder = MegaFeatureBuilder()
         per_asset_dfs: list[pd.DataFrame] = []
-        feature_names: list[str] = []
+        per_asset_names: list[list[str]] = []
 
         for asset_idx, symbol in enumerate(self.symbols):
             mega_sym = _SYMBOL_MAP.get(symbol.upper(), symbol)
             df, names = builder.build(mega_sym, start, end)
             # df is indexed by date (datetime), one row per trading day
             per_asset_dfs.append(df)
-            if not feature_names:
-                feature_names = names
+            per_asset_names.append(names)
+            logger.info(
+                "MegaFeatureAdapter: %s → %d features, %d rows",
+                mega_sym, len(names), len(df),
+            )
 
         if not per_asset_dfs:
             raise ValueError("No features built — check symbols and data availability")
+
+        # Union of all feature names (preserves order: first asset's names first,
+        # then any additional names from subsequent assets in order)
+        seen: set[str] = set()
+        feature_names: list[str] = []
+        for names in per_asset_names:
+            for n in names:
+                if n not in seen:
+                    seen.add(n)
+                    feature_names.append(n)
 
         # Outer-join all assets on date
         all_dates = sorted(
@@ -118,14 +131,17 @@ class MegaFeatureAdapter:
             aligned = df.reindex(dates)
             # Forward-fill within each asset (causal — only uses past values)
             aligned = aligned.ffill()
-            vals = aligned[feature_names].values
+            # Reindex columns to the union feature set (missing cols become NaN)
+            aligned = aligned.reindex(columns=feature_names)
+            vals = aligned.values
             features[:, asset_idx, :] = vals
 
-        # Zero remaining NaN (leading NaN before first valid date)
+        # Zero remaining NaN (leading NaN before first valid date, or
+        # asset-specific features missing for other assets)
         features = np.nan_to_num(features, nan=0.0)
 
         logger.info(
-            "MegaFeatureAdapter: %d days × %d assets × %d features",
+            "MegaFeatureAdapter: %d days × %d assets × %d features (union)",
             n_days, n_assets, n_features,
         )
         return features, feature_names, dates
@@ -242,30 +258,88 @@ if _HAS_TORCH:
             start_idx: int,
             end_idx: int,
             rng: np.random.Generator,
+            batch_size: int = 64,
         ) -> np.ndarray:
-            """Pre-compute hidden states for a date range, all assets.
+            """Pre-compute hidden states for a date range, all assets (batched).
+
+            Collects all valid (day, asset) pairs, builds their target
+            sequences and context sets in Python, then runs batched
+            forward passes through the backbone for GPU efficiency.
 
             Parameters
             ----------
             features : (n_days, n_assets, n_features) — normalized
             start_idx, end_idx : fold boundaries (inclusive, exclusive)
             rng : numpy RNG
+            batch_size : int — GPU batch size for forward passes
 
             Returns
             -------
             hidden_states : (end_idx - start_idx, n_assets, d_hidden)
             """
+            from models.ml.tft.x_trend import build_context_set
+
             n_assets = features.shape[1]
             fold_len = end_idx - start_idx
+            seq_len = self.cfg.seq_len
             hidden = np.zeros((fold_len, n_assets, self.cfg.d_hidden), dtype=np.float32)
 
             self.eval()
+
+            # Collect all valid (t_offset, asset) pairs and their data
+            indices = []        # (t_offset, asset_idx) for mapping back
+            tgt_list = []       # target windows
+            ctx_list = []       # context sets
+            tid_list = []       # target asset ids
+            cid_list = []       # context asset ids
+
             for t in range(fold_len):
                 day_idx = start_idx + t
+                if day_idx < seq_len:
+                    continue
                 for a in range(n_assets):
-                    hidden[t, a, :] = self.extract_hidden_for_day(
-                        features, day_idx, a, rng
+                    tw = features[day_idx - seq_len: day_idx, a, :]
+                    if np.any(np.isnan(tw)):
+                        continue
+                    ctx_seqs, ctx_ids = build_context_set(
+                        features,
+                        target_start=day_idx - seq_len,
+                        n_context=self.cfg.n_context,
+                        ctx_len=self.cfg.ctx_len,
+                        rng=rng,
                     )
+                    indices.append((t, a))
+                    tgt_list.append(tw)
+                    ctx_list.append(ctx_seqs)
+                    tid_list.append(a)
+                    cid_list.append(ctx_ids)
+
+            if not indices:
+                return hidden
+
+            # Convert to numpy arrays
+            tgt_arr = np.array(tgt_list, dtype=np.float32)
+            ctx_arr = np.array(ctx_list, dtype=np.float32)
+            tid_arr = np.array(tid_list, dtype=np.int64)
+            cid_arr = np.array(cid_list, dtype=np.int64)
+
+            dev = next(self.parameters()).device
+            n_total = len(indices)
+
+            # Batched forward passes
+            with torch.no_grad():
+                for bs in range(0, n_total, batch_size):
+                    be = min(bs + batch_size, n_total)
+                    tgt_t = torch.tensor(tgt_arr[bs:be], device=dev)
+                    ctx_t = torch.tensor(ctx_arr[bs:be], device=dev)
+                    tid_t = torch.tensor(tid_arr[bs:be], device=dev)
+                    cid_t = torch.tensor(cid_arr[bs:be], device=dev)
+                    h = self.model.extract_hidden(tgt_t, ctx_t, tid_t, cid_t)
+                    h_np = h.cpu().numpy()
+                    for j in range(be - bs):
+                        t_off, a_idx = indices[bs + j]
+                        hidden[t_off, a_idx, :] = h_np[j]
+
             return hidden
 
         def get_feature_importance(self) -> dict[str, float]:
@@ -367,6 +441,11 @@ if _HAS_TORCH:
                     X_cid.append(ctx_ids)
                     Y.append(tgt)
 
+            logger.info(
+                "Pretrain: built %d training episodes (%d assets × %d days)",
+                len(X_target), n_assets, train_end - train_start - seq_len,
+            )
+
             if len(X_target) < 10:
                 return {"final_loss": float("nan"), "losses": [], "best_epoch": 0}
 
@@ -425,6 +504,12 @@ if _HAS_TORCH:
 
                 avg_loss = epoch_loss / max(n_batches, 1)
                 losses.append(avg_loss)
+
+                if epoch % 10 == 0 or epoch == epochs - 1:
+                    logger.info(
+                        "  Epoch %d/%d: loss=%.4f (%d batches)",
+                        epoch, epochs, avg_loss, n_batches,
+                    )
 
                 if avg_loss < best_loss:
                     best_loss = avg_loss

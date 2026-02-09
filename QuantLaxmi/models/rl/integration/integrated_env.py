@@ -108,6 +108,10 @@ class IntegratedTradingEnv:
         self._hidden_states: Optional[np.ndarray] = None
         self._rng = np.random.default_rng(42)
 
+        # Reward shaping (Pattern 5 — attention reward)
+        self._reward_shaper = None
+        self._reward_bonuses: Optional[np.ndarray] = None
+
     @property
     def state_dim(self) -> int:
         """Total state vector dimension: 4×d_hidden + 10."""
@@ -137,18 +141,29 @@ class IntegratedTradingEnv:
         -------
         state_vec : (state_dim,)
         """
-        self._fold_start = fold_start_idx
-        self._fold_end = fold_end_idx
         self._step_idx = 0
         self._positions = np.zeros(self.n_assets)
         self._cum_pnl = 0.0
         self._peak_pnl = 0.0
         self._drawdown = 0.0
 
-        # Pre-compute backbone hidden states for the fold
-        self._hidden_states = self.backbone.precompute_hidden_states(
-            self.features, fold_start_idx, fold_end_idx, self._rng
-        )
+        # Pre-compute backbone hidden states ONLY if fold boundaries changed
+        # (avoids re-running 1000+ forward passes on every RL episode reset)
+        if (
+            self._fold_start != fold_start_idx
+            or self._fold_end != fold_end_idx
+            or self._hidden_states is None
+        ):
+            self._fold_start = fold_start_idx
+            self._fold_end = fold_end_idx
+            logger.info(
+                "Precomputing hidden states: days [%d:%d] × %d assets...",
+                fold_start_idx, fold_end_idx, self.n_assets,
+            )
+            self._hidden_states = self.backbone.precompute_hidden_states(
+                self.features, fold_start_idx, fold_end_idx, self._rng
+            )
+            logger.info("Hidden states precomputed: %s", self._hidden_states.shape)
         # shape: (fold_len, n_assets, d_hidden)
 
         # Reset per-asset envs
@@ -233,6 +248,12 @@ class IntegratedTradingEnv:
         dd_penalty = self.reward_lambda_risk * max(0.0, self._drawdown - dd_threshold)
         reward = net_pnl - dd_penalty
 
+        # Add reward shaping bonus (Pattern 5 — attention spikes)
+        if self._reward_bonuses is not None and self._step_idx < len(self._reward_bonuses):
+            reward += float(self._reward_bonuses[self._step_idx])
+        elif self._reward_shaper is not None:
+            reward += float(self._reward_shaper.get_bonus(self._step_idx))
+
         self._step_idx += 1
         done = (self._step_idx + 1 >= fold_len) or (day_idx + 1 >= self._fold_end)
 
@@ -283,6 +304,23 @@ class IntegratedTradingEnv:
         parts.append(np.array([progress, day_sin, day_cos], dtype=np.float32))
 
         return np.concatenate(parts).astype(np.float32)
+
+    def set_reward_shaper(self, shaper) -> None:
+        """Attach a reward shaper (e.g. AttentionRewardShaper).
+
+        The shaper must implement ``get_bonus(step_idx: int) -> float``.
+        Bonuses are added to the base reward at each step.
+        """
+        self._reward_shaper = shaper
+
+    def set_reward_bonuses(self, bonuses: np.ndarray) -> None:
+        """Pre-set reward bonus array for the current fold.
+
+        Parameters
+        ----------
+        bonuses : (fold_len,) array of reward bonuses per step.
+        """
+        self._reward_bonuses = bonuses
 
     def get_cost_per_leg(self, symbol: str) -> float:
         """Return cost per leg in index points for a given symbol."""

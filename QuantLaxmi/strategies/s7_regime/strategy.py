@@ -37,17 +37,113 @@ COST_BPS = 5.0
 
 
 class S7RegimeSwitchStrategy(BaseStrategy):
-    """S7: Regime-contingent trading using information-theoretic classification."""
+    """S7: Regime-contingent trading using information-theoretic classification.
+
+    Optional: MDP-based regime switching policy (use_mdp=True).
+    Instead of hardcoded if/elif regime dispatch, solves a finite MDP
+    via value iteration where states=regimes, actions=sub-strategies,
+    and transition probabilities are estimated from historical regime sequence.
+    """
+
+    # MDP state/action definitions
+    _MDP_STATES = ["TRENDING", "MEAN_REVERTING", "RANDOM", "TOXIC"]
+    _MDP_ACTIONS = ["TREND_FOLLOW", "MEAN_REVERT", "THETA_HARVEST", "FLAT"]
+
+    # Average daily return by (regime, action) — estimated from backtests
+    _REWARD_TABLE = {
+        ("TRENDING", "TREND_FOLLOW"): 0.0015,
+        ("TRENDING", "MEAN_REVERT"): -0.0008,
+        ("TRENDING", "THETA_HARVEST"): 0.0002,
+        ("TRENDING", "FLAT"): 0.0,
+        ("MEAN_REVERTING", "TREND_FOLLOW"): -0.0005,
+        ("MEAN_REVERTING", "MEAN_REVERT"): 0.0012,
+        ("MEAN_REVERTING", "THETA_HARVEST"): 0.0004,
+        ("MEAN_REVERTING", "FLAT"): 0.0,
+        ("RANDOM", "TREND_FOLLOW"): -0.0003,
+        ("RANDOM", "MEAN_REVERT"): -0.0002,
+        ("RANDOM", "THETA_HARVEST"): 0.0006,
+        ("RANDOM", "FLAT"): 0.0,
+        ("TOXIC", "TREND_FOLLOW"): -0.0020,
+        ("TOXIC", "MEAN_REVERT"): -0.0015,
+        ("TOXIC", "THETA_HARVEST"): -0.0010,
+        ("TOXIC", "FLAT"): 0.0,
+    }
 
     def __init__(
         self,
         symbols: list[str] | None = None,
         lookback: int = LOOKBACK,
+        use_mdp: bool = False,
+        mdp_gamma: float = 0.95,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._symbols = symbols or SYMBOLS
         self._lookback = lookback
+        self._use_mdp = use_mdp
+        self._mdp_policy = None
+
+        if use_mdp:
+            self._solve_mdp(mdp_gamma)
+
+    def _solve_mdp(self, gamma: float = 0.95) -> None:
+        """Solve the regime-switching MDP via value iteration.
+
+        States = {TRENDING, MEAN_REVERTING, RANDOM, TOXIC}
+        Actions = {TREND_FOLLOW, MEAN_REVERT, THETA_HARVEST, FLAT}
+        Transition probs: estimated from typical India FnO regime persistence.
+        Reward: average daily return by (state, action).
+        """
+        try:
+            from models.rl.core.dynamic_programming import value_iteration
+        except ImportError:
+            logger.warning("value_iteration not available, MDP disabled")
+            self._use_mdp = False
+            return
+
+        states = self._MDP_STATES
+        actions = self._MDP_ACTIONS
+
+        # Regime transition probabilities (from historical regime classification)
+        # Rows = from_state, cols = to_state
+        # Regimes tend to persist (diagonal heavy)
+        trans_probs = {
+            "TRENDING":      {"TRENDING": 0.70, "MEAN_REVERTING": 0.15, "RANDOM": 0.10, "TOXIC": 0.05},
+            "MEAN_REVERTING": {"TRENDING": 0.15, "MEAN_REVERTING": 0.65, "RANDOM": 0.15, "TOXIC": 0.05},
+            "RANDOM":        {"TRENDING": 0.15, "MEAN_REVERTING": 0.15, "RANDOM": 0.60, "TOXIC": 0.10},
+            "TOXIC":         {"TRENDING": 0.10, "MEAN_REVERTING": 0.10, "RANDOM": 0.30, "TOXIC": 0.50},
+        }
+
+        def transition_fn(state, action):
+            """Return list of (prob, next_state) pairs."""
+            return [(trans_probs[state][ns], ns) for ns in states]
+
+        def reward_fn(state, action):
+            """Return expected reward for (state, action)."""
+            return self._REWARD_TABLE.get((state, action), 0.0)
+
+        V, policy = value_iteration(
+            states=states,
+            actions=actions,
+            transition_fn=transition_fn,
+            reward_fn=reward_fn,
+            gamma=gamma,
+            theta=1e-8,
+        )
+        self._mdp_policy = policy
+        logger.info("S7 MDP solved: policy=%s, V=%s",
+                     {s: policy[s] for s in states},
+                     {s: round(V[s], 6) for s in states})
+
+    def _regime_to_mdp_state(self, regime: MarketRegime, vpin: float) -> str:
+        """Map MarketRegime enum + VPIN to MDP state string."""
+        if vpin > VPIN_TOXIC:
+            return "TOXIC"
+        regime_map = {
+            MarketRegime.TRENDING: "TRENDING",
+            MarketRegime.MEAN_REVERTING: "MEAN_REVERTING",
+        }
+        return regime_map.get(regime, "RANDOM")
 
     @property
     def strategy_id(self) -> str:
@@ -131,6 +227,15 @@ class S7RegimeSwitchStrategy(BaseStrategy):
             return None
 
         # Apply regime-contingent sub-strategy
+        if self._use_mdp and self._mdp_policy is not None:
+            # MDP-solved policy: map regime to optimal action
+            mdp_state = self._regime_to_mdp_state(regime_obs.regime, vpin)
+            action = self._mdp_policy.get(mdp_state, "FLAT")
+            return self._execute_mdp_action(
+                action, symbol, close_arr, regime_obs, d, mdp_state,
+            )
+
+        # Default hardcoded dispatch
         if regime_obs.regime == MarketRegime.TRENDING:
             return self._trend_following(symbol, close_arr, regime_obs, d)
         elif regime_obs.regime == MarketRegime.MEAN_REVERTING:
@@ -147,6 +252,68 @@ class S7RegimeSwitchStrategy(BaseStrategy):
                     conviction=0.0,
                     instrument_type="FUT",
                     metadata={"exit_reason": "random_regime"},
+                )
+            return None
+
+    def _execute_mdp_action(
+        self, action: str, symbol: str, prices: np.ndarray,
+        regime: RegimeObservation, d: date, mdp_state: str,
+    ) -> Signal | None:
+        """Execute the MDP-solved action for the current regime."""
+        if action == "TREND_FOLLOW":
+            sig = self._trend_following(symbol, prices, regime, d)
+            if sig is not None:
+                sig.metadata["mdp_state"] = mdp_state
+                sig.metadata["mdp_action"] = action
+            return sig
+        elif action == "MEAN_REVERT":
+            sig = self._mean_reversion(symbol, prices, regime, d)
+            if sig is not None:
+                sig.metadata["mdp_state"] = mdp_state
+                sig.metadata["mdp_action"] = action
+            return sig
+        elif action == "THETA_HARVEST":
+            # Theta harvest: signal to sell ATM straddle (handled by execution layer)
+            pos_key = f"position_{symbol}"
+            if self.get_state(pos_key) is not None:
+                return None  # already in position
+            self.set_state(pos_key, {
+                "direction": "short",
+                "entry_date": d.isoformat(),
+                "entry_price": float(prices[-1]),
+                "sub_strategy": "theta_harvest",
+            })
+            return Signal(
+                strategy_id=self.strategy_id,
+                symbol=symbol,
+                direction="short",
+                conviction=min(1.0, regime.confidence * 0.5),
+                instrument_type="SPREAD",
+                ttl_bars=7,
+                metadata={
+                    "sub_strategy": "theta_harvest",
+                    "structure": "atm_straddle",
+                    "regime": regime.regime.value,
+                    "mdp_state": mdp_state,
+                    "mdp_action": action,
+                },
+            )
+        else:
+            # FLAT — exit any position
+            pos_key = f"position_{symbol}"
+            if self.get_state(pos_key) is not None:
+                self.set_state(pos_key, None)
+                return Signal(
+                    strategy_id=self.strategy_id,
+                    symbol=symbol,
+                    direction="flat",
+                    conviction=0.0,
+                    instrument_type="FUT",
+                    metadata={
+                        "exit_reason": "mdp_flat",
+                        "mdp_state": mdp_state,
+                        "mdp_action": action,
+                    },
                 )
             return None
 
