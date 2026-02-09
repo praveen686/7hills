@@ -59,22 +59,22 @@ class TestEntropyDeterminism:
     """price_entropy must be bitwise identical across 3 runs."""
 
     def test_3x_replay_word_len_2(self, prices_100):
-        from core.features.information import price_entropy
+        from features.information import price_entropy
         results = [price_entropy(prices_100, word_length=2) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_word_len_3(self, prices_100):
-        from core.features.information import price_entropy
+        from features.information import price_entropy
         results = [price_entropy(prices_100, word_length=3) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_with_window(self, prices_300):
-        from core.features.information import price_entropy
+        from features.information import price_entropy
         results = [price_entropy(prices_300, word_length=2, window=100) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_different_data_different_result(self, prices_100, prices_300):
-        from core.features.information import price_entropy
+        from features.information import price_entropy
         r1 = price_entropy(prices_100)
         r2 = price_entropy(prices_300[:100])
         # Different seeds → different entropy (with high probability)
@@ -85,17 +85,17 @@ class TestMutualInfoDeterminism:
     """mutual_information must be bitwise identical across 3 runs."""
 
     def test_3x_replay(self, prices_100):
-        from core.features.information import mutual_information
+        from features.information import mutual_information
         results = [mutual_information(prices_100) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_word_len_3(self, prices_100):
-        from core.features.information import mutual_information
+        from features.information import mutual_information
         results = [mutual_information(prices_100, word_length=3) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_with_window(self, prices_300):
-        from core.features.information import mutual_information
+        from features.information import mutual_information
         results = [mutual_information(prices_300, word_length=2, window=100) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
@@ -104,19 +104,19 @@ class TestRollingFeatureDeterminism:
     """rolling_entropy and rolling_mutual_info must produce identical arrays."""
 
     def test_rolling_entropy_3x(self, prices_300):
-        from core.features.information import rolling_entropy
+        from features.information import rolling_entropy
         runs = [rolling_entropy(prices_300, window=50) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
         np.testing.assert_array_equal(runs[1], runs[2])
 
     def test_rolling_mi_3x(self, prices_300):
-        from core.features.information import rolling_mutual_info
+        from features.information import rolling_mutual_info
         runs = [rolling_mutual_info(prices_300, window=50) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
         np.testing.assert_array_equal(runs[1], runs[2])
 
     def test_rolling_entropy_nan_prefix(self, prices_300):
-        from core.features.information import rolling_entropy
+        from features.information import rolling_entropy
         out = rolling_entropy(prices_300, window=50)
         assert np.all(np.isnan(out[:49]))
         assert np.all(~np.isnan(out[49:]))
@@ -160,7 +160,7 @@ class TestVPINFromTicksDeterminism:
     """vpin_from_ticks must produce bitwise identical arrays."""
 
     def test_3x_replay(self, tick_prices):
-        from core.features.microstructure import vpin_from_ticks
+        from features.microstructure import vpin_from_ticks
         prices, volumes = tick_prices
         runs = [vpin_from_ticks(prices, volumes, bucket_size=500_000, n_buckets=20) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
@@ -169,7 +169,7 @@ class TestVPINFromTicksDeterminism:
 
 class TestTickEntropyDeterminism:
     def test_3x_replay(self, tick_prices):
-        from core.features.microstructure import tick_entropy
+        from features.microstructure import tick_entropy
         prices, _ = tick_prices
         runs = [tick_entropy(prices, window=50) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
@@ -178,7 +178,7 @@ class TestTickEntropyDeterminism:
 
 class TestHawkesDeterminism:
     def test_3x_replay(self):
-        from core.features.microstructure import trade_arrival_hawkes
+        from features.microstructure import trade_arrival_hawkes
         rng = np.random.default_rng(55)
         ts = np.sort(rng.uniform(0, 3600, 200))
         runs = [trade_arrival_hawkes(ts, eval_interval=5.0) for _ in range(3)]
@@ -196,7 +196,7 @@ class TestBarMicrostructureDeterminism:
 
     def test_3x_replay(self):
         import pandas as pd
-        from core.features.microstructure import Microstructure
+        from features.microstructure import Microstructure
         rng = np.random.default_rng(123)
         n = 200
         close = 22000 * np.exp(np.cumsum(rng.normal(0, 0.01, n)))
@@ -331,7 +331,7 @@ class TestSignalDeterminism:
     """Signal dataclass (frozen) properties are deterministic."""
 
     def test_frozen_signal_fields(self):
-        from core.strategy.protocol import Signal
+        from strategies.protocol import Signal
         s = Signal(
             strategy_id="s1_vrp", symbol="NIFTY",
             direction="long", conviction=0.8,
@@ -344,7 +344,7 @@ class TestSignalDeterminism:
             assert s.metadata["composite"] == 0.42
 
     def test_signal_immutable(self):
-        from core.strategy.protocol import Signal
+        from strategies.protocol import Signal
         s = Signal(strategy_id="s1_vrp", symbol="NIFTY", direction="long", conviction=0.5)
         with pytest.raises(AttributeError):
             s.conviction = 0.9  # type: ignore
@@ -358,13 +358,13 @@ class TestFPTolerance:
     """Verify numeric operations stay within rtol=1e-6 across runs."""
 
     def test_entropy_fp_stable(self, prices_300):
-        from core.features.information import price_entropy
+        from features.information import price_entropy
         runs = [price_entropy(prices_300, word_length=2, window=100) for _ in range(10)]
         for r in runs:
             np.testing.assert_allclose(r, runs[0], rtol=1e-10)
 
     def test_mi_fp_stable(self, prices_300):
-        from core.features.information import mutual_information
+        from features.information import mutual_information
         runs = [mutual_information(prices_300, word_length=2, window=100) for _ in range(10)]
         for r in runs:
             np.testing.assert_allclose(r, runs[0], rtol=1e-10)

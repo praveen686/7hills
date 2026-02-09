@@ -38,7 +38,7 @@ from strategies.s1_vrp.density import (
     DEFAULT_PHYS_WINDOW,
 )
 from strategies.s9_momentum.data import is_trading_day, get_fno
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 

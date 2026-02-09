@@ -8,7 +8,7 @@ SRC := QuantLaxmi
 TESTS := $(SRC)/tests
 
 .PHONY: test test-fast test-phase1 test-phase2 test-phase3 test-phase4 \
-        test-phase5 test-phase6 test-phase7 test-missingness test-parity \
+        test-phase5 test-phase6 test-phase7 test-rl test-missingness test-parity \
         test-regime test-sanos test-ci deploy-gate lint
 
 # -----------------------------------------------------------------------
@@ -45,6 +45,9 @@ test-phase6:
 
 test-phase7:
 	$(PYTEST) $(TESTS)/phase7_production -v --tb=short -q
+
+test-rl:
+	$(PYTEST) $(TESTS)/rl -v --tb=short -q
 
 # -----------------------------------------------------------------------
 # Phase 7 sub-targets

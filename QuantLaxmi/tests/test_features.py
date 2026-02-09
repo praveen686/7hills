@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from core.base.timeguard import LookaheadError
-from core.features import (
+from features import (
     RSI,
     ATR,
     BollingerBands,

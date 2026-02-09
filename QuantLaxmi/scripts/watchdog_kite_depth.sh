@@ -11,11 +11,11 @@ VENV="/home/ubuntu/Desktop/7hills/QuantLaxmi/venv/bin/python3"
 LOG="logs/watchdog_kite_depth.log"
 mkdir -p logs
 
-if pgrep -f "collectors.kite_depth collect" > /dev/null 2>&1; then
+if pgrep -f "data.collectors.kite_depth collect" > /dev/null 2>&1; then
     : # running
 else
     echo "$(date -u): Kite depth not running — restarting" >> "$LOG"
-    nohup "$VENV" -m collectors.kite_depth collect \
+    nohup "$VENV" -m data.data.collectors.kite_depth collect \
         >> logs/kite_depth.log 2>&1 &
     echo "$(date -u): Kite depth restarted with PID $!" >> "$LOG"
 fi

@@ -24,7 +24,7 @@ import pytest
 # Entity extraction tests
 # ---------------------------------------------------------------------------
 
-from collectors.news.entity import (
+from data.collectors.news.entity import (
     COMPANY_ALIASES,
     INDEX_KEYWORDS,
     extract_indices,
@@ -108,7 +108,7 @@ class TestExtractIndices:
 # Event classification tests
 # ---------------------------------------------------------------------------
 
-from collectors.news.scraper import classify_event
+from data.collectors.news.scraper import classify_event
 
 
 class TestClassifyEvent:
@@ -132,7 +132,7 @@ class TestClassifyEvent:
 # Scraper tests
 # ---------------------------------------------------------------------------
 
-from collectors.news.scraper import IndiaNewsItem, scan_india_news
+from data.collectors.news.scraper import IndiaNewsItem, scan_india_news
 
 
 class TestScraper:
@@ -154,13 +154,13 @@ class TestScraper:
         mock_entry.updated_parsed = old_time.timetuple()
         mock_feed.entries = [mock_entry]
 
-        with patch("collectors.news.scraper.requests.get") as mock_get:
+        with patch("data.collectors.news.scraper.requests.get") as mock_get:
             mock_resp = MagicMock()
             mock_resp.content = b""
             mock_resp.raise_for_status = MagicMock()
             mock_get.return_value = mock_resp
 
-            with patch("collectors.news.scraper.feedparser.parse", return_value=mock_feed):
+            with patch("data.collectors.news.scraper.feedparser.parse", return_value=mock_feed):
                 result = scan_india_news(max_age_minutes=60, feeds={"test": "http://test.com"})
                 assert len(result) == 0
 
@@ -229,7 +229,7 @@ class TestScraper:
 # Strategy tests
 # ---------------------------------------------------------------------------
 
-from collectors.news.strategy import (
+from data.collectors.news.strategy import (
     EVENT_WEIGHTS,
     IndiaTradeSignal,
     ScoredHeadline,
@@ -379,7 +379,7 @@ class TestStrategy:
 # State tests
 # ---------------------------------------------------------------------------
 
-from collectors.news.state import ActiveTrade, ClosedTrade, IndiaNewsTradingState
+from data.collectors.news.state import ActiveTrade, ClosedTrade, IndiaNewsTradingState
 
 
 class TestState:
@@ -551,7 +551,7 @@ class TestIntegration:
     def test_kite_price_used_in_paper(self):
         """cmd_paper should use Kite, not bhavcopy."""
         import inspect
-        from collectors.news.__main__ import cmd_paper
+        from data.collectors.news.__main__ import cmd_paper
         src = inspect.getsource(cmd_paper)
         assert "BhavcopyCache" not in src
         assert "_get_live_price" in src

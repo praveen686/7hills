@@ -27,7 +27,7 @@ import numpy as np
 
 from strategies.s9_momentum.scanner import run_daily_scan
 from strategies.s9_momentum.data import is_trading_day, get_fno
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 
 COST_BPS = 10.0

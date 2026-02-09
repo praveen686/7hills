@@ -28,7 +28,7 @@ from strategies.s4_iv_mr.engine import (
     format_multi_index_results,
     run_from_series,
 )
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 
 def _get_date_range(store: MarketDataStore) -> tuple[date, date]:

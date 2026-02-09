@@ -29,7 +29,7 @@ from datetime import date, timedelta
 import numpy as np
 
 from strategies.s9_momentum.data import is_trading_day
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 
 SYMBOLS = ["NIFTY", "BANKNIFTY"]

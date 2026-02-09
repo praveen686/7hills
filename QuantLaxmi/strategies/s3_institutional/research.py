@@ -23,7 +23,7 @@ import pandas as pd
 
 from strategies.s9_momentum.data import available_dates, is_trading_day
 from strategies.s9_momentum.scanner import run_daily_scan
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 
 def _next_trading_days(d: date, n: int) -> list[date]:

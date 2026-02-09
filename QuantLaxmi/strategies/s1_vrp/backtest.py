@@ -29,7 +29,7 @@ from core.pricing.iv_engine import (
     OptionChainIV,
 )
 from strategies.s9_momentum.data import is_trading_day, get_fno, get_delivery
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 

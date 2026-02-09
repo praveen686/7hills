@@ -32,9 +32,9 @@ from core.backtest.costs import CostModel
 from core.backtest.portfolio import BacktestResult, run_backtest
 from core.base.timeguard import TimeGuard
 from core.base.types import OHLCV
-from core.features.base import Feature
-from core.features.matrix import FeatureMatrix
-from core.models.factory import ModelFactory
+from features.base import Feature
+from features.matrix import FeatureMatrix
+from models.factory import ModelFactory
 from core.pipeline.config import PipelineConfig
 from core.pipeline.split import ExpandingSplit, SplitResult, WalkForwardSplit
 

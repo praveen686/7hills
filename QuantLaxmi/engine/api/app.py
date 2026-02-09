@@ -31,8 +31,8 @@ from engine.services.trade_analytics import TradeAnalyticsService
 from engine.services.missed_opportunity import MissedOpportunityService
 from engine.services.ars_surface import ARSSurfaceService
 
-from core.market.store import MarketDataStore
-from core.strategy.registry import StrategyRegistry
+from data.store import MarketDataStore
+from strategies.registry import StrategyRegistry
 
 logger = logging.getLogger(__name__)
 

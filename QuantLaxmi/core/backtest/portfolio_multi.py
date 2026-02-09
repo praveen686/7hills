@@ -22,10 +22,10 @@ import pandas as pd
 
 from core.allocator.meta import MetaAllocator
 from core.allocator.regime import detect_regime
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 from core.risk.limits import RiskLimits
 from core.risk.manager import PortfolioState as RiskPortfolioState, RiskManager
-from core.strategy.protocol import Signal, StrategyProtocol
+from strategies.protocol import Signal, StrategyProtocol
 
 logger = logging.getLogger(__name__)
 

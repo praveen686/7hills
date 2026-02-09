@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "qlx-india"
+name = "quantlaxmi"
 version = "0.1.0"
 description = "QuantLaxmi India — lookahead-safe quantitative research engine"
 requires-python = ">=3.11"
@@ -21,7 +21,7 @@ dependencies = [
 zerodha = ["kiteconnect>=5.0", "pyotp>=2.9"]
 vbt = ["vectorbtpro"]
 dev = ["pytest>=7.0", "pytest-cov", "hypothesis>=6.0", "pytest-asyncio>=0.23"]
-all = ["qlx-india[zerodha,vbt,dev]"]
+all = ["quantlaxmi[zerodha,vbt,dev]"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

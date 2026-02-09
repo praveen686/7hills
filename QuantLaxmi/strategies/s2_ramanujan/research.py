@@ -23,8 +23,8 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from core.market.store import MarketDataStore
-from core.features.ramanujan import (
+from data.store import MarketDataStore
+from features.ramanujan import (
     dominant_periods,
     ramanujan_periodogram,
     ramanujan_sum,

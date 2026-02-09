@@ -23,13 +23,13 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from collectors.kite_depth.storage import (
+from data.collectors.kite_depth.storage import (
     DEPTH_SCHEMA,
     DepthStore,
     DepthStoreConfig,
     DepthTick,
 )
-from collectors.kite_depth.tokens import (
+from data.collectors.kite_depth.tokens import (
     FuturesToken,
     OptionToken,
     check_recenter_needed,
@@ -270,11 +270,12 @@ class TestDepthStore:
         ts = datetime(2026, 2, 6, 10, 30, tzinfo=IST)
         tick = _MockTick(timestamp=ts, depth=_full_depth())
 
-        for _ in range(10):
-            dt = DepthTick.from_kite_tick(tick, "NIFTY_FUT")
-            store.add_tick("NIFTY_FUT", dt)
+        with patch.object(DepthStore, "_current_date_str", return_value="2026-02-06"):
+            for _ in range(10):
+                dt = DepthTick.from_kite_tick(tick, "NIFTY_FUT")
+                store.add_tick("NIFTY_FUT", dt)
 
-        flushed = store.flush_all()
+            flushed = store.flush_all()
         assert flushed["NIFTY_FUT"] == 10
 
         table = DepthStore.read_depth(tmp_path, "NIFTY_FUT", "2026-02-06")
@@ -291,18 +292,19 @@ class TestDepthStore:
         ts = datetime(2026, 2, 6, 10, 30, tzinfo=IST)
         tick = _MockTick(timestamp=ts, depth=_full_depth())
 
-        # Futures tick
-        dt_fut = DepthTick.from_kite_tick(tick, "NIFTY_FUT")
-        store.add_tick("NIFTY_FUT", dt_fut)
+        with patch.object(DepthStore, "_current_date_str", return_value="2026-02-06"):
+            # Futures tick
+            dt_fut = DepthTick.from_kite_tick(tick, "NIFTY_FUT")
+            store.add_tick("NIFTY_FUT", dt_fut)
 
-        # Options tick
-        dt_opt = DepthTick.from_kite_tick(
-            tick, "NIFTY_OPT",
-            strike=23500.0, expiry="2026-02-13", option_type="CE",
-        )
-        store.add_tick("NIFTY_OPT", dt_opt)
+            # Options tick
+            dt_opt = DepthTick.from_kite_tick(
+                tick, "NIFTY_OPT",
+                strike=23500.0, expiry="2026-02-13", option_type="CE",
+            )
+            store.add_tick("NIFTY_OPT", dt_opt)
 
-        store.flush_all()
+            store.flush_all()
 
         symbols = DepthStore.list_symbols(tmp_path, "2026-02-06")
         assert sorted(symbols) == ["NIFTY_FUT", "NIFTY_OPT"]
@@ -323,13 +325,14 @@ class TestDepthStore:
         ts = datetime(2026, 2, 6, 10, 30, tzinfo=IST)
         tick = _MockTick(timestamp=ts, depth=_full_depth())
 
-        for _ in range(5):
-            store.add_tick("NIFTY_FUT", DepthTick.from_kite_tick(tick, "NIFTY_FUT"))
-        store.flush_all()
+        with patch.object(DepthStore, "_current_date_str", return_value="2026-02-06"):
+            for _ in range(5):
+                store.add_tick("NIFTY_FUT", DepthTick.from_kite_tick(tick, "NIFTY_FUT"))
+            store.flush_all()
 
-        for _ in range(3):
-            store.add_tick("NIFTY_FUT", DepthTick.from_kite_tick(tick, "NIFTY_FUT"))
-        store.flush_all()
+            for _ in range(3):
+                store.add_tick("NIFTY_FUT", DepthTick.from_kite_tick(tick, "NIFTY_FUT"))
+            store.flush_all()
 
         table = DepthStore.read_depth(tmp_path, "NIFTY_FUT", "2026-02-06")
         assert len(table) == 8
@@ -343,8 +346,9 @@ class TestDepthStore:
         ts = datetime(2026, 2, 6, 10, 30, tzinfo=IST)
         tick = _MockTick(timestamp=ts, depth=_full_depth())
 
-        store.add_tick("NIFTY_FUT", DepthTick.from_kite_tick(tick, "NIFTY_FUT"))
-        store.flush_all()
+        with patch.object(DepthStore, "_current_date_str", return_value="2026-02-06"):
+            store.add_tick("NIFTY_FUT", DepthTick.from_kite_tick(tick, "NIFTY_FUT"))
+            store.flush_all()
 
         with patch.object(DepthStore, "_current_date_str", return_value="2026-02-07"):
             store.add_tick("NIFTY_FUT", DepthTick.from_kite_tick(tick, "NIFTY_FUT"))

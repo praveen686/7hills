@@ -17,7 +17,7 @@ from enum import Enum
 
 import numpy as np
 
-from core.features.information import price_entropy, mutual_information
+from features.information import price_entropy, mutual_information
 
 logger = logging.getLogger(__name__)
 

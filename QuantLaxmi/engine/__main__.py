@@ -24,8 +24,8 @@ logger = logging.getLogger("engine")
 
 def cmd_paper(args: argparse.Namespace) -> None:
     """Run paper trading mode."""
-    from core.market.store import MarketDataStore
-    from core.strategy.registry import StrategyRegistry
+    from data.store import MarketDataStore
+    from strategies.registry import StrategyRegistry
     from core.allocator.meta import MetaAllocator
     from core.risk.manager import RiskManager
     from engine.orchestrator import Orchestrator
@@ -75,8 +75,8 @@ def cmd_paper(args: argparse.Namespace) -> None:
 
 def cmd_replay(args: argparse.Namespace) -> None:
     """Run replay engine for parity verification."""
-    from core.market.store import MarketDataStore
-    from core.strategy.registry import StrategyRegistry
+    from data.store import MarketDataStore
+    from strategies.registry import StrategyRegistry
     from engine.replay.engine import ReplayEngine
 
     store = MarketDataStore()

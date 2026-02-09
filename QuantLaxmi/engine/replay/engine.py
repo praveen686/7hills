@@ -29,8 +29,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
-from core.market.store import MarketDataStore
-from core.strategy.registry import StrategyRegistry
+from data.store import MarketDataStore
+from strategies.registry import StrategyRegistry
 from core.allocator.meta import MetaAllocator
 from core.risk.manager import RiskManager
 from core.events.envelope import EventEnvelope

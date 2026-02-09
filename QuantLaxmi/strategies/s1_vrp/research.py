@@ -21,7 +21,7 @@ from datetime import date
 
 from strategies.s1_vrp.options import run_multi_index_options_backtest
 from strategies.s1_vrp.density import run_multi_index_density_backtest
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 
 def _format_density_results(results: dict) -> str:

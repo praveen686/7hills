@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from core.market.store import MarketDataStore
-from core.strategy.base import BaseStrategy
-from core.strategy.protocol import Signal
+from data.store import MarketDataStore
+from strategies.base import BaseStrategy
+from strategies.protocol import Signal
 
 logger = logging.getLogger(__name__)
 

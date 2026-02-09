@@ -322,7 +322,7 @@ def _run_s2(store, start: date, end: date, p: dict) -> dict:
 
     Adapts run_research to return structured results instead of just printing.
     """
-    from core.features.ramanujan import ramanujan_periodogram, ramanujan_sum
+    from features.ramanujan import ramanujan_periodogram, ramanujan_sum
 
     symbol = p.get("symbol", "NIFTY")
     max_period = int(p.get("max_period", 64))

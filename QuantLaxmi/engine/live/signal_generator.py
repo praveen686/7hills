@@ -23,9 +23,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from core.strategy.protocol import Signal, StrategyProtocol
-from core.strategy.registry import StrategyRegistry
-from core.market.store import MarketDataStore
+from strategies.protocol import Signal, StrategyProtocol
+from strategies.registry import StrategyRegistry
+from data.store import MarketDataStore
 
 from engine.live.event_bus import EventBus, EventType
 

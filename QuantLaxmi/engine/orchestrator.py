@@ -20,7 +20,7 @@ from pathlib import Path
 
 from core.allocator.meta import MetaAllocator, TargetPosition
 from core.allocator.regime import VIXRegime, detect_regime
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 from core.events.envelope import EventEnvelope
 from core.events.payloads import (
     SignalPayload,
@@ -33,8 +33,8 @@ from core.events.payloads import (
 from core.events.types import EventType
 from core.risk.limits import RiskLimits
 from core.risk.manager import PortfolioState as RiskPortfolioState, RiskManager
-from core.strategy.protocol import Signal, StrategyProtocol
-from core.strategy.registry import StrategyRegistry
+from strategies.protocol import Signal, StrategyProtocol
+from strategies.registry import StrategyRegistry
 
 from engine.live.event_log import EventLogWriter
 from engine.live.journals import ExecutionJournal, SignalJournal

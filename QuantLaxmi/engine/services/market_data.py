@@ -11,7 +11,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 

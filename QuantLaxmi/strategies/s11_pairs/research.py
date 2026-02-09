@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 
 from strategies.s9_momentum.data import is_trading_day
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 
 COST_BPS = 10.0

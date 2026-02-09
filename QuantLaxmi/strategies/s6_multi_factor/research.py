@@ -19,7 +19,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 warnings.filterwarnings("ignore", category=UserWarning)
 

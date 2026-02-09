@@ -14,6 +14,6 @@ mkdir -p logs
 
 echo "$(date -u '+%Y-%m-%d %H:%M:%S'): Starting NSE daily collection" >> "$LOG"
 
-"$VENV" -m collectors.nse_daily collect >> "$LOG" 2>&1
+"$VENV" -m data.collectors.nse_daily collect >> "$LOG" 2>&1
 
 echo "$(date -u '+%Y-%m-%d %H:%M:%S'): NSE daily collection finished" >> "$LOG"

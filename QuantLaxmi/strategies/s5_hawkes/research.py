@@ -26,7 +26,7 @@ import pandas as pd
 import torch
 
 from strategies.s9_momentum.data import is_trading_day
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 NIFTY_TOKEN = 256265
 BANKNIFTY_TOKEN = 260105

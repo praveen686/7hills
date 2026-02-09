@@ -21,7 +21,7 @@ import time
 from datetime import date
 
 from strategies.s8_expiry_theta.strategy import backtest_expiry_theta
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 
 SYMBOLS = ["NIFTY", "BANKNIFTY"]

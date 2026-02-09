@@ -31,7 +31,7 @@ from strategies.s9_momentum.signals import (
     compute_oi_signals,
 )
 from strategies.s9_momentum.universe import get_fno_symbols
-from core.market.store import MarketDataStore
+from data.store import MarketDataStore
 
 logger = logging.getLogger(__name__)
 

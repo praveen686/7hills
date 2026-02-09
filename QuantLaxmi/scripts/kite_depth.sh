@@ -12,7 +12,7 @@ VENV="/home/ubuntu/Desktop/7hills/QuantLaxmi/venv/bin/python3"
 LOG="logs/kite_depth.log"
 mkdir -p logs
 
-nohup "$VENV" -m collectors.kite_depth collect \
+nohup "$VENV" -m data.data.collectors.kite_depth collect \
     >> "$LOG" 2>&1 &
 
 echo "$(date -u): Kite depth started with PID $!" >> logs/watchdog_kite_depth.log
