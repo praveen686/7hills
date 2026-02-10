@@ -1,0 +1,24 @@
+cooldown_secs = 0
+funding_threshold_exponent = -6
+funding_threshold_mantissa = 30
+min_hold_secs = 0
+momentum_threshold_bps = 10
+momentum_window_secs = 120
+position_size_mantissa = 1000000
+price_exponent = -2
+qty_exponent = -8
+sl_tp_arm_secs = 20
+stop_loss_bps = 60
+take_profit_bps = 70
+trade_on_spot_quotes = false
+
+[grassmann]
+distance_threshold_exponent = -2
+distance_threshold_mantissa = 45
+enabled = false
+feature_dim = 4
+regime_exit_on_chop = true
+sample_interval_ms = 1000
+subspace_k = 2
+unknown_is_chop = true
+window_len = 60

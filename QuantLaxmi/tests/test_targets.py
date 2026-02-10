@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 import pytest
 
-from core.targets import FutureReturn, TripleBarrier
+from quantlaxmi.core.targets import FutureReturn, TripleBarrier
 
 
 class TestFutureReturn:

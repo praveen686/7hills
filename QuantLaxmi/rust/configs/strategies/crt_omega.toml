@@ -1,0 +1,127 @@
+# CRT-Omega Strategy Configuration
+# =================================
+# Causal Reversal Transport with Evidence Gating
+#
+# This strategy trades residual overshoot in microstructure:
+# - Predicts where price SHOULD have gone given order flow + liquidity
+# - Trades the deviation (mean reversion of impact overshoot)
+# - Only trades when SPRT evidence gate shows statistical edge
+#
+# All numeric fields use mantissa + exponent for determinism.
+
+# ----------------------------------------------------------------------------
+# Transport Map Weights
+# ----------------------------------------------------------------------------
+# r_hat = a*phi + b*psi - c*kappa*sign(r_{t-1})
+# where:
+#   phi = signed aggressor flow
+#   psi = depth imbalance
+#   kappa = stiffness (spread / depth)
+
+# Flow weight (a), mantissa with exp -6
+# Higher = more responsive to order flow
+flow_weight_mantissa = 1
+
+# Depth imbalance weight (b), mantissa with exp -4
+# Higher = more responsive to book imbalance
+psi_weight_mantissa = 200
+
+# Anti-momentum weight (c), mantissa with exp -4
+# Higher = stronger mean reversion when book is fragile
+kappa_weight_mantissa = 1000
+
+# ----------------------------------------------------------------------------
+# Residual Z-Score Parameters
+# ----------------------------------------------------------------------------
+
+# Rolling window for robust z-score (in event ticks)
+# Larger = more stable, slower adaptation
+z_window = 900
+
+# Entry threshold (mantissa with exp -2)
+# 300 = 3.0 standard deviations
+z_in_mantissa = 300
+
+# Exit threshold (mantissa with exp -2)
+# 50 = 0.5 standard deviations (mean reversion complete)
+z_out_mantissa = 50
+
+# Maximum hold duration (in event ticks)
+max_hold_ticks = 180
+
+# ----------------------------------------------------------------------------
+# SPRT Evidence Gate
+# ----------------------------------------------------------------------------
+# Sequential Probability Ratio Test for edge detection
+# Only trade when P(edge > 0 after costs) is statistically significant
+
+# Minimum observations per regime cell before trading
+min_obs_per_cell = 60
+
+# SPRT delta (minimum edge to detect), mantissa with exp -8
+sprt_delta_mantissa = 1
+
+# SPRT alpha (type I error rate), mantissa with exp -4
+# 500 = 0.05 = 5%
+sprt_alpha_mantissa = 500
+
+# SPRT beta (type II error rate), mantissa with exp -4
+# 1000 = 0.10 = 10%
+sprt_beta_mantissa = 1000
+
+# ----------------------------------------------------------------------------
+# Position Sizing
+# ----------------------------------------------------------------------------
+
+# Base position size (mantissa with qty_exponent)
+# 1_000_000 with exp -8 = 0.01 BTC
+position_size_mantissa = 1000000
+
+# Kelly fraction, mantissa with exp -4
+# 2500 = 0.25 = 25% Kelly
+kelly_frac_mantissa = 2500
+
+# Maximum position multiplier, mantissa with exp -4
+# 10000 = 1.0 = max 1x base size
+max_pos_multiplier_mantissa = 10000
+
+# Drawdown stop threshold, mantissa with exp -4
+# -600 = -0.06 = stop trading at 6% drawdown
+dd_stop_mantissa = -600
+
+# ----------------------------------------------------------------------------
+# Cost Model
+# ----------------------------------------------------------------------------
+
+# Maker fee in basis points, mantissa with exp -2
+# 2 = 0.02 bps
+maker_fee_bps_mantissa = 2
+
+# Taker fee in basis points, mantissa with exp -2
+# 10 = 0.10 bps
+taker_fee_bps_mantissa = 10
+
+# ----------------------------------------------------------------------------
+# Exponents
+# ----------------------------------------------------------------------------
+
+# Quantity exponent (typically -8 for crypto)
+qty_exponent = -8
+
+# Price exponent (typically -2 for USD)
+price_exponent = -2
+
+# ----------------------------------------------------------------------------
+# Regime Bucketing
+# ----------------------------------------------------------------------------
+# State space is discretized into (kappa x spread x premium) cells
+# SPRT evidence is tracked per cell
+
+# Number of kappa (stiffness) buckets
+num_kappa_buckets = 3
+
+# Number of spread buckets
+num_spread_buckets = 3
+
+# Number of mark-mid premium buckets
+num_prem_buckets = 3

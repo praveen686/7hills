@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.base.types import OHLCV
-from data.bars import DollarBarAggregator, VolumeBarAggregator
+from quantlaxmi.core.base.types import OHLCV
+from quantlaxmi.data.bars import DollarBarAggregator, VolumeBarAggregator
 
 
 class TestDollarBarAggregator:

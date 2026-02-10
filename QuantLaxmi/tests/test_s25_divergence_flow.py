@@ -22,9 +22,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from features.divergence_flow import DFFConfig, DivergenceFlowBuilder
-from strategies.protocol import Signal
-from strategies.s25_divergence_flow.strategy import S25DFFStrategy, create_strategy
+from quantlaxmi.features.divergence_flow import DFFConfig, DivergenceFlowBuilder
+from quantlaxmi.strategies.protocol import Signal
+from quantlaxmi.strategies.s25_divergence_flow.strategy import S25DFFStrategy, create_strategy
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ class TestConservationLaw:
         first_col = perturbed.columns[0]
         perturbed.iloc[0, 0] += 1e6  # large perturbation
 
-        with caplog.at_level(logging.WARNING, logger="features.divergence_flow"):
+        with caplog.at_level(logging.WARNING, logger="quantlaxmi.features.divergence_flow"):
             check = builder.verify_conservation(perturbed, tolerance=1e-6)
 
         assert any("Conservation violation" in m for m in caplog.messages), (
@@ -154,7 +154,7 @@ class TestConservationLaw:
         """Daily flows (diffs) should also satisfy conservation across participants."""
         # Re-derive net positions from flows is not directly possible,
         # but we can check that flows summed across participants per ic = 0.
-        from features.divergence_flow import _INSTRUMENT_CLASSES, _PARTICIPANTS
+        from quantlaxmi.features.divergence_flow import _INSTRUMENT_CLASSES, _PARTICIPANTS
 
         for ic in _INSTRUMENT_CLASSES:
             cols = [
@@ -176,7 +176,7 @@ class TestConservationLaw:
         D(t) per-ic = (informed - uninformed).  Since informed + uninformed = 0,
         informed = -uninformed, so D(t) = 2*informed.
         """
-        from features.divergence_flow import (
+        from quantlaxmi.features.divergence_flow import (
             _INFORMED,
             _INSTRUMENT_CLASSES,
             _UNINFORMED,

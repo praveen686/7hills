@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.base.timeguard import LookaheadError
-from features import (
+from quantlaxmi.core.base.timeguard import LookaheadError
+from quantlaxmi.features import (
     RSI,
     ATR,
     BollingerBands,

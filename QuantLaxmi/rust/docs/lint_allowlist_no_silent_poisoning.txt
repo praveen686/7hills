@@ -1,0 +1,29 @@
+# Allowlist for No Silent Poisoning lint warnings
+# Format: path_regex:pattern_regex # comment
+#
+# Each line suppresses warnings matching BOTH the path and pattern.
+# Lines starting with # are comments.
+# Empty lines are ignored.
+#
+# RULES FOR ADDING ENTRIES:
+# 1. Must explain WHY the pattern is safe (not just "it's internal")
+# 2. Must be as narrow as possible (specific file + line context)
+# 3. Reviewer must verify the code doesn't feed trading signals
+#
+# =============================================================================
+
+# Token lookups - instrument IDs, not vendor quantities
+connectors-zerodha/src/zerodha\.rs:\.unwrap_or\(0\)  # lookup_token returns instrument token ID, filtered at line 377
+
+# Internal collection operations - not vendor field access
+quantlaxmi-core/src/hydra\.rs:min_len.*unwrap_or\(0\)  # series.iter().map(|v| v.len()).min() - vector length, not market data
+quantlaxmi-core/src/hydra\.rs:bids\.first\(\).*unwrap_or\(0\)  # order book level extraction, empty book = no bid (valid state)
+quantlaxmi-core/src/hydra\.rs:asks\.first\(\).*unwrap_or\(0\)  # order book level extraction, empty book = no ask (valid state)
+
+# Strategy order book extraction - same pattern as hydra
+quantlaxmi-core/src/aeon/strategy\.rs:bids\.first\(\).*unwrap_or\(0\)  # order book level, empty = no bid
+quantlaxmi-core/src/aeon/strategy\.rs:asks\.first\(\).*unwrap_or\(0\)  # order book level, empty = no ask
+
+# Null observer (test/debug infrastructure)
+quantlaxmi-core/src/null_observer\.rs:bids\.first\(\).*unwrap_or\(0\)  # debug observer, not trading path
+quantlaxmi-core/src/null_observer\.rs:asks\.first\(\).*unwrap_or\(0\)  # debug observer, not trading path

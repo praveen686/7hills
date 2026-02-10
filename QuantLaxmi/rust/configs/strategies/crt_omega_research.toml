@@ -1,0 +1,41 @@
+# CRT-Omega Research Configuration
+# ==================================
+# Parameters tuned for research/exploration
+# Relaxed SPRT to allow signal investigation
+
+# Transport Map Weights
+flow_weight_mantissa = 1
+psi_weight_mantissa = 200
+kappa_weight_mantissa = 1000
+
+# Z-Score Parameters - Much lower thresholds
+z_window = 300
+z_in_mantissa = 150        # 1.5σ entry (very aggressive)
+z_out_mantissa = 20        # 0.2σ exit
+max_hold_ticks = 100
+
+# SPRT Evidence Gate - BYPASSED for research
+min_obs_per_cell = 10
+sprt_delta_mantissa = 100
+sprt_alpha_mantissa = 2000
+sprt_beta_mantissa = 2000
+bypass_sprt = true          # RESEARCH ONLY - bypass evidence gate
+
+# Position Sizing
+position_size_mantissa = 1000000
+kelly_frac_mantissa = 5000  # 50% Kelly - aggressive
+max_pos_multiplier_mantissa = 10000
+dd_stop_mantissa = -2000    # -20% drawdown
+
+# Costs - realistic
+maker_fee_bps_mantissa = 2
+taker_fee_bps_mantissa = 10
+
+# Exponents
+qty_exponent = -8
+price_exponent = -2
+
+# Minimal buckets for faster convergence
+num_kappa_buckets = 2
+num_spread_buckets = 2
+num_prem_buckets = 2

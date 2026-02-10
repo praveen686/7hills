@@ -1,32 +1,59 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantlaxmi"
-version = "0.1.0"
-description = "QuantLaxmi India — lookahead-safe quantitative research engine"
+version = "1.0.0"
+description = "Institutional-grade trading system for India FnO"
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.0",
     "numpy>=1.24",
     "scikit-learn>=1.3",
     "xgboost>=2.0",
+    "duckdb>=1.0",
+    "pyarrow>=15.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "requests>=2.28",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
+ml = ["torch>=2.0", "transformers>=4.30"]
 zerodha = ["kiteconnect>=5.0", "pyotp>=2.9"]
-vbt = ["vectorbtpro"]
-dev = ["pytest>=7.0", "pytest-cov", "hypothesis>=6.0", "pytest-asyncio>=0.23"]
-all = ["quantlaxmi[zerodha,vbt,dev]"]
+telegram = ["telethon>=1.30"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.0",
+    "ruff>=0.4",
+    "mypy>=1.5",
+]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-v --tb=short"
+[project.scripts]
+qlx = "quantlaxmi.engine.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["quantlaxmi*"]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

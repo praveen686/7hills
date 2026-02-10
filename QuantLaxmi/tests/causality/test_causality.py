@@ -58,7 +58,7 @@ def _poison_future_crash(prices: np.ndarray, t: int) -> np.ndarray:
 class TestEntropyCausality:
     def test_entropy_unchanged_by_future_data(self):
         """Changing prices after the window should not affect entropy."""
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         prices = _make_prices(200)
         window = 100
         # Entropy at bar 150 using window=100 should only use prices[51:151]
@@ -69,7 +69,7 @@ class TestEntropyCausality:
 
     def test_entropy_uses_only_last_window_bars(self):
         """Entropy with window=50 should ignore bars before the window."""
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         prices = _make_prices(200)
         # Full series vs last 50 bars should give same result
         r1 = price_entropy(prices, word_length=2, window=50)
@@ -78,7 +78,7 @@ class TestEntropyCausality:
 
     def test_entropy_different_future_same_result(self):
         """Two series identical up to T, different after → same entropy at T."""
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         prices = _make_prices(300)
         t = 200
         spike = _poison_future(prices, t)
@@ -95,7 +95,7 @@ class TestEntropyCausality:
 class TestMutualInfoCausality:
     def test_mi_unchanged_by_future_data(self):
         """MI at T must not change when data after T is modified."""
-        from features.information import mutual_information
+        from quantlaxmi.features.information import mutual_information
         prices = _make_prices(200)
         t = 150
         clean = mutual_information(prices[:t + 1], word_length=2, window=100)
@@ -105,7 +105,7 @@ class TestMutualInfoCausality:
 
     def test_mi_uses_only_window(self):
         """MI with window=80 should only use last 80 bars."""
-        from features.information import mutual_information
+        from quantlaxmi.features.information import mutual_information
         prices = _make_prices(300)
         r1 = mutual_information(prices, word_length=2, window=80)
         r2 = mutual_information(prices[-80:], word_length=2)
@@ -119,7 +119,7 @@ class TestMutualInfoCausality:
 class TestRollingCausality:
     def test_rolling_entropy_causal(self):
         """rolling_entropy[i] must not change when future data changes."""
-        from features.information import rolling_entropy
+        from quantlaxmi.features.information import rolling_entropy
         prices = _make_prices(200)
         t = 150
         clean = rolling_entropy(prices, window=50)
@@ -133,7 +133,7 @@ class TestRollingCausality:
 
     def test_rolling_mi_causal(self):
         """rolling_mutual_info[i] must not change when future data changes."""
-        from features.information import rolling_mutual_info
+        from quantlaxmi.features.information import rolling_mutual_info
         prices = _make_prices(200)
         t = 150
         clean = rolling_mutual_info(prices, window=50)
@@ -145,13 +145,13 @@ class TestRollingCausality:
 
     def test_rolling_entropy_starts_with_nans(self):
         """First (window-1) values must be NaN (insufficient data)."""
-        from features.information import rolling_entropy
+        from quantlaxmi.features.information import rolling_entropy
         out = rolling_entropy(_make_prices(100), window=30)
         assert np.all(np.isnan(out[:29]))
         assert not np.isnan(out[29])
 
     def test_rolling_mi_starts_with_nans(self):
-        from features.information import rolling_mutual_info
+        from quantlaxmi.features.information import rolling_mutual_info
         out = rolling_mutual_info(_make_prices(100), window=30)
         assert np.all(np.isnan(out[:29]))
         assert not np.isnan(out[29])
@@ -164,7 +164,7 @@ class TestRollingCausality:
 class TestRegimeCausality:
     def test_classify_regime_uses_only_passed_prices(self):
         """classify_regime only uses the price array it receives."""
-        from strategies.s7_regime.detector import classify_regime
+        from quantlaxmi.strategies.s7_regime.detector import classify_regime
         prices = _make_prices(300)
         t = 200
         # Only pass prices up to t
@@ -176,7 +176,7 @@ class TestRegimeCausality:
 
     def test_rolling_regime_causal(self):
         """rolling_regime[i] must not change when future data changes."""
-        from strategies.s7_regime.detector import rolling_regime
+        from quantlaxmi.strategies.s7_regime.detector import rolling_regime
         prices = _make_prices(200)
         t = 120
         clean = rolling_regime(prices, window=50)
@@ -190,7 +190,7 @@ class TestRegimeCausality:
 
     def test_regime_short_prices_returns_random(self):
         """Insufficient data → RANDOM with zero confidence."""
-        from strategies.s7_regime.detector import classify_regime, MarketRegime
+        from quantlaxmi.strategies.s7_regime.detector import classify_regime, MarketRegime
         prices = _make_prices(20)
         r = classify_regime(prices, entropy_window=100)
         assert r.regime == MarketRegime.RANDOM
@@ -205,7 +205,7 @@ class TestBarVPINCausality:
     def test_vpin_bar_causal(self):
         """Bar-level VPIN at index i must not change when future bars change."""
         import pandas as pd
-        from features.microstructure import Microstructure
+        from quantlaxmi.features.microstructure import Microstructure
 
         rng = np.random.default_rng(42)
         n = 200
@@ -234,7 +234,7 @@ class TestBarVPINCausality:
 class TestTickVPINCausality:
     def test_tick_vpin_causal(self):
         """Tick-level VPIN at tick i unchanged by poisoning future ticks."""
-        from features.microstructure import vpin_from_ticks
+        from quantlaxmi.features.microstructure import vpin_from_ticks
 
         rng = np.random.default_rng(88)
         n = 1000
@@ -261,7 +261,7 @@ class TestTickVPINCausality:
 
 class TestTickEntropyCausality:
     def test_tick_entropy_causal(self):
-        from features.microstructure import tick_entropy
+        from quantlaxmi.features.microstructure import tick_entropy
         prices = _make_prices(500, seed=66)
         t = 400
         clean = tick_entropy(prices[:t + 1], window=50)
@@ -277,19 +277,19 @@ class TestTickEntropyCausality:
 class TestSignalProtocolCausality:
     def test_signal_frozen(self):
         """Signal is frozen — cannot be mutated after creation."""
-        from strategies.protocol import Signal
+        from quantlaxmi.strategies.protocol import Signal
         s = Signal(strategy_id="s1_vrp", symbol="NIFTY", direction="long", conviction=0.7)
         with pytest.raises(AttributeError):
             s.direction = "short"  # type: ignore
 
     def test_signal_direction_validation(self):
         """Only valid directions allowed."""
-        from strategies.protocol import Signal
+        from quantlaxmi.strategies.protocol import Signal
         with pytest.raises(ValueError, match="Invalid direction"):
             Signal(strategy_id="s1", symbol="NIFTY", direction="future_peek", conviction=0.5)
 
     def test_signal_conviction_bounds(self):
-        from strategies.protocol import Signal
+        from quantlaxmi.strategies.protocol import Signal
         with pytest.raises(ValueError, match="Conviction"):
             Signal(strategy_id="s1", symbol="NIFTY", direction="long", conviction=1.5)
         with pytest.raises(ValueError, match="Conviction"):
@@ -304,7 +304,7 @@ class TestSignalStateIsolation:
     """Verify reset_signal_state() clears all state between runs."""
 
     def test_ema_state_clears(self):
-        from strategies.s5_hawkes.signals import (
+        from quantlaxmi.strategies.s5_hawkes.signals import (
             _ema_state,
             _direction_streak,
             _last_raw_dir,
@@ -326,7 +326,7 @@ class TestSignalStateIsolation:
 
     def test_no_cross_contamination_between_resets(self):
         """State from run 1 must not affect run 2 after reset."""
-        from strategies.s5_hawkes.signals import (
+        from quantlaxmi.strategies.s5_hawkes.signals import (
             _ema_state,
             reset_signal_state,
         )
@@ -356,7 +356,7 @@ class TestTPlusOneLag:
     """
 
     def test_entropy_different_with_extra_bar(self):
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         prices = _make_prices(200)
         # At time T=100
         r_at_T = price_entropy(prices[:101], word_length=2)
@@ -365,7 +365,7 @@ class TestTPlusOneLag:
         assert r_at_T != r_at_T_plus_1
 
     def test_mi_different_with_extra_bar(self):
-        from features.information import mutual_information
+        from quantlaxmi.features.information import mutual_information
         prices = _make_prices(200)
         r_at_T = mutual_information(prices[:101], word_length=2)
         r_at_T_plus_1 = mutual_information(prices[:102], word_length=2)
@@ -375,7 +375,7 @@ class TestTPlusOneLag:
         """Adding one more bar to the price array shifts the window and
         should produce different entropy/MI. Use full-length window so the
         extra bar guaranteed changes the input set."""
-        from strategies.s7_regime.detector import classify_regime
+        from quantlaxmi.strategies.s7_regime.detector import classify_regime
         prices = _make_prices(300)
         # Use entropy_window equal to data length so adding a bar shifts it
         r1 = classify_regime(prices[:150], entropy_window=150)

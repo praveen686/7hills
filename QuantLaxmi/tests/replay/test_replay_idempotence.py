@@ -21,16 +21,16 @@ from pathlib import Path
 
 import pytest
 
-from core.events.envelope import EventEnvelope
-from core.events.serde import serialize_envelope, deserialize_envelope
-from core.events.hashing import compute_chain, verify_chain
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.serde import serialize_envelope, deserialize_envelope
+from quantlaxmi.core.events.hashing import compute_chain, verify_chain
 
-from engine.replay.reader import WalReader
-from engine.replay.comparator import (
+from quantlaxmi.engine.replay.reader import WalReader
+from quantlaxmi.engine.replay.comparator import (
     ComparisonResult,
     compare_streams,
 )
-from engine.live.event_log import EventLogWriter, read_event_log
+from quantlaxmi.engine.live.event_log import EventLogWriter, read_event_log
 
 
 # ---------------------------------------------------------------------------

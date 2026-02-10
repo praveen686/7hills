@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from features.masters import _fti_coefs, fti_single
-from features.fti import (
+from quantlaxmi.features.masters import _fti_coefs, fti_single
+from quantlaxmi.features.fti import (
     _quickselect_nb,
     fti_coefs_nb,
     fti_process_window_scratch_nb,

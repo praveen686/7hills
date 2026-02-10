@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.base.types import OHLCV
+from quantlaxmi.core.base.types import OHLCV
 
 
 @pytest.fixture

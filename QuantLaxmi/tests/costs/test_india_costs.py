@@ -20,7 +20,7 @@ import math
 
 import pytest
 
-from core.backtest.costs import CostModel
+from quantlaxmi.core.backtest.costs import CostModel
 
 
 # ===================================================================

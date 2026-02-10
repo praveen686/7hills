@@ -25,23 +25,23 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # Strategy imports
 # ---------------------------------------------------------------------------
-from strategies.s13_hmm_regime.strategy import (
+from quantlaxmi.strategies.s13_hmm_regime.strategy import (
     HMMRegimeConfig,
     run_backtest as run_hmm,
 )
-from strategies.s14_ofi_intraday.strategy import (
+from quantlaxmi.strategies.s14_ofi_intraday.strategy import (
     OFIConfig,
     run_ofi_backtest as run_ofi,
 )
-from strategies.s15_skew_mr.strategy import (
+from quantlaxmi.strategies.s15_skew_mr.strategy import (
     SkewConfig,
     run_skew_backtest as run_skew,
 )
-from models.ml.tft.momentum_tfm import (
+from quantlaxmi.models.ml.tft.momentum_tfm import (
     MomentumTFMConfig,
     run_backtest as run_mtfm,
 )
-from strategies.s16_vrp_enhanced.strategy import (
+from quantlaxmi.strategies.s16_vrp_enhanced.strategy import (
     VRPConfig,
     run_vrp_backtest as run_vrp,
 )

@@ -23,13 +23,13 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from data.collectors.kite_depth.storage import (
+from quantlaxmi.data.collectors.kite_depth.storage import (
     DEPTH_SCHEMA,
     DepthStore,
     DepthStoreConfig,
     DepthTick,
 )
-from data.collectors.kite_depth.tokens import (
+from quantlaxmi.data.collectors.kite_depth.tokens import (
     FuturesToken,
     OptionToken,
     check_recenter_needed,

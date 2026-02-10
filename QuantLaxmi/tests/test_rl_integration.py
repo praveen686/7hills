@@ -37,7 +37,7 @@ pytestmark = pytest.mark.skipif(not HAS_TORCH, reason="PyTorch required")
 @pytest.fixture
 def backbone_cfg():
     """Small XTrendConfig for testing."""
-    from models.ml.tft.x_trend import XTrendConfig
+    from quantlaxmi.models.ml.tft.x_trend import XTrendConfig
     return XTrendConfig(
         d_hidden=32,
         n_heads=2,
@@ -75,7 +75,7 @@ def synthetic_data():
 @pytest.fixture
 def backbone(backbone_cfg):
     """Create a small backbone for testing (CPU)."""
-    from models.rl.integration.backbone import XTrendBackbone
+    from quantlaxmi.models.rl.integration.backbone import XTrendBackbone
     feature_names = [f"feat_{i}" for i in range(backbone_cfg.n_features)]
     bb = XTrendBackbone(backbone_cfg, feature_names)
     bb.to(torch.device("cpu"))
@@ -85,7 +85,7 @@ def backbone(backbone_cfg):
 @pytest.fixture
 def rl_cfg():
     """Small RL config for testing."""
-    from models.rl.integration.rl_trading_agent import RLConfig
+    from quantlaxmi.models.rl.integration.rl_trading_agent import RLConfig
     return RLConfig(
         gamma=0.99,
         lr_actor=1e-3,
@@ -193,7 +193,7 @@ def test_backbone_pretrain_synthetic(backbone, backbone_cfg, synthetic_data):
 
 def test_rl_agent_select_action(rl_cfg):
     """Actions in [-1,1], log_prob finite, value scalar."""
-    from models.rl.integration.rl_trading_agent import RLTradingAgent
+    from quantlaxmi.models.rl.integration.rl_trading_agent import RLTradingAgent
 
     state_dim = 4 * 32 + 10  # 4 assets × 32 hidden + 10 portfolio
     agent = RLTradingAgent(
@@ -225,7 +225,7 @@ def test_rl_agent_select_action(rl_cfg):
 
 def test_rl_agent_kelly_constraints(rl_cfg):
     """Position ≤ max_pct, reduced during drawdown."""
-    from models.rl.integration.rl_trading_agent import RLTradingAgent
+    from quantlaxmi.models.rl.integration.rl_trading_agent import RLTradingAgent
 
     state_dim = 4 * 32 + 10
     agent = RLTradingAgent(
@@ -268,7 +268,7 @@ def test_rl_agent_kelly_constraints(rl_cfg):
 
 def test_rl_agent_thompson_update(rl_cfg):
     """NIG posterior mu shifts toward observed returns."""
-    from models.rl.integration.rl_trading_agent import RLTradingAgent
+    from quantlaxmi.models.rl.integration.rl_trading_agent import RLTradingAgent
 
     state_dim = 4 * 32 + 10
     agent = RLTradingAgent(
@@ -304,7 +304,7 @@ def test_rl_agent_thompson_update(rl_cfg):
 
 def test_rl_agent_td_update(rl_cfg):
     """Critic loss decreases after update batch."""
-    from models.rl.integration.rl_trading_agent import RLTradingAgent
+    from quantlaxmi.models.rl.integration.rl_trading_agent import RLTradingAgent
 
     state_dim = 4 * 32 + 10
     n_assets = 4
@@ -344,7 +344,7 @@ def test_rl_agent_td_update(rl_cfg):
 def test_integrated_env_step(backbone, backbone_cfg, synthetic_data, rl_cfg):
     """Valid states, rewards, done at fold end."""
     features, targets, dates = synthetic_data
-    from models.rl.integration.integrated_env import IntegratedTradingEnv
+    from quantlaxmi.models.rl.integration.integrated_env import IntegratedTradingEnv
 
     env = IntegratedTradingEnv(
         backbone=backbone,
@@ -387,8 +387,8 @@ def test_integrated_env_step(backbone, backbone_cfg, synthetic_data, rl_cfg):
 
 def test_integrated_env_costs(backbone, backbone_cfg, synthetic_data):
     """Costs match India FnO per-leg index points."""
-    from models.rl.integration.integrated_env import IntegratedTradingEnv
-    from models.rl.environments.india_fno_env import COST_PER_LEG
+    from quantlaxmi.models.rl.integration.integrated_env import IntegratedTradingEnv
+    from quantlaxmi.models.rl.environments.india_fno_env import COST_PER_LEG
 
     features, targets, dates = synthetic_data
     env = IntegratedTradingEnv(
@@ -419,7 +419,7 @@ def test_integrated_env_costs(backbone, backbone_cfg, synthetic_data):
 def test_pipeline_smoke(backbone_cfg, synthetic_data, rl_cfg):
     """Full pipeline on synthetic 100d data, 1 fold, 3 pretrain + 3 RL episodes."""
     features, targets, dates = synthetic_data
-    from models.rl.integration.pipeline import IntegratedPipeline
+    from quantlaxmi.models.rl.integration.pipeline import IntegratedPipeline
 
     # Small config for speed
     backbone_cfg.epochs = 2

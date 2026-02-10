@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from engine.services.ars_surface import ARSSurfaceService, ARSPoint
-from core.events.envelope import EventEnvelope
-from core.events.serde import serialize_envelope
-from core.events.types import EventType
+from quantlaxmi.engine.services.ars_surface import ARSSurfaceService, ARSPoint
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.serde import serialize_envelope
+from quantlaxmi.core.events.types import EventType
 
 
 # ---------------------------------------------------------------------------

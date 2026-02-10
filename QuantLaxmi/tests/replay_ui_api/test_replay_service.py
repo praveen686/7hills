@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from core.events.types import EventType
-from engine.live.event_log import EventLogWriter
-from engine.services.replay_service import ReplayService
+from quantlaxmi.core.events.types import EventType
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.engine.services.replay_service import ReplayService
 
 
 # ---------------------------------------------------------------------------

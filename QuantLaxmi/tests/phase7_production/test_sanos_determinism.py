@@ -9,7 +9,7 @@ and responds to input perturbations in a bounded, stable manner.
 import numpy as np
 import pytest
 
-from core.pricing.sanos import fit_sanos, SANOSResult, bs_call
+from quantlaxmi.core.pricing.sanos import fit_sanos, SANOSResult, bs_call
 
 
 # ---------------------------------------------------------------------------

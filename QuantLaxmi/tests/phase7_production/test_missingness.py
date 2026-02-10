@@ -18,13 +18,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.services.data_quality import DataQualityGate, DQGateResult, DQCheckResult
-from engine.live.event_log import EventLogWriter, read_event_log
-from core.events.types import EventType
-from core.events.payloads import MissingnessPayload
-from core.events.envelope import EventEnvelope
-from strategies.s5_hawkes.analytics import compute_gex, MIN_GEX_OI
-from engine.api.ws import (
+from quantlaxmi.engine.services.data_quality import DataQualityGate, DQGateResult, DQCheckResult
+from quantlaxmi.engine.live.event_log import EventLogWriter, read_event_log
+from quantlaxmi.core.events.types import EventType
+from quantlaxmi.core.events.payloads import MissingnessPayload
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.strategies.s5_hawkes.analytics import compute_gex, MIN_GEX_OI
+from quantlaxmi.engine.api.ws import (
     update_tick_ts,
     check_tick_staleness,
     _last_tick_ts,

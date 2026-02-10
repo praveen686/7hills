@@ -22,10 +22,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from engine.api.routes.why_panel import router
-from engine.services.wal_query import WalQueryService
-from engine.live.event_log import EventLogWriter
-from core.events.types import EventType
+from quantlaxmi.engine.api.routes.why_panel import router
+from quantlaxmi.engine.services.wal_query import WalQueryService
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.core.events.types import EventType
 
 
 # ---------------------------------------------------------------------------

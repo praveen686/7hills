@@ -11,8 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.base.timeguard import LookaheadError, TimeGuard
-from core.base.types import OHLCV
+from quantlaxmi.core.base.timeguard import LookaheadError, TimeGuard
+from quantlaxmi.core.base.types import OHLCV
 
 
 # ---------------------------------------------------------------------------

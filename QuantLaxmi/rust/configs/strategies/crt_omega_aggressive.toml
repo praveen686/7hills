@@ -1,0 +1,40 @@
+# CRT-Omega Strategy Configuration (Aggressive Test)
+# ===================================================
+# Less conservative parameters for shorter backtests
+# NOT recommended for production - use for research only
+
+# Transport Map Weights
+flow_weight_mantissa = 1
+psi_weight_mantissa = 200
+kappa_weight_mantissa = 1000
+
+# Z-Score Parameters - Lower thresholds = more signals
+z_window = 500
+z_in_mantissa = 200        # 2.0 std (was 3.0)
+z_out_mantissa = 30        # 0.3 std (was 0.5)
+max_hold_ticks = 300
+
+# SPRT Evidence Gate - Less strict for testing
+min_obs_per_cell = 20      # Lower barrier (was 60)
+sprt_delta_mantissa = 1
+sprt_alpha_mantissa = 1000  # 10% type I error (was 5%)
+sprt_beta_mantissa = 1500   # 15% type II error (was 10%)
+
+# Position Sizing
+position_size_mantissa = 1000000
+kelly_frac_mantissa = 2500
+max_pos_multiplier_mantissa = 10000
+dd_stop_mantissa = -1000   # -10% drawdown (was -6%)
+
+# Costs
+maker_fee_bps_mantissa = 2
+taker_fee_bps_mantissa = 10
+
+# Exponents
+qty_exponent = -8
+price_exponent = -2
+
+# Fewer buckets = faster convergence
+num_kappa_buckets = 2
+num_spread_buckets = 2
+num_prem_buckets = 2

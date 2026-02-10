@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from engine.replay.comparator import ComparisonResult
-from engine.services.data_quality import DQGateResult, DQCheckResult
+from quantlaxmi.engine.replay.comparator import ComparisonResult
+from quantlaxmi.engine.services.data_quality import DQGateResult, DQCheckResult
 
 # ---------------------------------------------------------------------------
 # Constants

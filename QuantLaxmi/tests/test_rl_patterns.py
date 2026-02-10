@@ -34,7 +34,7 @@ class TestThompsonSizing:
 
     def test_thompson_sizing_agent_init(self):
         """Create agent with 7 arms, verify arm names and count."""
-        from models.rl.integration.thompson_sizing import (
+        from quantlaxmi.models.rl.integration.thompson_sizing import (
             ThompsonSizingAgent,
             ThompsonSizingConfig,
             THOMPSON_ARM_NAMES,
@@ -50,7 +50,7 @@ class TestThompsonSizing:
 
     def test_thompson_sizing_agent_select(self):
         """Select arm given context; verify returned arm name is valid."""
-        from models.rl.integration.thompson_sizing import (
+        from quantlaxmi.models.rl.integration.thompson_sizing import (
             ThompsonSizingAgent,
             ThompsonSizingConfig,
             THOMPSON_ARM_NAMES,
@@ -67,7 +67,7 @@ class TestThompsonSizing:
 
     def test_thompson_sizing_agent_update(self):
         """Update posterior with reward; verify mu changed for the observed arm."""
-        from models.rl.integration.thompson_sizing import (
+        from quantlaxmi.models.rl.integration.thompson_sizing import (
             ThompsonSizingAgent,
             ThompsonSizingConfig,
         )
@@ -93,7 +93,7 @@ class TestThompsonSizing:
 
     def test_gradient_bandit_sizer_init(self):
         """Create GradientBanditSizer with 5 arms; verify setup."""
-        from models.rl.integration.thompson_sizing import (
+        from quantlaxmi.models.rl.integration.thompson_sizing import (
             GradientBanditSizer,
             GradientSizingConfig,
         )
@@ -111,7 +111,7 @@ class TestThompsonSizing:
 
     def test_gradient_bandit_sizer_select_and_update(self):
         """Select arm and update; verify preferences shift towards rewarded arm."""
-        from models.rl.integration.thompson_sizing import (
+        from quantlaxmi.models.rl.integration.thompson_sizing import (
             GradientBanditSizer,
             GradientSizingConfig,
         )
@@ -149,7 +149,7 @@ class TestDeepHedging:
 
     def test_standalone_deep_hedger_init(self):
         """Create StandaloneDeepHedger with default params; verify attributes."""
-        from models.rl.integration.deep_hedging_pipeline import (
+        from quantlaxmi.models.rl.integration.deep_hedging_pipeline import (
             StandaloneDeepHedger,
         )
 
@@ -170,7 +170,7 @@ class TestDeepHedging:
 
     def test_tft_deep_hedging_pipeline_init(self):
         """Create TFTDeepHedgingPipeline; verify configuration stored."""
-        from models.rl.integration.deep_hedging_pipeline import (
+        from quantlaxmi.models.rl.integration.deep_hedging_pipeline import (
             TFTDeepHedgingPipeline,
             DHPipelineConfig,
         )
@@ -190,7 +190,7 @@ class TestDeepHedging:
 
     def test_iv_path_bootstrap(self):
         """Test _build_iv_augmented_paths returns correct shape and endpoints."""
-        from models.rl.integration.deep_hedging_pipeline import (
+        from quantlaxmi.models.rl.integration.deep_hedging_pipeline import (
             _build_iv_augmented_paths,
         )
 
@@ -232,7 +232,7 @@ class TestDeepHedging:
         Uses synthetic spot paths (no DuckDB) to verify compare_vs_bs output structure.
         """
         torch = pytest.importorskip("torch")
-        from models.rl.agents.deep_hedger import DeepHedgingAgent
+        from quantlaxmi.models.rl.agents.deep_hedger import DeepHedgingAgent
 
         agent = DeepHedgingAgent(
             instrument="NIFTY",
@@ -287,7 +287,7 @@ class TestCrossMarket:
 
     def test_crypto_feature_adapter_init(self):
         """Create CryptoFeatureAdapter; verify symbols and N_FEATURES constant."""
-        from models.rl.integration.cross_market import (
+        from quantlaxmi.models.rl.integration.cross_market import (
             CryptoFeatureAdapter,
             CRYPTO_SYMBOLS,
         )
@@ -299,7 +299,7 @@ class TestCrossMarket:
 
     def test_crypto_feature_adapter_features_from_ohlcv(self):
         """Feed synthetic OHLCV DataFrame; get ~31 features per asset."""
-        from models.rl.integration.cross_market import CryptoFeatureAdapter
+        from quantlaxmi.models.rl.integration.cross_market import CryptoFeatureAdapter
 
         # Patch _load_daily_ohlcv to return synthetic data
         adapter = CryptoFeatureAdapter(symbols=["BTC", "ETH"])
@@ -322,8 +322,8 @@ class TestCrossMarket:
     def test_cross_market_backbone_init(self):
         """Create CrossMarketBackbone with India + Crypto configs."""
         torch = pytest.importorskip("torch")
-        from models.ml.tft.x_trend import XTrendConfig
-        from models.rl.integration.cross_market import CrossMarketBackbone
+        from quantlaxmi.models.ml.tft.x_trend import XTrendConfig
+        from quantlaxmi.models.rl.integration.cross_market import CrossMarketBackbone
 
         india_cfg = XTrendConfig(
             n_features=10, n_assets=4, d_hidden=32,
@@ -347,7 +347,7 @@ class TestCrossMarket:
     def test_cross_market_allocator_init(self):
         """Create CrossMarketAllocator (requires torch); verify basic forward."""
         torch = pytest.importorskip("torch")
-        from models.rl.integration.cross_market import CrossMarketAllocator
+        from quantlaxmi.models.rl.integration.cross_market import CrossMarketAllocator
 
         joint_dim = 6 * 32  # 6 assets x 32 hidden
         allocator = CrossMarketAllocator(
@@ -369,7 +369,7 @@ class TestCrossMarket:
 
     def test_cross_market_pipeline_init(self):
         """Create CrossMarketPipeline; verify config stored."""
-        from models.rl.integration.cross_market import (
+        from quantlaxmi.models.rl.integration.cross_market import (
             CrossMarketPipeline,
             CrossMarketConfig,
         )
@@ -398,7 +398,7 @@ class TestAttentionReward:
 
     def test_attention_reward_shaper_init(self):
         """Create AttentionRewardShaper; verify default parameters."""
-        from models.rl.integration.attention_reward import AttentionRewardShaper
+        from quantlaxmi.models.rl.integration.attention_reward import AttentionRewardShaper
 
         shaper = AttentionRewardShaper(
             bonus_scale=0.02,
@@ -415,7 +415,7 @@ class TestAttentionReward:
 
     def test_attention_entropy_computation(self):
         """Compute entropy of known attention weights and verify correctness."""
-        from models.rl.integration.attention_reward import _attention_entropy
+        from quantlaxmi.models.rl.integration.attention_reward import _attention_entropy
 
         # Uniform weights: H = log(n_context) = log(4) ~ 1.3863
         n_context = 4
@@ -438,7 +438,7 @@ class TestAttentionReward:
 
     def test_spike_detection(self):
         """Detect spikes in an entropy series with known properties."""
-        from models.rl.integration.attention_reward import _causal_rolling_zscore
+        from quantlaxmi.models.rl.integration.attention_reward import _causal_rolling_zscore
 
         rng = np.random.default_rng(42)
         n = 100
@@ -465,11 +465,11 @@ class TestAttentionReward:
 
     def test_attention_shaped_env_wrapping(self):
         """Wrap IntegratedTradingEnv; verify bonus injection mechanism."""
-        from models.rl.integration.attention_reward import (
+        from quantlaxmi.models.rl.integration.attention_reward import (
             AttentionRewardShaper,
             AttentionShapedEnv,
         )
-        from models.rl.integration.integrated_env import IntegratedTradingEnv
+        from quantlaxmi.models.rl.integration.integrated_env import IntegratedTradingEnv
 
         # Create a mock backbone
         mock_backbone = MagicMock()
@@ -521,7 +521,7 @@ class TestExecution:
 
     def test_execution_calibrator_defaults(self):
         """ExecutionCalibrator falls back to defaults with no data."""
-        from models.rl.integration.execution_pipeline import (
+        from quantlaxmi.models.rl.integration.execution_pipeline import (
             ExecutionCalibrator,
             _DEFAULT_PARAMS,
         )
@@ -547,7 +547,7 @@ class TestExecution:
     def test_execution_calibrator_with_data(self):
         """Calibrate from mock kite_depth data; verify non-default results."""
         import pandas as pd
-        from models.rl.integration.execution_pipeline import ExecutionCalibrator
+        from quantlaxmi.models.rl.integration.execution_pipeline import ExecutionCalibrator
 
         rng = np.random.default_rng(42)
         n = 500  # > _MIN_DEPTH_ROWS (200)
@@ -600,7 +600,7 @@ class TestExecution:
 
     def test_optimal_execution_pipeline_init(self):
         """Create OptimalExecutionPipeline; verify attributes."""
-        from models.rl.integration.execution_pipeline import OptimalExecutionPipeline
+        from quantlaxmi.models.rl.integration.execution_pipeline import OptimalExecutionPipeline
 
         mock_store = MagicMock()
         pipeline = OptimalExecutionPipeline(
@@ -620,7 +620,7 @@ class TestExecution:
 
     def test_hawkes_optimal_stopping_init(self):
         """Create HawkesOptimalStopping; verify state/action space sizes."""
-        from models.rl.integration.execution_pipeline import HawkesOptimalStopping
+        from quantlaxmi.models.rl.integration.execution_pipeline import HawkesOptimalStopping
 
         mdp = HawkesOptimalStopping(
             n_intensity_bins=5,
@@ -645,7 +645,7 @@ class TestExecution:
 
     def test_hawkes_optimal_stopping_solve(self):
         """Solve small MDP; verify policy is non-trivial (not all same action)."""
-        from models.rl.integration.execution_pipeline import HawkesOptimalStopping
+        from quantlaxmi.models.rl.integration.execution_pipeline import HawkesOptimalStopping
 
         mdp = HawkesOptimalStopping(
             n_intensity_bins=5,
@@ -696,7 +696,7 @@ class TestMarketMaking:
 
     def test_crypto_mm_calibrator_init(self):
         """Create CryptoMMCalibrator; verify default parameters."""
-        from models.rl.integration.market_making_pipeline import CryptoMMCalibrator
+        from quantlaxmi.models.rl.integration.market_making_pipeline import CryptoMMCalibrator
 
         calibrator = CryptoMMCalibrator(
             interval="1m",
@@ -711,7 +711,7 @@ class TestMarketMaking:
     def test_crypto_mm_calibrator_defaults(self):
         """Verify CryptoMMCalibrator output dict structure from synthetic data."""
         import pandas as pd
-        from models.rl.integration.market_making_pipeline import CryptoMMCalibrator
+        from quantlaxmi.models.rl.integration.market_making_pipeline import CryptoMMCalibrator
 
         # Generate synthetic 1-min OHLCV data
         rng = np.random.default_rng(42)
@@ -756,7 +756,7 @@ class TestMarketMaking:
 
     def test_market_making_pipeline_init(self):
         """Create MarketMakingPipeline; verify configuration."""
-        from models.rl.integration.market_making_pipeline import MarketMakingPipeline
+        from quantlaxmi.models.rl.integration.market_making_pipeline import MarketMakingPipeline
 
         pipeline = MarketMakingPipeline(
             train_sessions=60,
@@ -779,7 +779,7 @@ class TestMarketMaking:
 
         The Avellaneda-Stoikov optimal spread formula from Ch 10.3.
         """
-        from models.rl.agents.market_maker import avellaneda_stoikov_quotes
+        from quantlaxmi.models.rl.agents.market_maker import avellaneda_stoikov_quotes
 
         mid_price = 65000.0
         inventory = 0  # neutral inventory for clean spread test
@@ -833,10 +833,10 @@ class TestMarketMaking:
 class TestStrategyAugmentations:
     """Tests for Kelly/MDP/DeepHedge augmentations to S1/S7/S10 strategies."""
 
-    @patch("strategies.base.BaseStrategy.__init__", return_value=None)
+    @patch("quantlaxmi.strategies.base.BaseStrategy.__init__", return_value=None)
     def test_s1_kelly_flag_default(self, mock_init):
         """S1VRPStrategy default: use_kelly=False."""
-        from strategies.s1_vrp.strategy import S1VRPStrategy
+        from quantlaxmi.strategies.s1_vrp.strategy import S1VRPStrategy
 
         s = S1VRPStrategy.__new__(S1VRPStrategy)
         # Manually call __init__ with patched base
@@ -853,10 +853,10 @@ class TestStrategyAugmentations:
         assert s._use_kelly is False
         assert s._kelly is None
 
-    @patch("strategies.base.BaseStrategy.__init__", return_value=None)
+    @patch("quantlaxmi.strategies.base.BaseStrategy.__init__", return_value=None)
     def test_s1_kelly_flag_enabled(self, mock_init):
         """S1VRPStrategy with use_kelly=True; KellySizer initialized."""
-        from strategies.s1_vrp.strategy import S1VRPStrategy
+        from quantlaxmi.strategies.s1_vrp.strategy import S1VRPStrategy
 
         # We mock the base init, then manually construct to test the kelly path
         s = S1VRPStrategy.__new__(S1VRPStrategy)
@@ -872,7 +872,7 @@ class TestStrategyAugmentations:
 
         # Now simulate the Kelly init block from __init__
         try:
-            from models.rl.agents.kelly_sizer import KellySizer
+            from quantlaxmi.models.rl.agents.kelly_sizer import KellySizer
             s._kelly = KellySizer(
                 mode="fractional_kelly",
                 fraction=0.5,
@@ -896,10 +896,10 @@ class TestStrategyAugmentations:
             f"Kelly size should be in [0, 1], got {kelly_size}"
         )
 
-    @patch("strategies.base.BaseStrategy.__init__", return_value=None)
+    @patch("quantlaxmi.strategies.base.BaseStrategy.__init__", return_value=None)
     def test_s7_mdp_flag_default(self, mock_init):
         """S7RegimeSwitchStrategy default: use_mdp=False."""
-        from strategies.s7_regime.strategy import S7RegimeSwitchStrategy
+        from quantlaxmi.strategies.s7_regime.strategy import S7RegimeSwitchStrategy
 
         s = S7RegimeSwitchStrategy.__new__(S7RegimeSwitchStrategy)
         s._state = {}
@@ -911,7 +911,7 @@ class TestStrategyAugmentations:
         assert s._use_mdp is False
         assert s._mdp_policy is None
 
-    @patch("strategies.base.BaseStrategy.__init__", return_value=None)
+    @patch("quantlaxmi.strategies.base.BaseStrategy.__init__", return_value=None)
     def test_s7_mdp_solve(self, mock_init):
         """S7RegimeSwitchStrategy(use_mdp=True); policy solved, all states have actions.
 
@@ -923,7 +923,7 @@ class TestStrategyAugmentations:
         (states, actions, rewards, transitions) is correct and yields a sensible
         policy.
         """
-        from strategies.s7_regime.strategy import S7RegimeSwitchStrategy
+        from quantlaxmi.strategies.s7_regime.strategy import S7RegimeSwitchStrategy
 
         def _simple_value_iteration(
             states, actions, transition_fn, reward_fn, gamma, theta=1e-8,
@@ -966,7 +966,7 @@ class TestStrategyAugmentations:
 
         # Mock value_iteration at the source module since S7 imports it locally
         with patch(
-            "models.rl.core.dynamic_programming.value_iteration",
+            "quantlaxmi.models.rl.core.dynamic_programming.value_iteration",
             side_effect=_simple_value_iteration,
         ):
             s._solve_mdp(gamma=0.95)
@@ -999,10 +999,10 @@ class TestStrategyAugmentations:
             f"TOXIC should be FLAT, got {s._mdp_policy['TOXIC']}"
         )
 
-    @patch("strategies.base.BaseStrategy.__init__", return_value=None)
+    @patch("quantlaxmi.strategies.base.BaseStrategy.__init__", return_value=None)
     def test_s10_deep_hedge_flag(self, mock_init):
         """S10GammaScalpStrategy(use_deep_hedge=True); deep_hedger initialized."""
-        from strategies.s10_gamma_scalp.strategy import S10GammaScalpStrategy
+        from quantlaxmi.strategies.s10_gamma_scalp.strategy import S10GammaScalpStrategy
 
         s = S10GammaScalpStrategy.__new__(S10GammaScalpStrategy)
         s._state = {}
@@ -1016,7 +1016,7 @@ class TestStrategyAugmentations:
 
         # Simulate the DeepHedgingAgent init block from __init__
         try:
-            from models.rl.agents.deep_hedger import DeepHedgingAgent
+            from quantlaxmi.models.rl.agents.deep_hedger import DeepHedgingAgent
             s._deep_hedger = DeepHedgingAgent(
                 n_instruments=1,
                 state_dim=11,
@@ -1029,7 +1029,7 @@ class TestStrategyAugmentations:
             # DeepHedgingAgent may have a different signature; try the
             # constructor used in the actual source
             try:
-                from models.rl.agents.deep_hedger import DeepHedgingAgent
+                from quantlaxmi.models.rl.agents.deep_hedger import DeepHedgingAgent
                 s._deep_hedger = DeepHedgingAgent(
                     instrument="NIFTY",
                     strategy="straddle",
@@ -1055,7 +1055,7 @@ class TestIntegration:
 
     def test_integrated_env_reward_shaping(self):
         """Set bonus array on IntegratedTradingEnv; verify step() adds bonus."""
-        from models.rl.integration.integrated_env import IntegratedTradingEnv
+        from quantlaxmi.models.rl.integration.integrated_env import IntegratedTradingEnv
 
         # Mock backbone
         mock_backbone = MagicMock()
@@ -1096,7 +1096,7 @@ class TestIntegration:
     def test_xtrend_forward_with_weights(self):
         """CrossAttentionBlock returns weights with correct shape (if torch)."""
         torch = pytest.importorskip("torch")
-        from models.ml.tft.x_trend import XTrendConfig, XTrendModel
+        from quantlaxmi.models.ml.tft.x_trend import XTrendConfig, XTrendModel
 
         cfg = XTrendConfig(
             d_hidden=32,
@@ -1139,11 +1139,11 @@ class TestIntegration:
 
     def test_all_exports_importable(self):
         """Import all names from __init__.py; verify they are callable/class."""
-        from models.rl.integration import __all__
+        from quantlaxmi.models.rl.integration import __all__
 
         for name in __all__:
             obj = getattr(
-                __import__("models.rl.integration", fromlist=[name]),
+                __import__("quantlaxmi.models.rl.integration", fromlist=[name]),
                 name,
             )
             assert obj is not None, f"{name} should not be None"

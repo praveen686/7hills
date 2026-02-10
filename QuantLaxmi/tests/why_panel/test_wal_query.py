@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from core.events.envelope import EventEnvelope
-from core.events.types import EventType
-from core.events.serde import serialize_envelope
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.types import EventType
+from quantlaxmi.core.events.serde import serialize_envelope
 
-from engine.live.event_log import EventLogWriter
-from engine.services.wal_query import WalQueryService
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.engine.services.wal_query import WalQueryService
 
 
 # ---------------------------------------------------------------------------

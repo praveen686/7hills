@@ -15,14 +15,14 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from engine.api.routes.diagnostics import router
-from engine.services.ars_surface import ARSSurfaceService
-from engine.services.missed_opportunity import MissedOpportunityService
-from engine.services.trade_analytics import TradeAnalyticsService
-from engine.state import PortfolioState, ClosedTrade
-from core.events.envelope import EventEnvelope
-from core.events.serde import serialize_envelope
-from core.events.types import EventType
+from quantlaxmi.engine.api.routes.diagnostics import router
+from quantlaxmi.engine.services.ars_surface import ARSSurfaceService
+from quantlaxmi.engine.services.missed_opportunity import MissedOpportunityService
+from quantlaxmi.engine.services.trade_analytics import TradeAnalyticsService
+from quantlaxmi.engine.state import PortfolioState, ClosedTrade
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.serde import serialize_envelope
+from quantlaxmi.core.events.types import EventType
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from strategies.s9_momentum.signals import (
+from quantlaxmi.strategies.s9_momentum.signals import (
     CompositeSignal,
     DeliverySignal,
     FIIFlowSignal,

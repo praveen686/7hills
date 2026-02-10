@@ -22,8 +22,8 @@ project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from data.collectors.auth import headless_login
-from data.zerodha import fetch_historical_chunked
+from quantlaxmi.data.collectors.auth import headless_login
+from quantlaxmi.data.zerodha import fetch_historical_chunked
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def fetch_nifty_daily(years: int = 2) -> pd.DataFrame:
 
 def run_hmm_on_kite_data(years: int = 2) -> None:
     """Fetch Kite data and run HMM backtest."""
-    from strategies.s13_hmm_regime.strategy import (
+    from quantlaxmi.strategies.s13_hmm_regime.strategy import (
         extract_features,
         GaussianHMM,
         Regime,

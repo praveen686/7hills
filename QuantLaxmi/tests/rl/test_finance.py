@@ -30,7 +30,7 @@ class TestMertonSolution:
         With mu=0.15, r=0.05, sigma=0.2, gamma=2:
             pi* = (0.15 - 0.05) / (2 * 0.04) = 0.10 / 0.08 = 1.25
         """
-        from models.rl.finance import MertonSolution
+        from quantlaxmi.models.rl.finance import MertonSolution
 
         mu = np.array([0.15])
         sigma = np.array([[0.04]])  # sigma^2 = 0.2^2 = 0.04
@@ -51,7 +51,7 @@ class TestBlackScholesHedger:
 
     def test_put_call_parity(self):
         """Put-call parity: C - P = S - K*exp(-rT)."""
-        from models.rl.finance import BlackScholesHedger
+        from quantlaxmi.models.rl.finance import BlackScholesHedger
 
         S, K, tau, sigma, r = 100.0, 100.0, 0.25, 0.20, 0.05
         C = BlackScholesHedger.price(S, K, tau, sigma, r, "call")
@@ -64,7 +64,7 @@ class TestBlackScholesHedger:
 
     def test_call_delta_in_range(self):
         """Call delta must be in [0, 1]."""
-        from models.rl.finance import BlackScholesHedger
+        from quantlaxmi.models.rl.finance import BlackScholesHedger
 
         S, K, tau, sigma, r = 100.0, 100.0, 0.25, 0.20, 0.05
         delta = BlackScholesHedger.delta(S, K, tau, sigma, r, "call")
@@ -72,7 +72,7 @@ class TestBlackScholesHedger:
 
     def test_put_delta_in_range(self):
         """Put delta must be in [-1, 0]."""
-        from models.rl.finance import BlackScholesHedger
+        from quantlaxmi.models.rl.finance import BlackScholesHedger
 
         S, K, tau, sigma, r = 100.0, 100.0, 0.25, 0.20, 0.05
         delta = BlackScholesHedger.delta(S, K, tau, sigma, r, "put")
@@ -88,7 +88,7 @@ class TestBertsimasLoSolution:
 
     def test_twap_schedule_sums_to_total(self):
         """TWAP schedule must sum to total_shares."""
-        from models.rl.finance import BertsimasLoSolution
+        from quantlaxmi.models.rl.finance import BertsimasLoSolution
 
         total = 1000
         steps = 20
@@ -108,7 +108,7 @@ class TestAlmgrenChrissSolution:
 
     def test_trajectory_boundary_conditions(self):
         """trajectory[0] = total_shares, trajectory[-1] ~= 0."""
-        from models.rl.finance import AlmgrenChrissSolution
+        from quantlaxmi.models.rl.finance import AlmgrenChrissSolution
 
         ac = AlmgrenChrissSolution(
             total_shares=1000,
@@ -132,7 +132,7 @@ class TestAvellanedaStoikovSolution:
 
     def test_spread_positive(self):
         """Optimal spread must be positive."""
-        from models.rl.finance import AvellanedaStoikovSolution
+        from quantlaxmi.models.rl.finance import AvellanedaStoikovSolution
 
         av = AvellanedaStoikovSolution(
             sigma=0.02, gamma_risk=0.1, fill_rate_k=1.5, time_horizon=1.0
@@ -142,7 +142,7 @@ class TestAvellanedaStoikovSolution:
 
     def test_bid_below_ask(self):
         """bid < ask for any inventory level."""
-        from models.rl.finance import AvellanedaStoikovSolution
+        from quantlaxmi.models.rl.finance import AvellanedaStoikovSolution
 
         av = AvellanedaStoikovSolution(
             sigma=0.02, gamma_risk=0.1, fill_rate_k=1.5
@@ -155,7 +155,7 @@ class TestAvellanedaStoikovSolution:
 
     def test_positive_inventory_widens_bid(self):
         """Positive inventory -> higher bid offset (wider bid, lower bid price)."""
-        from models.rl.finance import AvellanedaStoikovSolution
+        from quantlaxmi.models.rl.finance import AvellanedaStoikovSolution
 
         av = AvellanedaStoikovSolution(
             sigma=0.02, gamma_risk=0.1, fill_rate_k=1.5
@@ -170,7 +170,7 @@ class TestAvellanedaStoikovSolution:
 
     def test_negative_inventory_widens_ask(self):
         """Negative inventory -> higher ask offset (wider ask, higher ask price)."""
-        from models.rl.finance import AvellanedaStoikovSolution
+        from quantlaxmi.models.rl.finance import AvellanedaStoikovSolution
 
         av = AvellanedaStoikovSolution(
             sigma=0.02, gamma_risk=0.1, fill_rate_k=1.5
@@ -193,7 +193,7 @@ class TestDeepHedger:
 
     def test_construct_cpu(self):
         """DeepHedger can be constructed with device='cpu'."""
-        from models.rl.finance import DeepHedger
+        from quantlaxmi.models.rl.finance import DeepHedger
 
         dh = DeepHedger(
             state_dim=4,
@@ -205,7 +205,7 @@ class TestDeepHedger:
 
     def test_train_on_small_gbm_paths(self):
         """DeepHedger.train runs on 50 GBM paths with 5 steps each."""
-        from models.rl.finance import DeepHedger
+        from quantlaxmi.models.rl.finance import DeepHedger
 
         dh = DeepHedger(
             state_dim=4,
@@ -246,7 +246,7 @@ class TestAssetAllocPG:
 
     def test_construct_cpu(self):
         """AssetAllocPG can be constructed with device='cpu'."""
-        from models.rl.finance import AssetAllocPG
+        from quantlaxmi.models.rl.finance import AssetAllocPG
 
         pg = AssetAllocPG(
             num_assets=1,

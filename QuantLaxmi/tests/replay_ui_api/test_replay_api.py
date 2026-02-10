@@ -19,12 +19,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from engine.api.routes.replay import router as replay_router
-from engine.api.routes.why_panel import router as why_router
-from engine.services.replay_service import ReplayService
-from engine.services.wal_query import WalQueryService
-from engine.live.event_log import EventLogWriter
-from core.events.types import EventType
+from quantlaxmi.engine.api.routes.replay import router as replay_router
+from quantlaxmi.engine.api.routes.why_panel import router as why_router
+from quantlaxmi.engine.services.replay_service import ReplayService
+from quantlaxmi.engine.services.wal_query import WalQueryService
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.core.events.types import EventType
 
 
 # ---------------------------------------------------------------------------

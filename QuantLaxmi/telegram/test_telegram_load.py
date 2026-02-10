@@ -6,7 +6,7 @@ import pandas as pd
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from engine.datafetch.external_csv import process_external_csv
+from quantlaxmi.engine.datafetch.external_csv import process_external_csv
 
 def main():
     # Sample file from the extracted telegram data

@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import pytest
 
-from core.allocator.meta import TargetPosition
-from core.risk.limits import RiskLimits
-from core.risk.manager import (
+from quantlaxmi.core.allocator.meta import TargetPosition
+from quantlaxmi.core.risk.limits import RiskLimits
+from quantlaxmi.core.risk.manager import (
     GateResult,
     PortfolioState,
     RiskCheckResult,

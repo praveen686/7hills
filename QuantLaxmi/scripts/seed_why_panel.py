@@ -8,8 +8,8 @@ Usage:
 """
 
 from pathlib import Path
-from engine.live.event_log import EventLogWriter
-from core.events.types import EventType
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.core.events.types import EventType
 
 WAL_DIR = Path("data/events")
 RUN_ID = "seed-why-panel-001"
@@ -311,7 +311,7 @@ def main():
     writer.close()
 
     # Verify
-    from engine.replay.reader import WalReader
+    from quantlaxmi.engine.replay.reader import WalReader
     reader = WalReader(base_dir=WAL_DIR)
     events = reader.read_date(TODAY)
     print(f"Seeded {len(events)} events for {TODAY}")

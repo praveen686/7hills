@@ -25,7 +25,7 @@ class TestTradingState:
 
     def test_to_array_returns_numpy(self):
         """to_array() must return a numpy array."""
-        from models.rl.environments import TradingState
+        from quantlaxmi.models.rl.environments import TradingState
 
         state = TradingState(
             timestamp=0,
@@ -49,7 +49,7 @@ class TestSimulatedPriceEnv:
 
     def test_reset_returns_trading_state(self):
         """reset() must return a TradingState."""
-        from models.rl.environments import SimulatedPriceEnv, TradingState
+        from quantlaxmi.models.rl.environments import SimulatedPriceEnv, TradingState
 
         env = SimulatedPriceEnv(
             dynamics="gbm",
@@ -62,7 +62,7 @@ class TestSimulatedPriceEnv:
 
     def test_step_returns_step_result(self):
         """step() must return a StepResult."""
-        from models.rl.environments import (
+        from quantlaxmi.models.rl.environments import (
             SimulatedPriceEnv,
             TradingAction,
             StepResult,
@@ -91,25 +91,25 @@ class TestIndiaFnOEnv:
 
     def test_lot_size_nifty(self):
         """NIFTY lot size must be 25."""
-        from models.rl.environments import IndiaFnOEnv
+        from quantlaxmi.models.rl.environments import IndiaFnOEnv
 
         assert IndiaFnOEnv.get_lot_size("NIFTY") == 25
 
     def test_lot_size_banknifty(self):
         """BANKNIFTY lot size must be 15."""
-        from models.rl.environments import IndiaFnOEnv
+        from quantlaxmi.models.rl.environments import IndiaFnOEnv
 
         assert IndiaFnOEnv.get_lot_size("BANKNIFTY") == 15
 
     def test_cost_per_leg_nifty(self):
         """NIFTY cost per leg must be 3.0 index points."""
-        from models.rl.environments import IndiaFnOEnv
+        from quantlaxmi.models.rl.environments import IndiaFnOEnv
 
         assert IndiaFnOEnv.get_cost_per_leg("NIFTY") == 3.0
 
     def test_cost_per_leg_banknifty(self):
         """BANKNIFTY cost per leg must be 5.0 index points."""
-        from models.rl.environments import IndiaFnOEnv
+        from quantlaxmi.models.rl.environments import IndiaFnOEnv
 
         assert IndiaFnOEnv.get_cost_per_leg("BANKNIFTY") == 5.0
 
@@ -123,7 +123,7 @@ class TestCryptoEnv:
 
     def test_reset_step_cycle(self):
         """CryptoEnv reset + step cycle must work."""
-        from models.rl.environments import CryptoEnv, TradingAction, StepResult
+        from quantlaxmi.models.rl.environments import CryptoEnv, TradingAction, StepResult
 
         env = CryptoEnv(
             symbol="BTCUSDT",
@@ -148,8 +148,8 @@ class TestOptionsEnv:
 
     def test_reset_works(self):
         """OptionsEnv.reset() must return TradingState."""
-        from models.rl.environments import OptionsEnv
-        from models.rl.environments.trading_env import TradingState
+        from quantlaxmi.models.rl.environments import OptionsEnv
+        from quantlaxmi.models.rl.environments.trading_env import TradingState
 
         env = OptionsEnv(
             spot_init=100.0,
@@ -164,8 +164,8 @@ class TestOptionsEnv:
 
     def test_step_returns_step_result(self):
         """OptionsEnv.step() must return StepResult."""
-        from models.rl.environments import OptionsEnv
-        from models.rl.environments.trading_env import TradingAction, StepResult
+        from quantlaxmi.models.rl.environments import OptionsEnv
+        from quantlaxmi.models.rl.environments.trading_env import TradingAction, StepResult
 
         env = OptionsEnv(
             spot_init=100.0,
@@ -189,8 +189,8 @@ class TestExecutionEnv:
 
     def test_reset_step_works(self):
         """ExecutionEnv reset + step must work."""
-        from models.rl.environments import ExecutionEnv
-        from models.rl.environments.trading_env import (
+        from quantlaxmi.models.rl.environments import ExecutionEnv
+        from quantlaxmi.models.rl.environments.trading_env import (
             TradingState,
             TradingAction,
             StepResult,
@@ -219,7 +219,7 @@ class TestLOBSimulator:
 
     def test_market_order_returns_fill(self):
         """submit_market_order must return (fill_price, filled_qty)."""
-        from models.rl.environments import LOBSimulator
+        from quantlaxmi.models.rl.environments import LOBSimulator
 
         lob = LOBSimulator(
             price=100.0,

@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from core.events.hashing import chain_hash, verify_chain, compute_chain, GENESIS
-from engine.live.event_log import EventLogWriter, read_event_log
-from core.events.serde import serialize_envelope
+from quantlaxmi.core.events.hashing import chain_hash, verify_chain, compute_chain, GENESIS
+from quantlaxmi.engine.live.event_log import EventLogWriter, read_event_log
+from quantlaxmi.core.events.serde import serialize_envelope
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +37,8 @@ class TestGenesis:
         int(GENESIS, 16)  # should not raise
 
     def test_genesis_stable_across_calls(self):
-        from core.events import hashing as h1
-        from core.events import hashing as h2
+        from quantlaxmi.core.events import hashing as h1
+        from quantlaxmi.core.events import hashing as h2
         assert h1.GENESIS == h2.GENESIS
 
 

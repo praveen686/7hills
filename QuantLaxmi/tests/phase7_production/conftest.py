@@ -10,9 +10,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.state import PortfolioState, Position, ClosedTrade
-from engine.live.event_log import EventLogWriter
-from core.events.envelope import EventEnvelope
+from quantlaxmi.engine.state import PortfolioState, Position, ClosedTrade
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.core.events.envelope import EventEnvelope
 
 
 # -----------------------------------------------------------------------

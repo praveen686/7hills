@@ -1,0 +1,63 @@
+[package]
+name = "quantlaxmi-runner-common"
+version = "0.1.0"
+edition = "2024"
+description = "Shared runner infrastructure for QuantLaxmi (venue-agnostic)"
+
+[dependencies]
+# Core infrastructure (via shims) - NO CONNECTOR IMPORTS
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-data = { path = "../quantlaxmi-data" }
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-gates = { path = "../quantlaxmi-gates" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# Time
+chrono = { workspace = true }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+
+# HTTP server (WebSocket)
+axum = { workspace = true, features = ["ws"] }
+tower-http = { workspace = true }
+
+# TUI
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Environment
+dotenvy = { workspace = true }
+
+# IDs
+uuid = { workspace = true }
+
+# Cryptography (for artifact hashing)
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# System info
+hostname = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

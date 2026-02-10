@@ -1,0 +1,16 @@
+[package]
+name = "quantlaxmi-india"
+version = "0.1.0"
+edition = "2024"
+description = "QuantLaxmi India - Indian F&O Trading (NSE/BSE via Zerodha)"
+
+[[bin]]
+name = "quantlaxmi-india"
+path = "src/main.rs"
+
+[dependencies]
+# India runner library (brings all India-specific deps)
+quantlaxmi-runner-india = { path = "../../crates/quantlaxmi-runner-india" }
+
+# Error handling
+anyhow = { workspace = true }

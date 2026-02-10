@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.backtest.costs import CostModel
-from core.backtest.portfolio import BacktestResult, run_backtest
+from quantlaxmi.core.backtest.costs import CostModel
+from quantlaxmi.core.backtest.portfolio import BacktestResult, run_backtest
 
 
 class TestCostModel:

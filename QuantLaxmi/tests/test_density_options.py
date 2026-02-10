@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from strategies.s1_vrp.options import (
+from quantlaxmi.strategies.s1_vrp.options import (
     OPTION_COST_BPS,
     SHORT_OFFSET,
     LONG_OFFSET,
@@ -31,13 +31,13 @@ from strategies.s1_vrp.options import (
     run_density_options_backtest,
     _compute_metrics,
 )
-from strategies.s1_vrp.density import (
+from quantlaxmi.strategies.s1_vrp.density import (
     DensityDayObs,
     compute_composite_signal,
     _rolling_percentile,
     DEFAULT_LOOKBACK,
 )
-from core.pricing.sanos import bs_call
+from quantlaxmi.core.pricing.sanos import bs_call
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ def _mock_get_fno(store, d: date) -> pd.DataFrame:
 @pytest.fixture(autouse=True)
 def _patch_get_fno():
     """Patch get_fno in density_options so tests use MockStore._data."""
-    with patch("strategies.s1_vrp.options.get_fno", new=_mock_get_fno):
+    with patch("quantlaxmi.strategies.s1_vrp.options.get_fno", new=_mock_get_fno):
         yield
 
 

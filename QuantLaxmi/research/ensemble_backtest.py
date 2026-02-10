@@ -35,7 +35,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from data.store import MarketDataStore
+from quantlaxmi.data.store import MarketDataStore
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ def _generate_s25_returns(
     pd.Series
         Daily net returns indexed by pd.Timestamp date.
     """
-    from features.divergence_flow import DivergenceFlowBuilder
+    from quantlaxmi.features.divergence_flow import DivergenceFlowBuilder
 
     print("  [S25 DFF] Building features...", flush=True)
     t0 = time.time()
@@ -483,8 +483,8 @@ def _generate_s4_returns(
         Daily net returns indexed by pd.Timestamp date. Includes all days
         (zero for flat days).
     """
-    from strategies.s4_iv_mr.engine import build_iv_series, DayObs
-    from strategies.s9_momentum.data import is_trading_day
+    from quantlaxmi.strategies.s4_iv_mr.engine import build_iv_series, DayObs
+    from quantlaxmi.strategies.s9_momentum.data import is_trading_day
 
     print("  [S4 IV MR] Building IV series (SANOS calibration)...", flush=True)
     t0 = time.time()
@@ -1106,7 +1106,7 @@ def run_ensemble_backtest(
 
 
 def main() -> None:
-    from strategies.utils import tee_to_results
+    from quantlaxmi.strategies.utils import tee_to_results
 
     parser = argparse.ArgumentParser(
         description="Multi-Strategy Ensemble Backtest — NIFTY 50"

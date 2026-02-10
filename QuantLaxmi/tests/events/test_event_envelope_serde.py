@@ -14,15 +14,15 @@ import json
 import math
 import pytest
 
-from core.events.envelope import EventEnvelope
-from core.events.types import EventType
-from core.events.serde import (
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.types import EventType
+from quantlaxmi.core.events.serde import (
     serialize_envelope,
     deserialize_envelope,
     roundtrip_stable,
     _sanitize,
 )
-from core.events.payloads import (
+from quantlaxmi.core.events.payloads import (
     TickPayload,
     Bar1mPayload,
     SignalPayload,

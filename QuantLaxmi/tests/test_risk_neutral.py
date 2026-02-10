@@ -12,7 +12,7 @@ import math
 import numpy as np
 import pytest
 
-from core.pricing.risk_neutral import (
+from quantlaxmi.core.pricing.risk_neutral import (
     DensitySnapshot,
     compute_moments,
     compute_snapshot,
@@ -23,7 +23,7 @@ from core.pricing.risk_neutral import (
     shannon_entropy,
     tail_weights,
 )
-from core.pricing.sanos import SANOSResult, bs_call, fit_sanos
+from quantlaxmi.core.pricing.sanos import SANOSResult, bs_call, fit_sanos
 
 
 # ---------------------------------------------------------------------------

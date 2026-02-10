@@ -1,0 +1,113 @@
+[package]
+name = "quantlaxmi-runner-india"
+version = "0.1.0"
+edition = "2024"
+description = "India trading runner for QuantLaxmi (Zerodha/NSE/BSE)"
+
+[[bin]]
+name = "quantlaxmi-india"
+path = "src/main.rs"
+
+[[bin]]
+name = "replay_india_session"
+path = "src/bin/replay_india_session.rs"
+
+[[bin]]
+name = "run_calendar_carry"
+path = "src/bin/run_calendar_carry.rs"
+
+[[bin]]
+name = "score_calendar_carry"
+path = "src/bin/score_calendar_carry.rs"
+
+[[bin]]
+name = "sanos_single_slice"
+path = "src/bin/sanos_single_slice.rs"
+
+[[bin]]
+name = "sanos_temporal"
+path = "src/bin/sanos_temporal.rs"
+
+[[bin]]
+name = "sanos_multi_expiry"
+path = "src/bin/sanos_multi_expiry.rs"
+
+[[bin]]
+name = "sanos_features"
+path = "src/bin/sanos_features.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Shared runner infrastructure
+quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }
+
+# India-specific connector (NO BINANCE)
+quantlaxmi-connectors-zerodha = { path = "../quantlaxmi-connectors-zerodha" }
+
+# Core infrastructure (via shims)
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-data = { path = "../quantlaxmi-data" }
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-options = { path = "../quantlaxmi-options" }
+
+# Regime detection (Phase 28 - Grassmann manifolds)
+quantlaxmi-regime = { path = "../quantlaxmi-regime" }
+
+# LP solver for SANOS (via quantlaxmi-options)
+good_lp = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# WebSocket (for Zerodha capture)
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
+byteorder = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# Time
+chrono = { workspace = true }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+
+# TUI
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+# HTTP
+axum = { workspace = true, features = ["ws"] }
+reqwest = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Environment
+dotenvy = { workspace = true }
+
+# IDs
+uuid = { workspace = true }
+
+# CSV output
+csv = "1.3"
+
+# Hashing for decision IDs (Gate B1.3)
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]

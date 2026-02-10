@@ -37,7 +37,7 @@ def _chain_step(state, action):
 # =====================================================================
 
 def test_mc_prediction_chain():
-    from models.rl.algorithms import mc_prediction
+    from quantlaxmi.models.rl.algorithms import mc_prediction
     episodes = _chain_mdp_episodes(num_episodes=200)
     V = mc_prediction(episodes, gamma=0.9)
     # V(s0) should be higher than V(s1) since s0 collects more rewards
@@ -52,7 +52,7 @@ def test_mc_prediction_chain():
 # =====================================================================
 
 def test_td_prediction_chain():
-    from models.rl.algorithms import td_prediction
+    from quantlaxmi.models.rl.algorithms import td_prediction
     episodes = _chain_mdp_episodes(num_episodes=200)
     V = td_prediction(episodes, gamma=0.9, learning_rate=0.05)
     v_s0 = V('s0')
@@ -67,7 +67,7 @@ def test_td_prediction_chain():
 # =====================================================================
 
 def test_q_learning_chain():
-    from models.rl.algorithms import q_learning
+    from quantlaxmi.models.rl.algorithms import q_learning
     Q, policy = q_learning(
         mdp_step=_chain_step,
         start_states=['s0'],
@@ -88,7 +88,7 @@ def test_q_learning_chain():
 # =====================================================================
 
 def test_dqn_construct_and_select():
-    from models.rl.algorithms import DQN
+    from quantlaxmi.models.rl.algorithms import DQN
     dqn = DQN(
         state_dim=4,
         num_actions=2,
@@ -103,7 +103,7 @@ def test_dqn_construct_and_select():
 
 
 def test_dqn_greedy_select():
-    from models.rl.algorithms import DQN
+    from quantlaxmi.models.rl.algorithms import DQN
     dqn = DQN(
         state_dim=4,
         num_actions=2,
@@ -118,7 +118,7 @@ def test_dqn_greedy_select():
 
 
 def test_dqn_store_and_train():
-    from models.rl.algorithms import DQN
+    from quantlaxmi.models.rl.algorithms import DQN
     dqn = DQN(
         state_dim=4,
         num_actions=2,
@@ -147,7 +147,7 @@ def test_dqn_store_and_train():
 # =====================================================================
 
 def test_reinforce_construct_and_select():
-    from models.rl.algorithms import REINFORCE
+    from quantlaxmi.models.rl.algorithms import REINFORCE
     agent = REINFORCE(
         state_dim=4,
         action_dim=2,
@@ -165,7 +165,7 @@ def test_reinforce_construct_and_select():
 
 
 def test_reinforce_update():
-    from models.rl.algorithms import REINFORCE
+    from quantlaxmi.models.rl.algorithms import REINFORCE
     agent = REINFORCE(
         state_dim=4,
         action_dim=2,
@@ -191,7 +191,7 @@ def test_reinforce_update():
 # =====================================================================
 
 def test_actor_critic_construct_and_select():
-    from models.rl.algorithms import ActorCritic
+    from quantlaxmi.models.rl.algorithms import ActorCritic
     ac = ActorCritic(
         state_dim=4,
         action_dim=2,
@@ -208,7 +208,7 @@ def test_actor_critic_construct_and_select():
 
 
 def test_actor_critic_update_returns_two_losses():
-    from models.rl.algorithms import ActorCritic
+    from quantlaxmi.models.rl.algorithms import ActorCritic
     ac = ActorCritic(
         state_dim=4,
         action_dim=2,
@@ -238,7 +238,7 @@ def test_actor_critic_update_returns_two_losses():
 # =====================================================================
 
 def test_thompson_sampling_identifies_best_arm():
-    from models.rl.algorithms import ThompsonSampling, GaussianArm
+    from quantlaxmi.models.rl.algorithms import ThompsonSampling, GaussianArm
     arms = [
         GaussianArm(mu=0.0, sigma=0.5, seed=10),
         GaussianArm(mu=1.0, sigma=0.5, seed=20),
@@ -256,7 +256,7 @@ def test_thompson_sampling_identifies_best_arm():
 # =====================================================================
 
 def test_ucb1_identifies_best_arm():
-    from models.rl.algorithms import UCB1, GaussianArm
+    from quantlaxmi.models.rl.algorithms import UCB1, GaussianArm
     arms = [
         GaussianArm(mu=0.0, sigma=0.3, seed=10),
         GaussianArm(mu=2.0, sigma=0.3, seed=20),
@@ -274,7 +274,7 @@ def test_ucb1_identifies_best_arm():
 # =====================================================================
 
 def test_epsilon_greedy_runs():
-    from models.rl.algorithms import EpsilonGreedy, GaussianArm
+    from quantlaxmi.models.rl.algorithms import EpsilonGreedy, GaussianArm
     arms = [
         GaussianArm(mu=0.0, sigma=1.0, seed=10),
         GaussianArm(mu=1.0, sigma=1.0, seed=20),
@@ -290,7 +290,7 @@ def test_epsilon_greedy_runs():
 # =====================================================================
 
 def test_gradient_bandit_runs():
-    from models.rl.algorithms import GradientBandit, GaussianArm
+    from quantlaxmi.models.rl.algorithms import GradientBandit, GaussianArm
     arms = [
         GaussianArm(mu=0.0, sigma=1.0, seed=10),
         GaussianArm(mu=1.0, sigma=1.0, seed=20),
@@ -306,7 +306,7 @@ def test_gradient_bandit_runs():
 # =====================================================================
 
 def test_linucb_contextual_selection():
-    from models.rl.algorithms import LinUCB
+    from quantlaxmi.models.rl.algorithms import LinUCB
     linucb = LinUCB(context_dim=3, num_arms=2, alpha=1.0)
     context = np.array([1.0, 0.5, -0.5])
     arm = linucb.select_arm(context)
@@ -318,7 +318,7 @@ def test_linucb_contextual_selection():
 
 
 def test_linucb_learns_correct_arm():
-    from models.rl.algorithms import LinUCB
+    from quantlaxmi.models.rl.algorithms import LinUCB
     rng = np.random.default_rng(42)
     linucb = LinUCB(context_dim=2, num_arms=2, alpha=1.0)
     # Arm 0 gives reward = context[0], arm 1 gives reward = -context[0]

@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 from scipy.stats import norm as _norm
 
-from features.options_features import (
+from quantlaxmi.features.options_features import (
     OptionsFeatureBuilder,
     _bs_delta,
     _bs_gamma,

@@ -1,0 +1,92 @@
+# CRT-Omega Tournament Grid Configuration
+# =========================================
+# Parameter sweep for Causal Reversal Transport strategy
+#
+# Total combinations: 3 × 3 × 3 × 2 × 2 × 2 = 216 configs
+
+[meta]
+strategy = "crt_omega"
+description = "CRT-Omega microstructure mean reversion with SPRT gating"
+
+# ----------------------------------------------------------------------------
+# Transport Map Weights (core signal sensitivity)
+# ----------------------------------------------------------------------------
+
+[params.transport]
+# Depth imbalance weight (b) - how much to weight book imbalance
+# Higher = more responsive to order book pressure
+psi_weight_mantissa = [150, 200, 300]
+
+# Anti-momentum weight (c) - mean reversion strength when book is fragile
+# Higher = stronger reversal tendency on fragile books
+kappa_weight_mantissa = [800, 1000, 1200]
+
+# ----------------------------------------------------------------------------
+# Z-Score Thresholds (entry/exit sensitivity)
+# ----------------------------------------------------------------------------
+
+[params.zscore]
+# Entry threshold (z_in)
+# Lower = more trades, potentially noisier; Higher = fewer but higher conviction
+z_in_mantissa = [250, 300, 350]
+
+# Exit threshold (z_out)
+# Lower = hold longer; Higher = exit faster on mean reversion
+z_out_mantissa = [40, 60]
+
+# ----------------------------------------------------------------------------
+# SPRT Evidence Gate (edge detection strictness)
+# ----------------------------------------------------------------------------
+
+[params.sprt]
+# Minimum observations per cell before allowing trades
+# Higher = more data required, fewer spurious activations
+min_obs_per_cell = [40, 60]
+
+# ----------------------------------------------------------------------------
+# Position Sizing (risk management)
+# ----------------------------------------------------------------------------
+
+[params.sizing]
+# Kelly fraction (how aggressive to size based on estimated edge)
+# Lower = more conservative; Higher = more aggressive
+kelly_frac_mantissa = [1500, 2500]
+
+# ----------------------------------------------------------------------------
+# Fixed Parameters (not swept)
+# ----------------------------------------------------------------------------
+
+[fixed]
+# Flow weight - typically small (flow is noisy)
+flow_weight_mantissa = 1
+
+# Rolling window for z-score
+z_window = 900
+
+# Max hold time
+max_hold_ticks = 180
+
+# SPRT parameters
+sprt_delta_mantissa = 1
+sprt_alpha_mantissa = 500
+sprt_beta_mantissa = 1000
+
+# Max position and drawdown
+max_pos_multiplier_mantissa = 10000
+dd_stop_mantissa = -600
+
+# Base position size
+position_size_mantissa = 1000000
+
+# Costs
+maker_fee_bps_mantissa = 2
+taker_fee_bps_mantissa = 10
+
+# Exponents
+qty_exponent = -8
+price_exponent = -2
+
+# Regime buckets
+num_kappa_buckets = 3
+num_spread_buckets = 3
+num_prem_buckets = 3

@@ -59,22 +59,22 @@ class TestEntropyDeterminism:
     """price_entropy must be bitwise identical across 3 runs."""
 
     def test_3x_replay_word_len_2(self, prices_100):
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         results = [price_entropy(prices_100, word_length=2) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_word_len_3(self, prices_100):
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         results = [price_entropy(prices_100, word_length=3) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_with_window(self, prices_300):
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         results = [price_entropy(prices_300, word_length=2, window=100) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_different_data_different_result(self, prices_100, prices_300):
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         r1 = price_entropy(prices_100)
         r2 = price_entropy(prices_300[:100])
         # Different seeds → different entropy (with high probability)
@@ -85,17 +85,17 @@ class TestMutualInfoDeterminism:
     """mutual_information must be bitwise identical across 3 runs."""
 
     def test_3x_replay(self, prices_100):
-        from features.information import mutual_information
+        from quantlaxmi.features.information import mutual_information
         results = [mutual_information(prices_100) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_word_len_3(self, prices_100):
-        from features.information import mutual_information
+        from quantlaxmi.features.information import mutual_information
         results = [mutual_information(prices_100, word_length=3) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
     def test_3x_replay_with_window(self, prices_300):
-        from features.information import mutual_information
+        from quantlaxmi.features.information import mutual_information
         results = [mutual_information(prices_300, word_length=2, window=100) for _ in range(3)]
         assert results[0] == results[1] == results[2]
 
@@ -104,19 +104,19 @@ class TestRollingFeatureDeterminism:
     """rolling_entropy and rolling_mutual_info must produce identical arrays."""
 
     def test_rolling_entropy_3x(self, prices_300):
-        from features.information import rolling_entropy
+        from quantlaxmi.features.information import rolling_entropy
         runs = [rolling_entropy(prices_300, window=50) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
         np.testing.assert_array_equal(runs[1], runs[2])
 
     def test_rolling_mi_3x(self, prices_300):
-        from features.information import rolling_mutual_info
+        from quantlaxmi.features.information import rolling_mutual_info
         runs = [rolling_mutual_info(prices_300, window=50) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
         np.testing.assert_array_equal(runs[1], runs[2])
 
     def test_rolling_entropy_nan_prefix(self, prices_300):
-        from features.information import rolling_entropy
+        from quantlaxmi.features.information import rolling_entropy
         out = rolling_entropy(prices_300, window=50)
         assert np.all(np.isnan(out[:49]))
         assert np.all(~np.isnan(out[49:]))
@@ -130,7 +130,7 @@ class TestRegimeDetectorDeterminism:
     """classify_regime and rolling_regime must produce identical results."""
 
     def test_classify_3x_replay(self, prices_300):
-        from strategies.s7_regime.detector import classify_regime
+        from quantlaxmi.strategies.s7_regime.detector import classify_regime
         runs = [classify_regime(prices_300, vpin=0.3, entropy_window=100) for _ in range(3)]
         for r in runs:
             assert r.regime == runs[0].regime
@@ -139,14 +139,14 @@ class TestRegimeDetectorDeterminism:
             assert r.confidence == runs[0].confidence
 
     def test_rolling_regime_3x_replay(self, prices_300):
-        from strategies.s7_regime.detector import rolling_regime
+        from quantlaxmi.strategies.s7_regime.detector import rolling_regime
         runs = [rolling_regime(prices_300, window=50) for _ in range(3)]
         for i in range(len(runs[0])):
             assert runs[0][i].regime == runs[1][i].regime == runs[2][i].regime
             assert runs[0][i].entropy == runs[1][i].entropy == runs[2][i].entropy
 
     def test_vpin_override_deterministic(self, prices_300):
-        from strategies.s7_regime.detector import classify_regime, MarketRegime
+        from quantlaxmi.strategies.s7_regime.detector import classify_regime, MarketRegime
         runs = [classify_regime(prices_300, vpin=0.85) for _ in range(3)]
         for r in runs:
             assert r.regime == MarketRegime.RANDOM
@@ -160,7 +160,7 @@ class TestVPINFromTicksDeterminism:
     """vpin_from_ticks must produce bitwise identical arrays."""
 
     def test_3x_replay(self, tick_prices):
-        from features.microstructure import vpin_from_ticks
+        from quantlaxmi.features.microstructure import vpin_from_ticks
         prices, volumes = tick_prices
         runs = [vpin_from_ticks(prices, volumes, bucket_size=500_000, n_buckets=20) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
@@ -169,7 +169,7 @@ class TestVPINFromTicksDeterminism:
 
 class TestTickEntropyDeterminism:
     def test_3x_replay(self, tick_prices):
-        from features.microstructure import tick_entropy
+        from quantlaxmi.features.microstructure import tick_entropy
         prices, _ = tick_prices
         runs = [tick_entropy(prices, window=50) for _ in range(3)]
         np.testing.assert_array_equal(runs[0], runs[1])
@@ -178,7 +178,7 @@ class TestTickEntropyDeterminism:
 
 class TestHawkesDeterminism:
     def test_3x_replay(self):
-        from features.microstructure import trade_arrival_hawkes
+        from quantlaxmi.features.microstructure import trade_arrival_hawkes
         rng = np.random.default_rng(55)
         ts = np.sort(rng.uniform(0, 3600, 200))
         runs = [trade_arrival_hawkes(ts, eval_interval=5.0) for _ in range(3)]
@@ -196,7 +196,7 @@ class TestBarMicrostructureDeterminism:
 
     def test_3x_replay(self):
         import pandas as pd
-        from features.microstructure import Microstructure
+        from quantlaxmi.features.microstructure import Microstructure
         rng = np.random.default_rng(123)
         n = 200
         close = 22000 * np.exp(np.cumsum(rng.normal(0, 0.01, n)))
@@ -219,7 +219,7 @@ class TestBarMicrostructureDeterminism:
 
 class TestCostModelDeterminism:
     def test_properties_3x(self):
-        from core.backtest.costs import CostModel
+        from quantlaxmi.core.backtest.costs import CostModel
         cm = CostModel(commission_bps=5.0, slippage_bps=3.0, funding_annual_pct=8.0)
         for _ in range(3):
             assert cm.one_way_frac == (5.0 + 3.0) / 10_000
@@ -236,9 +236,9 @@ class TestRiskManagerDeterminism:
     """Same targets + same state → identical gate results across 3 runs."""
 
     def test_3x_replay_pass(self):
-        from core.allocator.meta import TargetPosition
-        from core.risk.limits import RiskLimits
-        from core.risk.manager import GateResult, PortfolioState, RiskManager
+        from quantlaxmi.core.allocator.meta import TargetPosition
+        from quantlaxmi.core.risk.limits import RiskLimits
+        from quantlaxmi.core.risk.manager import GateResult, PortfolioState, RiskManager
 
         targets = [TargetPosition(
             strategy_id="s1_vrp", symbol="NIFTY",
@@ -254,9 +254,9 @@ class TestRiskManagerDeterminism:
             assert results[0].adjusted_weight == 0.05
 
     def test_3x_replay_block(self):
-        from core.allocator.meta import TargetPosition
-        from core.risk.limits import RiskLimits
-        from core.risk.manager import GateResult, PortfolioState, RiskManager
+        from quantlaxmi.core.allocator.meta import TargetPosition
+        from quantlaxmi.core.risk.limits import RiskLimits
+        from quantlaxmi.core.risk.manager import GateResult, PortfolioState, RiskManager
 
         targets = [TargetPosition(
             strategy_id="s1_vrp", symbol="NIFTY",
@@ -272,9 +272,9 @@ class TestRiskManagerDeterminism:
             assert results[0].adjusted_weight == 0.0
 
     def test_3x_replay_reduce(self):
-        from core.allocator.meta import TargetPosition
-        from core.risk.limits import RiskLimits
-        from core.risk.manager import GateResult, PortfolioState, RiskManager
+        from quantlaxmi.core.allocator.meta import TargetPosition
+        from quantlaxmi.core.risk.limits import RiskLimits
+        from quantlaxmi.core.risk.manager import GateResult, PortfolioState, RiskManager
 
         targets = [TargetPosition(
             strategy_id="s5_hawkes", symbol="NIFTY",
@@ -298,13 +298,13 @@ class TestRiskManagerDeterminism:
 
 class TestPortfolioStateDeterminism:
     def test_dd_3x(self):
-        from core.risk.manager import PortfolioState
+        from quantlaxmi.core.risk.manager import PortfolioState
         s = PortfolioState(equity=0.93, peak_equity=1.0)
         dds = [s.portfolio_dd for _ in range(3)]
         assert dds[0] == dds[1] == dds[2]
 
     def test_strategy_dd_3x(self):
-        from core.risk.manager import PortfolioState
+        from quantlaxmi.core.risk.manager import PortfolioState
         s = PortfolioState(
             strategy_equity={"s1_vrp": 0.96},
             strategy_peaks={"s1_vrp": 1.0},
@@ -313,7 +313,7 @@ class TestPortfolioStateDeterminism:
         assert dds[0] == dds[1] == dds[2]
 
     def test_total_exposure_3x(self):
-        from core.risk.manager import PortfolioState
+        from quantlaxmi.core.risk.manager import PortfolioState
         s = PortfolioState(positions={
             "NIFTY": {"weight": 0.15},
             "BANKNIFTY": {"weight": 0.10},
@@ -331,7 +331,7 @@ class TestSignalDeterminism:
     """Signal dataclass (frozen) properties are deterministic."""
 
     def test_frozen_signal_fields(self):
-        from strategies.protocol import Signal
+        from quantlaxmi.strategies.protocol import Signal
         s = Signal(
             strategy_id="s1_vrp", symbol="NIFTY",
             direction="long", conviction=0.8,
@@ -344,7 +344,7 @@ class TestSignalDeterminism:
             assert s.metadata["composite"] == 0.42
 
     def test_signal_immutable(self):
-        from strategies.protocol import Signal
+        from quantlaxmi.strategies.protocol import Signal
         s = Signal(strategy_id="s1_vrp", symbol="NIFTY", direction="long", conviction=0.5)
         with pytest.raises(AttributeError):
             s.conviction = 0.9  # type: ignore
@@ -358,19 +358,19 @@ class TestFPTolerance:
     """Verify numeric operations stay within rtol=1e-6 across runs."""
 
     def test_entropy_fp_stable(self, prices_300):
-        from features.information import price_entropy
+        from quantlaxmi.features.information import price_entropy
         runs = [price_entropy(prices_300, word_length=2, window=100) for _ in range(10)]
         for r in runs:
             np.testing.assert_allclose(r, runs[0], rtol=1e-10)
 
     def test_mi_fp_stable(self, prices_300):
-        from features.information import mutual_information
+        from quantlaxmi.features.information import mutual_information
         runs = [mutual_information(prices_300, word_length=2, window=100) for _ in range(10)]
         for r in runs:
             np.testing.assert_allclose(r, runs[0], rtol=1e-10)
 
     def test_cost_model_fp_stable(self):
-        from core.backtest.costs import CostModel
+        from quantlaxmi.core.backtest.costs import CostModel
         cm = CostModel(commission_bps=3.5, slippage_bps=1.5)
         results = [cm.roundtrip_frac for _ in range(10)]
         assert all(r == results[0] for r in results)

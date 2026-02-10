@@ -1,0 +1,62 @@
+# ===== Secrets =====
+.env
+!.env.example
+*.session
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# ===== Virtual environments =====
+venv/
+.venv/
+env/
+
+# ===== Heavy data (11 GB+) =====
+common/data/
+
+# ===== UI / Frontend =====
+.next/
+node_modules/
+out/
+
+# ===== Rust =====
+rust/target/
+
+# ===== Logs =====
+logs/
+
+# ===== Research artefacts (large outputs) =====
+research_artefacts/
+
+# ===== IDE / Editor =====
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== Model checkpoints (can be large) =====
+*.ckpt
+*.pt
+*.pth
+checkpoints/
+
+# ===== DuckDB =====
+*.duckdb
+*.duckdb.wal

@@ -20,8 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from data.collectors.nse_daily.files import ALL_FILES, BASE_URL, NSEFile, format_date
-from data.collectors.nse_daily.collector import DownloadResult, NSEDailyCollector
+from quantlaxmi.data.collectors.nse_daily.files import ALL_FILES, BASE_URL, NSEFile, format_date
+from quantlaxmi.data.collectors.nse_daily.collector import DownloadResult, NSEDailyCollector
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ class TestBackfill:
         collector = NSEDailyCollector(base_dir=tmp_path)
 
         with patch.object(collector, "_init_session"), \
-             patch("data.collectors.nse_daily.collector.time.sleep"):
+             patch("quantlaxmi.data.collectors.nse_daily.collector.time.sleep"):
             collector._session = mock_session
             results = collector.backfill(
                 date(2026, 2, 2),  # Monday
@@ -349,7 +349,7 @@ class TestBackfill:
         collector = NSEDailyCollector(base_dir=tmp_path)
 
         with patch.object(collector, "_init_session"), \
-             patch("data.collectors.nse_daily.collector.time.sleep"):
+             patch("quantlaxmi.data.collectors.nse_daily.collector.time.sleep"):
             collector._session = mock_session
             results = collector.backfill(date(2026, 2, 5), date(2026, 2, 5))
 
@@ -368,7 +368,7 @@ class TestBackfill:
         collector = NSEDailyCollector(base_dir=tmp_path)
 
         with patch.object(collector, "_init_session"), \
-             patch("data.collectors.nse_daily.collector.time.sleep"):
+             patch("quantlaxmi.data.collectors.nse_daily.collector.time.sleep"):
             collector._session = mock_session
             collector.backfill(date(2026, 2, 2), date(2026, 2, 4))
 
@@ -401,7 +401,7 @@ class TestRetry:
 
         with patch.object(collector, "_init_session"), \
              patch.object(collector, "_refresh_session"), \
-             patch("data.collectors.nse_daily.collector.time.sleep"):
+             patch("quantlaxmi.data.collectors.nse_daily.collector.time.sleep"):
             collector._session = mock_session
             result = collector.collect(d)
 

@@ -8,7 +8,7 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
-from strategies.s4_iv_mr.engine import (
+from quantlaxmi.strategies.s4_iv_mr.engine import (
     BacktestResult,
     DayObs,
     Trade,

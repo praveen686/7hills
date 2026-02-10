@@ -1,0 +1,12 @@
+{
+  "schema_version": "v1",
+  "strategy": "funding_aligned_momentum",
+  "segments_root": "/home/isoula/7hills/QuantLaxmi/data/perp_sessions",
+  "matched_segments": [
+    "perp_20260125_133424"
+  ],
+  "grid_file_hash": "33d357dd65253207e74f756b8373afa8562d786f16e1c6c1f6ec0f500d9d2df2",
+  "total_runs": 16,
+  "git_commit": "4eeb60c4d867b54e58990c13138ed92f19aa38e6",
+  "git_dirty": true
+}

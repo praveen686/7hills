@@ -5,11 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core.base.timeguard import LookaheadError
-from features import RSI, BollingerBands, CyclicalTime, HistoricalReturns
-from core.pipeline.config import PipelineConfig
-from core.pipeline.engine import EngineResult, ResearchEngine
-from core.targets import FutureReturn
+from quantlaxmi.core.base.timeguard import LookaheadError
+from quantlaxmi.features import RSI, BollingerBands, CyclicalTime, HistoricalReturns
+from quantlaxmi.core.pipeline.config import PipelineConfig
+from quantlaxmi.core.pipeline.engine import EngineResult, ResearchEngine
+from quantlaxmi.core.targets import FutureReturn
 
 
 class TestResearchEngine:

@@ -13,20 +13,20 @@ from datetime import date
 import numpy as np
 import pytest
 
-from strategies.s7_regime.detector import (
+from quantlaxmi.strategies.s7_regime.detector import (
     classify_regime,
     classify_regime_with_hysteresis,
     reset_regime_state,
     MarketRegime,
     RegimeObservation,
 )
-from engine.services.regime_coordinator import (
+from quantlaxmi.engine.services.regime_coordinator import (
     RegimeCoordinator,
     RegimeLabel,
     RegimeDecision,
     RegimeState,
 )
-from engine.state import PortfolioState, Position, ClosedTrade
+from quantlaxmi.engine.state import PortfolioState, Position, ClosedTrade
 
 
 # ======================================================================

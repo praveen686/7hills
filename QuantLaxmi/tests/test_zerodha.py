@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from data.zerodha import (
+from quantlaxmi.data.zerodha import (
     INTERVALS,
     KiteTick,
     generate_totp,

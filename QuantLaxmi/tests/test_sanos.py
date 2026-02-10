@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from core.pricing.sanos import (
+from quantlaxmi.core.pricing.sanos import (
     SANOSResult,
     bs_call,
     bs_call_vega,
@@ -718,7 +718,7 @@ class TestPrepareNiftyChainReal:
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         try:
-            from data.store import MarketDataStore
+            from quantlaxmi.data.store import MarketDataStore
             store = MarketDataStore()
             dates = store.available_dates("nse_fo_bhavcopy")
             if not dates:

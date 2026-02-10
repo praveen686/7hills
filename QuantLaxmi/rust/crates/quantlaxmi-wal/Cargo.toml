@@ -1,0 +1,22 @@
+[package]
+name = "quantlaxmi-wal"
+version = "0.1.0"
+edition = "2024"
+description = "Write-Ahead Log for QuantLaxmi: JSONL-based event logging with correlation IDs"
+
+[dependencies]
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }

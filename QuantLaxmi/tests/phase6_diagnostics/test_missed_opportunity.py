@@ -12,10 +12,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from engine.services.missed_opportunity import MissedOpportunityService, MissedOpportunity
-from core.events.envelope import EventEnvelope
-from core.events.serde import serialize_envelope
-from core.events.types import EventType
+from quantlaxmi.engine.services.missed_opportunity import MissedOpportunityService, MissedOpportunity
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.serde import serialize_envelope
+from quantlaxmi.core.events.types import EventType
 
 
 # ---------------------------------------------------------------------------

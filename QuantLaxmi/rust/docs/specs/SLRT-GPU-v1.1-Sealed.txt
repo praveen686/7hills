@@ -1,0 +1,321 @@
+﻿SLRT-GPU v1.1 — SEALED SYSTEM SPECIFICATION
+Status: Sealed / Audit-Grade
+Supersedes: SLRT-GPU v1.0
+
+=================================================================
+NOTE TO READER
+This document is the fully consolidated, sealed version of SLRT-GPU.
+All parameters, failure modes, normalization semantics, and execution
+mappings are explicitly locked. No behavioral ambiguity remains.
+=================================================================
+
+1.0 SYSTEM OVERVIEW AND CORE PRINCIPLES
+
+1.1 Introduction
+SLRT-GPU (Structural Liquidity Regime Trading) is a regime-first trading
+system engineered to operate exclusively during periods of quantifiable
+structural market instability. The system remains dormant during stable
+conditions and activates only when predefined instability signatures
+are simultaneously present.
+
+The system detects five instability classes:
+1. Off-manifold excursion
+2. Liquidity fragility
+3. Follow-through / initiative (FTI)
+4. Flow toxicity (VPIN-style)
+5. Forced unwind pressure (optional for perpetual futures)
+
+The system is deterministic, auditable, replayable, and prioritizes
+safety over liveness.
+
+1.2 QuantLaxmi Doctrine (Hard Invariants)
+
+1. No Silent Poisoning
+All vendor fields are tri-state:
+- Absent
+- PresentNull
+- Present(value)
+
+Any required field not in Present(value) triggers RefuseSignal and
+immediate cessation of processing for that symbol.
+
+2. Deterministic Replay Parity
+Given identical WAL input, the system must reproduce identical outputs
+(regime labels, intents, digests) within declared floating-point
+tolerances for GPU computation.
+
+3. Separation of Concerns
+CPU (Spine):
+- Authoritative state
+- Risk, decision, execution
+- WAL and manifests
+
+GPU (Muscle):
+- Stateless mathematical acceleration only
+- No decisions, no state mutation
+
+=================================================================
+
+2.0 SYSTEM ARCHITECTURE
+
+CPU Responsibilities:
+- Data ingestion and validation
+- Limit Order Book (LOB)
+- Admission and refusal logic
+- Regime classification
+- Risk management
+- Execution control
+- Write-Ahead Logging (WAL)
+
+GPU Responsibilities:
+- High-rate feature computation
+- Subspace mathematics assistance (PCA / covariance)
+
+GPU is read-only and stateless by design.
+
+=================================================================
+
+3.0 DATA INGESTION AND TIME SEMANTICS
+
+3.1 Inputs (Per Symbol)
+- L2 order book (top N levels, default N=20)
+- Trades (price, quantity, timestamp)
+- Static venue metadata (tick size, lot size, limits)
+
+Optional (perpetuals):
+- Funding stream
+- Basis stream
+
+3.2 Numeric Representation
+- Raw prices and quantities: fixed-point i64 mantissa + exponent
+- GPU computation: fp32 (fp64 allowed for covariance / eigensolve)
+
+3.3 Time Semantics
+- Canonical time = receive timestamp
+- Exchange timestamps used only if strictly monotonic
+- All rolling windows use canonical time
+
+=================================================================
+
+4.0 FEATURE ENGINEERING STACK
+
+4.1 Snapshot Features
+
+Mid:
+m = (a1 + b1) / 2
+
+Microprice:
+μ = (a1 * qb1 + b1 * qa1) / (qa1 + qb1 + ε)
+
+Top-k Imbalance:
+Ik = (Σ q_bid - Σ q_ask) / (Σ q_bid + Σ q_ask + ε)
+
+Depth Slope (per side):
+For each level i:
+Qi = Σ q_j (j ≤ i)
+Δpi = |pi - p1|
+Slope = median_i (Δpi / (Qi + ε))
+
+Sweep Cost / Gap Risk:
+Walk book for target size Q*
+Compute VWAP psweep
+gapRisk = |psweep - μ| / tickSize
+
+4.2 Trade-Flow Features (Rolling Windows)
+
+Signed Volume Inference:
+- Use aggressor side if available
+- Else tick rule with microprice refinement
+
+Signed Volume:
+ΔV_signed = Σ(sign_t * volume_t)
+
+Elasticity:
+ε_W = |Δm_W| / (|ΔV_signed_W| + ε)
+
+Depth Collapse Rate:
+Ddot_k,W = (Dk(t) - Dk(t-W)) / W
+
+=================================================================
+
+5.0 CORE SIGNAL COMPONENTS
+
+5.1 Follow-Through Indicator (FTI)
+FTI is code-locked to:
+research/indicators/timothy_masters/FTI.CPP
+
+FTI is used only as initiative confirmation, never as a predictor.
+
+Derived metrics:
+- FTI_level
+- FTI_slope
+- FTI_persist
+
+5.2 Flow Toxicity (VPIN-style)
+
+Trades are bucketed in volume-time buckets of size Vb.
+
+For bucket j:
+imb_j = |V_buy_j - V_sell_j| / Vb
+
+Toxicity = rolling mean of imb_j over last M buckets.
+
+5.3 Liquidity Fragility Score
+
+fragility =
+  w1 * clip(gapRisk)
++ w2 * clip(elasticity)
+- w3 * clip(depth_decay)
++ w4 * clip(spread_z)
++ w5 * clip(min(depth_slope_bid, depth_slope_ask))
+
+=================================================================
+
+6.0 REGIME IDENTIFICATION ENGINE (SEALED)
+
+6.1 State Vector
+
+x_t =
+[
+  μ - m,
+  I10,
+  ε_250ms,
+  Ddot_10_250ms,
+  gapRisk,
+  FTI,
+  toxicity
+]
+
+6.2 Normalization (SEALED)
+
+- Warmup: 5 minutes or 30,000 ticks (minimum)
+- Post-warmup: rolling median / MAD (30 minutes)
+- Per-symbol only
+
+Normalization Failure Handling:
+- MAD == 0 → confidence × 0.8
+- MAD == 0 for > 2 seconds → RefuseSignal
+- Reset only on session boundary (never on reconnect)
+
+6.3 Subspace Tracking (Default, SEALED)
+
+- Rank r = 4
+- EW covariance decay λ = 0.995
+- Eigensolve cadence = every 250ms OR 500 batches
+- Diagonal jitter = 1e-6
+
+6.4 Regime Metrics
+
+Off-manifold distance:
+d_perp = ||x_perp||₂
+
+Tangent speed:
+v_para = ||x_para(t) - x_para(t-Δ)||₂
+
+Subspace rotation:
+ρ = ||U(t)ᵀ U(t-Δ) - I||_F
+
+6.5 Confidence Metric (SEALED)
+
+Initial confidence = 1.0
+
+Multiplicative penalties:
+- Missing optional field → ×0.95
+- Zero MAD → ×0.80
+- Spread soft breach → ×0.70
+- GPU fallback → ×0.90
+- Normalization instability → ×0.85
+
+Confidence is clipped to [0, 1].
+
+6.6 Regime Classification
+
+R3 (Trade-Eligible) if:
+- d_perp > τ_d
+- fragility > τ_frag
+- (FTI_persist > τ_F OR toxicity_persist > τ_T)
+- confidence > τ_C
+
+=================================================================
+
+7.0 DECISION, RISK, AND EXECUTION
+
+7.1 Admission
+Fail-fast refusal on:
+- missing data
+- crossed book
+- non-monotonic timestamps
+- spread kill-switch breach
+
+7.2 Direction
+
+S_dir =
+  α1 * sign(μ - m)
++ α2 * sign(ΔV_signed_250ms)
++ α3 * sign(I10)
+
+If |S_dir| < τ_dir → no trade
+
+7.3 Meta-Label Veto
+Model outputs:
+- p_edge
+- expected_slip_ticks
+- size_scalar
+
+p_edge < τ_p → veto
+
+7.4 Risk Controls
+- Max position per symbol
+- Daily loss cap
+- Time stop
+- Liquidity stop
+- Adverse selection stop
+
+7.5 Execution Urgency Mapping (SEALED)
+
+u = clip(0.4*d_perp + 0.4*fragility + 0.2*toxicity, 0, 1)
+
+u < 0.30 → passive post-only
+0.30 ≤ u < 0.60 → join book
+u ≥ 0.60 → IOC with slippage cap
+
+=================================================================
+
+8.0 GPU IMPLEMENTATION CONTRACT
+
+8.1 Tensor Layout (SoA)
+
+bid_px[L][S], bid_qty[L][S]
+ask_px[L][S], ask_qty[L][S]
+features[S][F]
+
+8.2 Determinism Rules
+- No nondeterministic atomics
+- Deterministic reductions only
+
+8.3 GPU Failure Policy (SEALED)
+
+- Kernel failure → CPU recompute
+- Apply confidence ×0.90
+- >3 failures/minute → symbol halt
+
+=================================================================
+
+9.0 AUDITING AND REPLAYABILITY
+
+WAL Events:
+- FeatureBatchComputed
+- RegimeComputed
+- SignalAdmitted / SignalRefused
+- IntentEmitted
+- ExecutionReport
+
+RunManifest must include:
+- Feature schema version
+- GPU kernel hash
+- Threshold values
+- Quantization policy
+
+=================================================================
+
+END OF SLRT-GPU v1.1 — SEALED SPECIFICATION

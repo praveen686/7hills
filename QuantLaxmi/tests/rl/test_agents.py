@@ -23,21 +23,21 @@ class TestKellySizer:
 
     def test_kelly_fraction(self):
         """f* = (mu - r) / sigma^2 = (0.15 - 0.05) / 0.04 = 2.5."""
-        from models.rl.agents import KellySizer
+        from quantlaxmi.models.rl.agents import KellySizer
 
         f = KellySizer.kelly_fraction(mu=0.15, sigma=0.2, r=0.05)
         assert abs(f - 2.5) < 1e-10, f"Expected 2.5, got {f}"
 
     def test_merton_fraction(self):
         """pi* = (mu - r) / (gamma * sigma^2) = (0.15 - 0.05) / (2 * 0.04) = 1.25."""
-        from models.rl.agents import KellySizer
+        from quantlaxmi.models.rl.agents import KellySizer
 
         f = KellySizer.merton_fraction(mu=0.15, sigma=0.2, r=0.05, gamma=2.0)
         assert abs(f - 1.25) < 1e-10, f"Expected 1.25, got {f}"
 
     def test_drawdown_adjustment_reduces_size(self):
         """Drawdown adjustment must reduce position size during drawdown."""
-        from models.rl.agents import KellySizer
+        from quantlaxmi.models.rl.agents import KellySizer
 
         sizer = KellySizer(mode="kelly", max_drawdown_pct=0.20)
         base_size = 1.0
@@ -63,7 +63,7 @@ class TestThompsonStrategyAllocator:
     """Tests for contextual Thompson Sampling strategy allocator."""
 
     def _make_allocator(self):
-        from models.rl.agents import ThompsonStrategyAllocator
+        from quantlaxmi.models.rl.agents import ThompsonStrategyAllocator
 
         return ThompsonStrategyAllocator(
             strategy_names=["S1", "S2", "S3"],
@@ -113,7 +113,7 @@ class TestMarketMakingAgent:
 
     def test_get_quotes_bid_lt_ask(self):
         """get_quotes must return bid < ask."""
-        from models.rl.agents import MarketMakingAgent
+        from quantlaxmi.models.rl.agents import MarketMakingAgent
 
         agent = MarketMakingAgent(
             instrument="BTCUSDT",
@@ -144,7 +144,7 @@ class TestDeepHedgingAgent:
 
     def test_construct_without_error(self):
         """DeepHedgingAgent can be constructed with device='cpu'."""
-        from models.rl.agents import DeepHedgingAgent
+        from quantlaxmi.models.rl.agents import DeepHedgingAgent
 
         agent = DeepHedgingAgent(
             instrument="NIFTY",
@@ -166,7 +166,7 @@ class TestOptimalExecutionAgent:
 
     def test_construct_without_error(self):
         """OptimalExecutionAgent can be constructed with device='cpu'."""
-        from models.rl.agents import OptimalExecutionAgent
+        from quantlaxmi.models.rl.agents import OptimalExecutionAgent
 
         agent = OptimalExecutionAgent(
             instrument="NIFTY",

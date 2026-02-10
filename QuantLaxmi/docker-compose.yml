@@ -1,0 +1,20 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.python
+    ports: ["8000:8000"]
+    volumes: ["./quantlaxmi:/app/quantlaxmi", "./common:/app/common"]
+    env_file: .env
+
+  frontend:
+    build:
+      context: ./ui
+    ports: ["3000:3000"]
+    depends_on: [backend]
+
+  rust-exec:
+    build:
+      context: ./rust
+    env_file: .env
+    depends_on: [backend]

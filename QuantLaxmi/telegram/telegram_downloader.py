@@ -188,7 +188,7 @@ async def _ingest_new_dates(download_dir: Path) -> None:
     try:
         import sys
         sys.path.insert(0, str(Path(__file__).parent.parent.parent / "QuantLaxmi"))
-        from data.convert import convert_all, discover_sources, discover_converted
+        from quantlaxmi.data.convert import convert_all, discover_sources, discover_converted
 
         sources = discover_sources()
         converted = discover_converted()

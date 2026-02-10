@@ -1,0 +1,112 @@
+[package]
+name = "quantlaxmi-runner-crypto"
+version = "0.1.0"
+edition = "2024"
+description = "Crypto trading runner for QuantLaxmi (Binance)"
+
+# NOTE: Main CLI binary lives in apps/quantlaxmi-crypto (cargo run -p quantlaxmi-crypto)
+# This crate only provides the library + specialized binaries below.
+
+[[bin]]
+name = "run_funding_arb"
+path = "src/bin/run_funding_arb.rs"
+
+[[bin]]
+name = "score_funding_arb"
+path = "src/bin/score_funding_arb.rs"
+
+[[bin]]
+name = "validate-execution-session"
+path = "src/bin/validate_execution_session.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Shared runner infrastructure
+quantlaxmi-runner-common = { path = "../quantlaxmi-runner-common" }
+
+# Crypto-specific connector (NO ZERODHA)
+quantlaxmi-connectors-binance = { path = "../quantlaxmi-connectors-binance" }
+
+# Core infrastructure (via shims)
+quantlaxmi-core = { path = "../quantlaxmi-core" }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-events = { path = "../quantlaxmi-events" }
+quantlaxmi-data = { path = "../quantlaxmi-data" }
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-sbe = { path = "../quantlaxmi-sbe" }
+quantlaxmi-strategy = { path = "../quantlaxmi-strategy" }
+quantlaxmi-gates = { path = "../quantlaxmi-gates" }
+quantlaxmi-wal = { path = "../quantlaxmi-wal" }
+quantlaxmi-eval = { path = "../quantlaxmi-eval" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# WebSocket (for Binance capture)
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+
+# Time
+chrono = { workspace = true }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+
+# TUI
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+
+# HTTP
+axum = { workspace = true, features = ["ws"] }
+reqwest = { version = "0.11", features = ["json", "native-tls", "blocking"] }
+
+# URL encoding
+urlencoding = "2.1"
+url = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Environment
+dotenvy = { workspace = true }
+
+# IDs
+uuid = { workspace = true }
+
+# Binary encoding
+byteorder = { workspace = true }
+
+# Hashing (for manifest digests)
+sha2 = "0.10"
+hex = "0.4"
+
+# Directory walking (for tournament validation)
+walkdir = "2.4"
+
+# Glob pattern matching (for tournament segment discovery)
+glob = "0.3"
+
+# Parallel execution (for tournament speedup)
+rayon = "1.10"
+
+# CPU count detection
+num_cpus = "1.16"
+
+[dev-dependencies]
+tempfile = "3"

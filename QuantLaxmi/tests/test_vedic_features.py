@@ -18,7 +18,7 @@ import pytest
 # Mittag-Leffler
 # ---------------------------------------------------------------------------
 
-from features.fractional import (
+from quantlaxmi.features.fractional import (
     mittag_leffler,
     estimate_alpha_msd,
     estimate_alpha_waiting,
@@ -166,7 +166,7 @@ class TestFFPESolver:
 # Mock Theta
 # ---------------------------------------------------------------------------
 
-from features.mock_theta import (
+from quantlaxmi.features.mock_theta import (
     mock_theta_f,
     mock_theta_phi,
     mock_theta_chi,
@@ -262,7 +262,7 @@ class TestVolatilityDistortion:
 # Vedic Angular
 # ---------------------------------------------------------------------------
 
-from features.vedic_angular import (
+from quantlaxmi.features.vedic_angular import (
     madhava_kernel,
     angular_coherence,
     update_regime_centroids,
@@ -442,7 +442,7 @@ class TestFeatureClasses:
 
     def test_feature_name_prefix(self, ohlcv_df):
         """Feature.transform() should prefix columns correctly."""
-        from core.base.types import OHLCV
+        from quantlaxmi.core.base.types import OHLCV
 
         # Create OHLCV wrapper (needs DatetimeIndex)
         ohlcv_df_ts = ohlcv_df.copy()

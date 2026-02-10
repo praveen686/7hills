@@ -13,14 +13,14 @@ import math
 import numpy as np
 import pytest
 
-from engine.replay.equity_comparator import (
+from quantlaxmi.engine.replay.equity_comparator import (
     EquityCurveComparison,
     EquityDiff,
     _values_equal,
     compare_equity_curves,
 )
-from engine.replay.engine import ReplayResult
-from engine.state import PortfolioState, ClosedTrade, Position
+from quantlaxmi.engine.replay.engine import ReplayResult
+from quantlaxmi.engine.state import PortfolioState, ClosedTrade, Position
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ class TestTrendFeatureBuilder:
 
     def test_trend_feature_builder(self):
         """Paper-only features (no kite_1min_dir), correct shapes, no NaN in output zone."""
-        from features.trend import TrendFeatureBuilder, N_PAPER_FEATURES
+        from quantlaxmi.features.trend import TrendFeatureBuilder, N_PAPER_FEATURES
 
         df, syms = self._make_prices(500, 4)
         builder = TrendFeatureBuilder()
@@ -55,7 +55,7 @@ class TestTrendFeatureBuilder:
 
     def test_normalized_returns(self):
         """Normalized returns match paper formula: r̂ = r / (σ√t')."""
-        from features.trend import TrendFeatureBuilder, RETURN_WINDOWS
+        from quantlaxmi.features.trend import TrendFeatureBuilder, RETURN_WINDOWS
 
         rng = np.random.default_rng(123)
         n = 400
@@ -80,7 +80,7 @@ class TestTrendFeatureBuilder:
 
     def test_macd_signals(self):
         """MACD features exist and have reasonable values."""
-        from features.trend import TrendFeatureBuilder
+        from quantlaxmi.features.trend import TrendFeatureBuilder
 
         rng = np.random.default_rng(456)
         n = 500
@@ -100,7 +100,7 @@ class TestTrendFeatureBuilder:
 
     def test_feature_names_count(self):
         """24 total feature names (8 paper + 16 intraday)."""
-        from features.trend import (
+        from quantlaxmi.features.trend import (
             FEATURE_NAMES, N_FEATURES, N_PAPER_FEATURES, N_INTRADAY_FEATURES,
         )
         assert N_PAPER_FEATURES == 8
@@ -120,7 +120,7 @@ class TestXTrendModel:
     """Tests for the X-Trend PyTorch model."""
 
     def _cfg(self, **overrides):
-        from models.ml.tft.x_trend import XTrendConfig
+        from quantlaxmi.models.ml.tft.x_trend import XTrendConfig
         defaults = dict(
             d_hidden=32,
             n_heads=2,
@@ -138,7 +138,7 @@ class TestXTrendModel:
 
     def test_entity_embedding(self):
         """Correct shape, gradients flow."""
-        from models.ml.tft.x_trend import EntityEmbedding
+        from quantlaxmi.models.ml.tft.x_trend import EntityEmbedding
 
         emb = EntityEmbedding(n_assets=4, d_hidden=32)
         ids = torch.tensor([0, 1, 2, 3])
@@ -151,7 +151,7 @@ class TestXTrendModel:
 
     def test_vsn_forward(self):
         """8 features → d_hidden output, correct shape."""
-        from models.ml.tft.x_trend import VariableSelectionNetwork
+        from quantlaxmi.models.ml.tft.x_trend import VariableSelectionNetwork
 
         vsn = VariableSelectionNetwork(n_features=8, hidden_dim=32, context_dim=32)
         x = torch.randn(2, 10, 8)
@@ -161,7 +161,7 @@ class TestXTrendModel:
 
     def test_cross_attention(self):
         """Q/K/V shapes work correctly."""
-        from models.ml.tft.x_trend import CrossAttentionBlock
+        from quantlaxmi.models.ml.tft.x_trend import CrossAttentionBlock
 
         ca = CrossAttentionBlock(d_hidden=32, n_heads=2)
         query = torch.randn(2, 32)
@@ -172,7 +172,7 @@ class TestXTrendModel:
 
     def test_xtrend_forward_sharpe(self):
         """Full model forward pass in sharpe mode, output in [-1, 1]."""
-        from models.ml.tft.x_trend import XTrendModel
+        from quantlaxmi.models.ml.tft.x_trend import XTrendModel
 
         cfg = self._cfg(loss_mode="sharpe")
         model = XTrendModel(cfg)
@@ -191,7 +191,7 @@ class TestXTrendModel:
 
     def test_xtrend_forward_mle(self):
         """Full model forward pass in MLE mode, returns (mu, log_sigma)."""
-        from models.ml.tft.x_trend import XTrendModel
+        from quantlaxmi.models.ml.tft.x_trend import XTrendModel
 
         cfg = self._cfg(loss_mode="joint_mle")
         model = XTrendModel(cfg)
@@ -208,7 +208,7 @@ class TestXTrendModel:
 
     def test_predict_position_mle(self):
         """predict_position with MLE mode returns values in [-1, 1] via PTP."""
-        from models.ml.tft.x_trend import XTrendModel
+        from quantlaxmi.models.ml.tft.x_trend import XTrendModel
 
         cfg = self._cfg(loss_mode="joint_mle")
         model = XTrendModel(cfg)
@@ -230,7 +230,7 @@ class TestLossFunctions:
 
     def test_sharpe_loss(self):
         """Gradient flows, correct sign."""
-        from models.ml.tft.x_trend import sharpe_loss
+        from quantlaxmi.models.ml.tft.x_trend import sharpe_loss
 
         positions = torch.tensor([0.5, -0.3, 0.8, 0.1], requires_grad=True)
         returns = torch.tensor([0.01, -0.02, 0.015, 0.005])
@@ -252,7 +252,7 @@ class TestLossFunctions:
 
     def test_joint_mle_loss(self):
         """NLL + Sharpe combined correctly."""
-        from models.ml.tft.x_trend import joint_loss
+        from quantlaxmi.models.ml.tft.x_trend import joint_loss
 
         mu = torch.tensor([[0.01], [0.02], [-0.01], [0.005]], requires_grad=True)
         log_sigma = torch.tensor([[-1.0], [-1.0], [-1.0], [-1.0]], requires_grad=True)
@@ -271,7 +271,7 @@ class TestContextConstruction:
 
     def test_context_construction(self):
         """Causality enforced, correct shapes."""
-        from models.ml.tft.x_trend import build_context_set
+        from quantlaxmi.models.ml.tft.x_trend import build_context_set
 
         rng = np.random.default_rng(42)
         # Synthetic features: (100 days, 4 assets, 8 features)
@@ -293,7 +293,7 @@ class TestContextConstruction:
 
     def test_context_causal(self):
         """Context can't leak future data."""
-        from models.ml.tft.x_trend import build_context_set
+        from quantlaxmi.models.ml.tft.x_trend import build_context_set
 
         rng = np.random.default_rng(42)
         n_days, n_assets = 200, 2
@@ -316,7 +316,7 @@ class TestContextConstruction:
 
     def test_context_insufficient_history(self):
         """When not enough history, returns zeros gracefully."""
-        from models.ml.tft.x_trend import build_context_set
+        from quantlaxmi.models.ml.tft.x_trend import build_context_set
 
         rng = np.random.default_rng(42)
         features = rng.standard_normal((10, 2, 8))
@@ -339,7 +339,7 @@ class TestWalkForwardSmoke:
 
     def test_walk_forward_smoke(self):
         """X-Trend walk-forward completes on small synthetic data."""
-        from models.ml.tft.x_trend import run_xtrend_backtest, XTrendConfig
+        from quantlaxmi.models.ml.tft.x_trend import run_xtrend_backtest, XTrendConfig
 
         rng = np.random.default_rng(42)
         n_days = 500
@@ -394,7 +394,7 @@ class TestLSTDPrediction:
 
     def test_lstd_simple_chain(self):
         """LSTD on a simple 3-state chain with known solution."""
-        from models.rl.core.dynamic_programming import lstd_prediction
+        from quantlaxmi.models.rl.core.dynamic_programming import lstd_prediction
 
         # 3-state chain: s0 → s1 → s2 (terminal)
         # Features: one-hot encoding (dim=2, only s0 and s1 are non-terminal)
@@ -419,7 +419,7 @@ class TestLSTDPrediction:
 
     def test_lstd_repeated_transitions(self):
         """LSTD with many samples of the same transition averages correctly."""
-        from models.rl.core.dynamic_programming import lstd_prediction
+        from quantlaxmi.models.rl.core.dynamic_programming import lstd_prediction
 
         gamma = 0.95
         # Single self-loop state with reward=1
@@ -439,5 +439,5 @@ class TestDefaultTolerance:
     """Verify DEFAULT_TOLERANCE is exported and used."""
 
     def test_default_tolerance_value(self):
-        from models.rl.core.dynamic_programming import DEFAULT_TOLERANCE
+        from quantlaxmi.models.rl.core.dynamic_programming import DEFAULT_TOLERANCE
         assert DEFAULT_TOLERANCE == 1e-6

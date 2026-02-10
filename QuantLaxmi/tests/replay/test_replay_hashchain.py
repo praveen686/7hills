@@ -22,17 +22,17 @@ from pathlib import Path
 
 import pytest
 
-from core.events.envelope import EventEnvelope
-from core.events.serde import serialize_envelope, deserialize_envelope
-from core.events.hashing import (
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.serde import serialize_envelope, deserialize_envelope
+from quantlaxmi.core.events.hashing import (
     GENESIS,
     chain_hash,
     compute_chain,
     verify_chain,
 )
 
-from engine.live.event_log import EventLogWriter
-from engine.replay.reader import WalReader, WalValidationError
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.engine.replay.reader import WalReader, WalValidationError
 
 
 # ---------------------------------------------------------------------------

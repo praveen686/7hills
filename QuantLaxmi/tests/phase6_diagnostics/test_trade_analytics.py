@@ -11,8 +11,8 @@ import math
 import pandas as pd
 import pytest
 
-from engine.services.trade_analytics import TradeAnalyticsService, TradeAnalytics
-from engine.state import ClosedTrade
+from quantlaxmi.engine.services.trade_analytics import TradeAnalyticsService, TradeAnalytics
+from quantlaxmi.engine.state import ClosedTrade
 
 
 # ---------------------------------------------------------------------------

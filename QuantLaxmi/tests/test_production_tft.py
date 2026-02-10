@@ -23,21 +23,21 @@ import pytest
 # Skip entire module if torch is not available
 torch = pytest.importorskip("torch")
 
-from models.ml.tft.production.feature_selection import (
+from quantlaxmi.models.ml.tft.production.feature_selection import (
     FeatureSelector,
     FeatureSelectionConfig,
     StabilityReport,
 )
-from models.ml.tft.production.checkpoint_manager import (
+from quantlaxmi.models.ml.tft.production.checkpoint_manager import (
     CheckpointManager,
     CheckpointMetadata,
     _convert_numpy,
 )
-from models.ml.tft.production.inference import (
+from quantlaxmi.models.ml.tft.production.inference import (
     TFTInferencePipeline,
     InferenceResult,
 )
-from models.ml.tft.production.strategy_adapter import (
+from quantlaxmi.models.ml.tft.production.strategy_adapter import (
     TFTStrategy,
     create_strategy,
 )
@@ -88,7 +88,7 @@ def synth_targets():
 @pytest.fixture
 def mock_model():
     """Mock XTrendModel with VSN for weight extraction tests."""
-    from models.ml.tft.x_trend import XTrendConfig, XTrendModel
+    from quantlaxmi.models.ml.tft.x_trend import XTrendConfig, XTrendModel
     cfg = XTrendConfig(d_hidden=16, n_heads=2, lstm_layers=1, n_features=10, n_assets=4, seq_len=10, n_context=4)
     model = XTrendModel(cfg)
     return model
@@ -345,7 +345,7 @@ class TestHPTuner:
     """Tests for HPTuner."""
 
     def test_build_config_from_params(self):
-        from models.ml.tft.production.hp_tuner import HPTuner
+        from quantlaxmi.models.ml.tft.production.hp_tuner import HPTuner
 
         params = {
             "d_hidden": 64,
@@ -368,7 +368,7 @@ class TestHPTuner:
         assert cfg.loss_mode == "sharpe"
 
     def test_build_config_with_overrides(self):
-        from models.ml.tft.production.hp_tuner import HPTuner
+        from quantlaxmi.models.ml.tft.production.hp_tuner import HPTuner
 
         params = {"d_hidden": 64, "n_heads": 4}
         cfg = HPTuner.build_config_from_params(
@@ -388,7 +388,7 @@ class TestTFTInferencePipeline:
 
     def test_from_checkpoint_loads(self, tmp_dir):
         """Test that from_checkpoint correctly loads a model."""
-        from models.ml.tft.x_trend import XTrendConfig, XTrendModel
+        from quantlaxmi.models.ml.tft.x_trend import XTrendConfig, XTrendModel
 
         cfg = XTrendConfig(d_hidden=16, n_heads=2, lstm_layers=1,
                            n_features=10, n_assets=4, seq_len=10, n_context=4)
@@ -427,7 +427,7 @@ class TestTFTInferencePipeline:
 
     def test_normalization_uses_saved_stats(self, tmp_dir):
         """Verify that inference uses saved normalization, not recomputed."""
-        from models.ml.tft.x_trend import XTrendConfig, XTrendModel
+        from quantlaxmi.models.ml.tft.x_trend import XTrendConfig, XTrendModel
 
         cfg = XTrendConfig(d_hidden=16, n_heads=2, lstm_layers=1,
                            n_features=5, n_assets=2, seq_len=5, n_context=2)
@@ -461,7 +461,7 @@ class TestTFTStrategy:
     """Tests for TFTStrategy."""
 
     def test_implements_protocol(self):
-        from strategies.protocol import StrategyProtocol
+        from quantlaxmi.strategies.protocol import StrategyProtocol
         strategy = TFTStrategy()
         # Check required interface attributes/methods exist
         assert hasattr(strategy, "strategy_id")
@@ -534,7 +534,7 @@ class TestTrainingPipeline:
     """Unit tests for TrainingPipeline components."""
 
     def test_config_defaults(self):
-        from models.ml.tft.production.training_pipeline import TrainingPipelineConfig
+        from quantlaxmi.models.ml.tft.production.training_pipeline import TrainingPipelineConfig
         cfg = TrainingPipelineConfig()
         assert cfg.start_date == "2024-01-01"
         assert len(cfg.symbols) == 4
@@ -542,7 +542,7 @@ class TestTrainingPipeline:
         assert cfg.skip_tuning is False
 
     def test_result_structure(self):
-        from models.ml.tft.production.training_pipeline import TrainingResult
+        from quantlaxmi.models.ml.tft.production.training_pipeline import TrainingResult
         result = TrainingResult(
             n_features_initial=292,
             n_features_final=80,
@@ -553,7 +553,7 @@ class TestTrainingPipeline:
 
     def test_compute_targets(self, synth_features_3d):
         """Test target computation from synthetic features."""
-        from models.ml.tft.production.training_pipeline import (
+        from quantlaxmi.models.ml.tft.production.training_pipeline import (
             TrainingPipeline,
             TrainingPipelineConfig,
         )
@@ -582,7 +582,7 @@ class TestIntegration:
 
     def test_checkpoint_roundtrip_with_real_model(self, tmp_dir):
         """Save a real XTrendModel, load it, verify state dict matches."""
-        from models.ml.tft.x_trend import XTrendConfig, XTrendModel
+        from quantlaxmi.models.ml.tft.x_trend import XTrendConfig, XTrendModel
 
         cfg = XTrendConfig(d_hidden=16, n_heads=2, lstm_layers=1,
                            n_features=8, n_assets=4, seq_len=10, n_context=4)

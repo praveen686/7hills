@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from engine.live.event_log import EventLogWriter, read_event_log
-from engine.live.session_manifest import SessionManifest
-from core.events.envelope import EventEnvelope
-from core.events.serde import serialize_envelope, deserialize_envelope
+from quantlaxmi.engine.live.event_log import EventLogWriter, read_event_log
+from quantlaxmi.engine.live.session_manifest import SessionManifest
+from quantlaxmi.core.events.envelope import EventEnvelope
+from quantlaxmi.core.events.serde import serialize_envelope, deserialize_envelope
 
 
 # ---------------------------------------------------------------------------

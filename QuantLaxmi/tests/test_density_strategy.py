@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
-from strategies.s1_vrp.density import (
+from quantlaxmi.strategies.s1_vrp.density import (
     DEFAULT_COST_BPS,
     DEFAULT_ENTRY_PCTILE,
     DEFAULT_EXIT_PCTILE,

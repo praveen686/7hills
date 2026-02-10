@@ -12,11 +12,11 @@ from __future__ import annotations
 import asyncio
 import pytest
 
-from engine.live.event_bus import EventBus, Event
-from engine.live.event_bus import EventType as BusEventType
-from engine.live.event_log import EventLogWriter
-from engine.live.wal_tap import WalTap, WalOverflowError
-from core.events.envelope import EventEnvelope
+from quantlaxmi.engine.live.event_bus import EventBus, Event
+from quantlaxmi.engine.live.event_bus import EventType as BusEventType
+from quantlaxmi.engine.live.event_log import EventLogWriter
+from quantlaxmi.engine.live.wal_tap import WalTap, WalOverflowError
+from quantlaxmi.core.events.envelope import EventEnvelope
 
 
 # ---------------------------------------------------------------------------
