@@ -91,6 +91,9 @@ class TrainingPipelineConfig:
     production_test_window: int = 42
     production_step_size: int = 21
 
+    # Purge gap (days between train end and test start to prevent look-ahead)
+    purge_gap: int = 5
+
     # Checkpoint
     checkpoint_base_dir: str = "checkpoints"
     model_type: str = "x_trend"
@@ -321,13 +324,14 @@ class TrainingPipeline:
         fold_idx = 0
         start = 0
 
-        while start + x_cfg.train_window + x_cfg.test_window <= n_days:
+        while start + x_cfg.train_window + cfg.purge_gap + x_cfg.test_window <= n_days:
             train_end = start + x_cfg.train_window
-            test_end = min(train_end + x_cfg.test_window, n_days)
+            test_start = train_end + cfg.purge_gap
+            test_end = min(test_start + x_cfg.test_window, n_days)
 
             logger.info(
-                "Exploration fold %d: train=[%d:%d], test=[%d:%d]",
-                fold_idx, start, train_end, train_end, test_end,
+                "Exploration fold %d: train=[%d:%d], purge=%d, test=[%d:%d]",
+                fold_idx, start, train_end, cfg.purge_gap, test_start, test_end,
             )
 
             # Normalize
@@ -528,6 +532,7 @@ class TrainingPipeline:
             train_window=cfg.production_train_window,
             test_window=cfg.production_test_window,
             step_size=cfg.production_step_size,
+            purge_gap=cfg.purge_gap,
             n_assets=len(cfg.symbols),
         )
 
@@ -548,6 +553,10 @@ class TrainingPipeline:
             "HP tuning: best Sharpe=%.3f after %d trials",
             tuning_result.best_sharpe, tuning_result.n_trials_completed,
         )
+
+        # Log fANOVA HP importances
+        if tuning_result.hp_importances:
+            state["hp_importances"] = tuning_result.hp_importances
 
     # ------------------------------------------------------------------
     # Phase 5: Production pass
@@ -613,13 +622,14 @@ class TrainingPipeline:
         fold_idx = 0
         start = 0
 
-        while start + x_cfg.train_window + x_cfg.test_window <= n_days:
+        while start + x_cfg.train_window + cfg.purge_gap + x_cfg.test_window <= n_days:
             train_end = start + x_cfg.train_window
-            test_end = min(train_end + x_cfg.test_window, n_days)
+            test_start = train_end + cfg.purge_gap
+            test_end = min(test_start + x_cfg.test_window, n_days)
 
             logger.info(
-                "Production fold %d: train=[%d:%d], test=[%d:%d]",
-                fold_idx, start, train_end, train_end, test_end,
+                "Production fold %d: train=[%d:%d], purge=%d, test=[%d:%d]",
+                fold_idx, start, train_end, cfg.purge_gap, test_start, test_end,
             )
 
             # Normalize
@@ -759,7 +769,7 @@ class TrainingPipeline:
             fold_returns = []
             model.eval()
             with torch.no_grad():
-                for t in range(train_end, test_end):
+                for t in range(test_start, test_end):
                     if t < x_cfg.seq_len:
                         continue
                     for a in range(n_assets):
@@ -955,6 +965,7 @@ def main() -> None:
     parser.add_argument("--skip-feature-selection", action="store_true")
     parser.add_argument("--n-trials", type=int, default=40)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument("--purge-gap", type=int, default=5, help="Days between train/test to prevent look-ahead bias")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -969,6 +980,7 @@ def main() -> None:
         skip_feature_selection=args.skip_feature_selection,
         tuning_n_trials=args.n_trials,
         checkpoint_base_dir=args.checkpoint_dir,
+        purge_gap=args.purge_gap,
     )
 
     pipeline = TrainingPipeline(config)

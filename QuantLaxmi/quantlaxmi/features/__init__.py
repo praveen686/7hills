@@ -10,6 +10,15 @@ from quantlaxmi.features.fractional import FractionalFeatures
 from quantlaxmi.features.mock_theta import MockThetaFeatures
 from quantlaxmi.features.vedic_angular import VedicAngularFeatures
 from quantlaxmi.features.fti import FollowThroughIndex, FTI_VBT
+from quantlaxmi.features.crypto_alpha import (
+    VolatilityRegime,
+    MeanReversionZ,
+    VWAPDeviation,
+    VolumeProfile,
+    ReturnDistribution,
+    MultiTimeframeMomentum,
+    RangePosition,
+)
 
 __all__ = [
     "Feature",
@@ -25,4 +34,11 @@ __all__ = [
     "VedicAngularFeatures",
     "FollowThroughIndex",
     "FTI_VBT",
+    "VolatilityRegime",
+    "MeanReversionZ",
+    "VWAPDeviation",
+    "VolumeProfile",
+    "ReturnDistribution",
+    "MultiTimeframeMomentum",
+    "RangePosition",
 ]

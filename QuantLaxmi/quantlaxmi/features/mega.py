@@ -233,6 +233,7 @@ class MegaFeatureBuilder:
             ("settle", self._build_settlement_features, (ticker, start_date, end_date)),
             ("ext_options", self._build_extended_options_features, (ticker, start_date, end_date)),
             ("divergence_flow", self._build_divergence_flow_features, (start_date, end_date)),
+            ("crypto_alpha", self._build_crypto_alpha_features, (start_date, end_date)),
         ]
 
         for name, fn, args in builders:
@@ -2202,4 +2203,71 @@ class MegaFeatureBuilder:
             return builder.build(start_date, end_date, store=self.store)
         except Exception:
             logger.exception("Divergence flow features failed")
+            return pd.DataFrame()
+
+    def _build_crypto_alpha_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """7 crypto-specific alpha features from BTC/ETH kline data.
+
+        Features: ca_vol_regime, ca_vol_zscore, ca_mr_z_24, ca_mr_z_72,
+        ca_mr_z_168, ca_vwap_dev, ca_vol_profile, ca_ret_skew, ca_ret_kurt,
+        ca_mtf_momentum, ca_range_pos — all causal.
+        """
+        try:
+            from quantlaxmi.features.crypto_alpha import (
+                VolatilityRegime,
+                MeanReversionZ,
+                VWAPDeviation,
+                VolumeProfile,
+                ReturnDistribution,
+                MultiTimeframeMomentum,
+                RangePosition,
+            )
+
+            # Load BTC/ETH kline data from store
+            btc = self.store.load("binance_kline", start_date=start_date, end_date=end_date)
+            if btc is None or btc.empty:
+                return pd.DataFrame()
+
+            # Ensure required columns exist
+            needed = {"close", "high", "low", "volume"}
+            if not needed.issubset(set(btc.columns)):
+                return pd.DataFrame()
+
+            features = []
+            prefix = "ca_"
+
+            vol_regime = VolatilityRegime(name=f"{prefix}vol_regime")
+            features.append(vol_regime.transform(btc))
+
+            mr_z = MeanReversionZ(name=f"{prefix}mr_z")
+            features.append(mr_z.transform(btc))
+
+            vwap = VWAPDeviation(name=f"{prefix}vwap_dev")
+            features.append(vwap.transform(btc))
+
+            vol_prof = VolumeProfile(name=f"{prefix}vol_profile")
+            features.append(vol_prof.transform(btc))
+
+            ret_dist = ReturnDistribution(name=f"{prefix}ret_dist")
+            features.append(ret_dist.transform(btc))
+
+            mtf = MultiTimeframeMomentum(name=f"{prefix}mtf_momentum")
+            features.append(mtf.transform(btc))
+
+            rng = RangePosition(name=f"{prefix}range_pos")
+            features.append(rng.transform(btc))
+
+            # Concatenate all feature DataFrames
+            valid = [f for f in features if f is not None and not f.empty]
+            if not valid:
+                return pd.DataFrame()
+
+            result = pd.concat(valid, axis=1)
+            logger.info("Crypto alpha features: %d columns", len(result.columns))
+            return result
+
+        except Exception:
+            logger.exception("Crypto alpha features failed")
             return pd.DataFrame()

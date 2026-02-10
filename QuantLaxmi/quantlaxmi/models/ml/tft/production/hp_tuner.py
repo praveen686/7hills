@@ -70,6 +70,7 @@ class TunerConfig:
     train_window: int = 150
     test_window: int = 42
     step_size: int = 42
+    purge_gap: int = 5
 
     # Fixed settings (not tuned)
     n_assets: int = 4
@@ -92,6 +93,7 @@ class TuningResult:
     elapsed_seconds: float
     study: Optional[Any] = None  # optuna.Study
     all_trials: list[dict[str, Any]] = field(default_factory=list)
+    hp_importances: dict[str, float] = field(default_factory=dict)
 
 
 # ============================================================================
@@ -229,6 +231,9 @@ class HPTuner:
         )
         logger.info("Best params: %s", best_params)
 
+        # fANOVA: HP importance analysis
+        hp_importances = self._compute_hp_importances(study)
+
         return TuningResult(
             best_params=best_params,
             best_sharpe=best_sharpe,
@@ -236,6 +241,7 @@ class HPTuner:
             elapsed_seconds=elapsed,
             study=study,
             all_trials=all_trials,
+            hp_importances=hp_importances,
         )
 
     def _objective(
@@ -276,12 +282,13 @@ class HPTuner:
         fold_idx = 0
         start = 0
 
-        while start + cfg.train_window + cfg.test_window <= n_days:
+        while start + cfg.train_window + cfg.purge_gap + cfg.test_window <= n_days:
             if fold_idx >= cfg.n_folds_per_trial:
                 break
 
             train_end = start + cfg.train_window
-            test_end = min(train_end + cfg.test_window, n_days)
+            test_start = train_end + cfg.purge_gap
+            test_end = min(test_start + cfg.test_window, n_days)
 
             # Normalize using train stats
             train_feats = features[start:train_end]
@@ -309,7 +316,7 @@ class HPTuner:
             # Train abbreviated model
             sharpe = self._train_and_evaluate(
                 x_cfg, episodes, norm_features, targets,
-                train_end, test_end, n_assets, rng,
+                test_start, test_end, n_assets, rng,
             )
 
             fold_sharpes.append(sharpe)
@@ -578,6 +585,44 @@ class HPTuner:
         if std_r < 1e-8:
             return 0.0
         return float((mean_r / std_r) * math.sqrt(252))
+
+    # ------------------------------------------------------------------
+    # fANOVA: HP importance analysis
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_hp_importances(study: "optuna.Study") -> dict[str, float]:
+        """Compute HP importances using fANOVA after tuning.
+
+        Returns dict of {param_name: importance_fraction} sorted by importance.
+        Falls back to empty dict if insufficient trials or import errors.
+        """
+        try:
+            from optuna.importance import get_param_importances, FanovaImportanceEvaluator
+
+            completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+            if len(completed) < 3:
+                logger.warning(
+                    "fANOVA needs >= 3 completed trials, got %d — skipping",
+                    len(completed),
+                )
+                return {}
+
+            importances = get_param_importances(
+                study, evaluator=FanovaImportanceEvaluator(),
+            )
+
+            logger.info("=" * 60)
+            logger.info("fANOVA Hyperparameter Importance")
+            logger.info("=" * 60)
+            for param, importance in importances.items():
+                logger.info("  %-25s  %.1f%%", param, importance * 100)
+            logger.info("=" * 60)
+
+            return importances
+        except Exception as e:
+            logger.warning("fANOVA computation failed: %s", e)
+            return {}
 
     # ------------------------------------------------------------------
     # Utility: build config from best params
