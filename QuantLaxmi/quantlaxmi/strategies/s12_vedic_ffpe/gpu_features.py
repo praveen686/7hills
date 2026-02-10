@@ -19,11 +19,18 @@ from __future__ import annotations
 import math
 import time
 
-import numpy as np
-import torch
-import torch.nn.functional as F
-
 import logging
+
+import numpy as np
+
+try:
+    import torch
+    import torch.nn.functional as F
+    HAS_TORCH = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
+    HAS_TORCH = False
 
 from quantlaxmi.features.fractional import estimate_alpha_waiting
 from quantlaxmi.features.mock_theta import ramanujan_volatility_distortion
