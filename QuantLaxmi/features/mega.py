@@ -1,6 +1,6 @@
 """MegaFeatureBuilder -- aggregate ALL available data sources into a daily feature matrix.
 
-Extracts ~150-200 features from every available data source, aligns them to
+Extracts ~160-212 features from every available data source, aligns them to
 daily frequency, and returns a single DataFrame suitable for the TFT model.
 
 Feature groups
@@ -15,6 +15,7 @@ Feature groups
 8. Crypto Signals     (Binance BTC/ETH)          ~15 features
 9. Futures Premium    (nse_settlement_prices)    ~10 features
 10. FII/DII Activity  (nse_fii_stats)            ~10 features
+11. Divergence Flow   (nse_participant_oi DFF)   ~12 features
 
 Design principles
 -----------------
@@ -52,6 +53,8 @@ logger = logging.getLogger(__name__)
 
 from data._paths import DATA_ROOT as _DATA_ROOT, TICK_DIR as _TICK_DIR, \
     KITE_1MIN_DIR as _KITE_1MIN_DIR, BINANCE_DIR as _BINANCE_DIR
+
+from features.divergence_flow import DivergenceFlowBuilder, DFFConfig
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +149,8 @@ class MegaFeatureBuilder:
     14. Market Activity (from nse_market_activity): F&O contract/value ratios
     15. MWPL/Ban Stress (from nse_combined_oi, nse_security_ban): ban proximity, stress
     16. Settlement Basis (from nse_settlement_prices): futures settlement basis
+    17. Extended Options (from nse_fo_bhavcopy): ATM IV, gamma exposure, theta, max pain
+    18. Divergence Flow (from nse_participant_oi DFF): Helmholtz decomposition signals
     """
 
     def __init__(
@@ -227,6 +232,7 @@ class MegaFeatureBuilder:
             ("mwpl", self._build_mwpl_stress_features, (ticker, start_date, end_date)),
             ("settle", self._build_settlement_features, (ticker, start_date, end_date)),
             ("ext_options", self._build_extended_options_features, (ticker, start_date, end_date)),
+            ("divergence_flow", self._build_divergence_flow_features, (start_date, end_date)),
         ]
 
         for name, fn, args in builders:
@@ -2176,4 +2182,24 @@ class MegaFeatureBuilder:
             return builder.build(ticker, start_date, end_date, store=self.store)
         except Exception:
             logger.exception("Extended options features failed for %s", ticker)
+            return pd.DataFrame()
+
+    # ==================================================================
+    # GROUP 18: Divergence Flow Field (nse_participant_oi DFF)  (~12 features)
+    # ==================================================================
+
+    def _build_divergence_flow_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """12 DFF features from Helmholtz decomposition of participant OI flows.
+
+        Features: dff_d_hat, dff_r_hat, dff_z_d, dff_z_r, dff_interaction,
+        dff_energy, dff_composite, dff_d_hat_5d, dff_r_hat_5d, dff_energy_z,
+        dff_regime, dff_momentum — all causal.
+        """
+        try:
+            builder = DivergenceFlowBuilder(config=DFFConfig())
+            return builder.build(start_date, end_date, store=self.store)
+        except Exception:
+            logger.exception("Divergence flow features failed")
             return pd.DataFrame()
