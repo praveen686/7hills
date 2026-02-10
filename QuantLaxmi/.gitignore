@@ -60,3 +60,4 @@ checkpoints/
 # ===== DuckDB =====
 *.duckdb
 *.duckdb.wal
+wandb/
