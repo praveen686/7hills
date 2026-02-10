@@ -281,9 +281,9 @@ pub enum Commands {
 
     /// Run live trading mode
     Live {
-        /// Path to configuration file (default: $QUANTLAXMI_CONFIG_ROOT/live.toml or configs/live.toml)
-        #[arg(short, long)]
-        config: Option<String>,
+        /// Path to configuration file
+        #[arg(short, long, default_value = "configs/live.toml")]
+        config: String,
 
         /// Initial capital (USD)
         #[arg(long, default_value_t = 10000.0)]
@@ -383,7 +383,7 @@ pub enum Commands {
         #[arg(long, default_value_t = 10000.0)]
         initial_capital: f64,
 
-        /// Fee in basis points (e.g., 10 = 0.1%)
+        /// Fee in basis points (e.g., 10 = 0.1% retail taker)
         #[arg(long, default_value_t = 10.0)]
         fee_bps: f64,
 
@@ -610,12 +610,7 @@ async fn async_main() -> anyhow::Result<()> {
         Commands::Live {
             config,
             initial_capital,
-        } => {
-            let config_path = config.unwrap_or_else(|| {
-                RunnerConfig::default_path(&quantlaxmi_core::ExecutionMode::Live)
-            });
-            run_live_mode(&config_path, initial_capital).await
-        }
+        } => run_live_mode(&config, initial_capital).await,
         Commands::CapturePerpTicker {
             symbol,
             out,
