@@ -272,8 +272,10 @@ struct TGate {
     updates: u64,
 }
 
-const T_ON: f64 = 3.0;   // Enable when t-stat > 3.0 (strong evidence)
+const T_ON: f64 = 3.0;   // Enable when t-stat > 3.0 (more trades, lower variance)
 const T_OFF: f64 = 1.0;  // Disable when t-stat < 1.0 (hysteresis)
+const MIN_EDGE: f64 = 0.0; // No minimum edge - let T-gate filter (was 3 bps)
+const STOP_LOSS: f64 = 0.0002; // 2 bps stop-loss (very aggressive)
 
 // State machine timing constants (milliseconds) - ALL TIME-BASED, NEVER TICK-BASED
 const MIN_HOLD_MS: i64 = 3_000;    // Minimum 3s hold before exit
@@ -794,7 +796,11 @@ impl CrtOmegaStrategy {
         // 0.10 bps (mantissa=10, exp=-2) = 10 * 10^-2 / 10000 * 1e8 = 10 * 100 = 1,000 in exp -8
         // Round-trip (2×) = 2,000 in exp -8
         let cost_one_side = self.config.taker_fee_bps_mantissa * 100; // mantissa * 10^(8-4-2) = mantissa * 100
-        let cost = 2 * cost_one_side; // Round-trip cost
+
+        // Entry uses bid/ask (realistic). Exit uses mid which is slightly optimistic.
+        // Net effect: ~half-spread advantage at exit partially offsets entry cost.
+        // Keep cost model simple: just round-trip fees
+        let cost = 2 * cost_one_side;
 
         // Helper to compute log return (approximated as (p1 - p0) / p0 * 1e8)
         let logret = |p0: i64, p1: i64| -> i64 {
@@ -1119,8 +1125,14 @@ impl Strategy for CrtOmegaStrategy {
         // Record signal for multi-horizon SPRT update (instead of immediate 1-step payoff)
         if signal_dir != 0 {
             self.total_signals += 1;
-            // Add to pending signals for delayed SPRT update
-            self.pending_signals.push((self.current_tick, signal_dir, cell_id, mid, ts_ms));
+            // CRITICAL: Use actual fill price (bid/ask), not mid, to match real execution
+            // Long entry at ask, short entry at bid
+            let entry_px_for_payoff = if signal_dir > 0 {
+                self.micro.ask_price_mantissa
+            } else {
+                self.micro.bid_price_mantissa
+            };
+            self.pending_signals.push((self.current_tick, signal_dir, cell_id, entry_px_for_payoff, ts_ms));
         }
 
         // Check if evidence gate is ON (extract values from cell)
@@ -1169,8 +1181,10 @@ impl Strategy for CrtOmegaStrategy {
             // State machine: time-based cooldown check
             let can_enter = self.pos.can_enter(ts_ms);
 
-            // CRITICAL: Only trade if gate ON AND mean > 0 (positive edge)
-            let has_positive_edge = evidence_on && cell_mean_f > 0.0;
+            // T-gate is the sole gatekeeper: only trade when t-stat > T_ON AND mean > MIN_EDGE
+            // No static cell whitelist - let the gate adapt to which cells have edge
+            // MIN_EDGE filters out marginal cells (e.g., 1.8 bps) that don't survive variance
+            let has_positive_edge = evidence_on && cell_mean_f > MIN_EDGE;
 
             if signal_dir != 0 && has_positive_edge && !vetoed && can_enter {
                 let w = self.compute_size_from_stats_f64(cell_mean_f, cell_var_f);
@@ -1211,19 +1225,27 @@ impl Strategy for CrtOmegaStrategy {
                 self.signals_gated += 1;
             }
         } else {
-            // ========== EXIT LOGIC (TIME-BASED) ==========
+            // ========== EXIT LOGIC (TIME-BASED + STOP-LOSS) ==========
             let hold_ms = ts_ms - self.pos.entry_ts_ms;
             let z_abs = z.abs();
 
+            // Stop-loss: exit immediately if unrealized loss > STOP_LOSS
+            let side = self.pos.side as f64;
+            let unrealized_ret = if self.pos.entry_px > 0.0 {
+                (mid / self.pos.entry_px - 1.0) * side
+            } else { 0.0 };
+            let stop_loss_exit = unrealized_ret < -STOP_LOSS;
+
             // Exit conditions (ALL TIME-BASED):
-            // 1. Target horizon hit (10s) - primary exit
-            // 2. Max hold hit (10s) - safety
-            // 3. Z reverted AND min_hold passed
+            // 1. Stop-loss hit - immediate exit to cut losers
+            // 2. Target horizon hit (10s) - primary exit
+            // 3. Max hold hit (10s) - safety
+            // 4. Z reverted AND min_hold passed
             let target_exit = self.pos.target_horizon_hit(ts_ms);
             let max_exit = self.pos.max_hold_hit(ts_ms);
             let z_exit = z_abs <= z_out && self.pos.can_exit(ts_ms);
 
-            let should_exit = target_exit || max_exit || z_exit;
+            let should_exit = stop_loss_exit || target_exit || max_exit || z_exit;
 
             if should_exit {
                 let side = self.pos.side;

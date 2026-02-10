@@ -1,0 +1,21 @@
+[package]
+name = "quantlaxmi-pybridge"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 bridge for hot-path Python <-> Rust interop"
+
+[lib]
+name = "quantlaxmi_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { workspace = true, features = ["extension-module"] }
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-events = { path = "../quantlaxmi-events" }
+prost = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }

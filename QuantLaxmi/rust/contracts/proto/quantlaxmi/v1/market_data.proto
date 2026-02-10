@@ -1,0 +1,69 @@
+// QuantLaxmi Signal Contract v1 — Market Data
+//
+// Maps to:
+//   Python: TickPayload, Bar1mPayload (payloads.py)
+//   Rust:   MarketEvent, QuoteEvent, DepthEvent (models/lib.rs, depth.rs)
+
+syntax = "proto3";
+package quantlaxmi.v1;
+
+import "quantlaxmi/v1/common.proto";
+
+// Raw market tick.
+message Tick {
+  int64  instrument_token = 1;
+  double ltp              = 2;   // last traded price
+  int64  volume           = 3;
+  int64  oi               = 4;   // open interest
+  double bid              = 5;
+  double ask              = 6;
+  int64  bid_qty          = 7;
+  int64  ask_qty          = 8;
+}
+
+// 1-minute OHLCV bar.
+message Bar1m {
+  double open    = 1;
+  double high    = 2;
+  double low     = 3;
+  double close   = 4;
+  int64  volume  = 5;
+  int64  oi      = 6;
+  double vwap    = 7;
+  string bar_ts  = 8;   // ISO timestamp for bar open
+}
+
+// L1 quote (fixed-point, from Rust data crate).
+message QuoteEvent {
+  Timestamp ts                = 1;
+  string    symbol            = 2;
+  int64     bid_price_mantissa = 3;
+  int64     ask_price_mantissa = 4;
+  int64     bid_qty_mantissa   = 5;
+  int64     ask_qty_mantissa   = 6;
+  int32     price_exponent     = 7;
+  int32     qty_exponent       = 8;
+  string    venue              = 9;
+  CorrelationContext ctx       = 10;
+}
+
+// L2 depth level.
+message DepthLevel {
+  int64 price_mantissa = 1;
+  int64 qty_mantissa   = 2;
+}
+
+// L2 depth event.
+message DepthEvent {
+  Timestamp ts              = 1;
+  string    tradingsymbol   = 2;
+  uint64    first_update_id = 3;
+  uint64    last_update_id  = 4;
+  int32     price_exponent  = 5;
+  int32     qty_exponent    = 6;
+  repeated DepthLevel bids  = 7;
+  repeated DepthLevel asks  = 8;
+  bool      is_snapshot     = 9;
+  IntegrityTier integrity_tier = 10;
+  optional string source    = 11;
+}

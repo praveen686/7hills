@@ -1,0 +1,48 @@
+// QuantLaxmi Signal Contract v1 — EventEnvelope
+//
+// Top-level wrapper for ALL events crossing the Python <-> Rust boundary.
+// Maps to:
+//   Python: EventEnvelope (core/events/envelope.py)
+//   Rust:   EventEnvelope + WAL records
+
+syntax = "proto3";
+package quantlaxmi.v1;
+
+import "quantlaxmi/v1/common.proto";
+import "quantlaxmi/v1/signal.proto";
+import "quantlaxmi/v1/order.proto";
+import "quantlaxmi/v1/fill.proto";
+import "quantlaxmi/v1/position.proto";
+import "quantlaxmi/v1/market_data.proto";
+import "quantlaxmi/v1/risk.proto";
+
+// Canonical event envelope. All events are wrapped in this container.
+// JSON serde (sorted keys, compact separators) remains for WAL/audit trail.
+// Protobuf encoding is used ONLY for the live Python<->Rust signal boundary.
+message EventEnvelope {
+  string ts           = 1;   // UTC ISO-8601 (microsecond precision)
+  uint64 seq          = 2;   // monotonic sequence number per run
+  string run_id       = 3;   // stable session identifier
+  string event_type   = 4;   // EventType string value
+  string source       = 5;   // engine module name
+  string strategy_id  = 6;   // empty for market-only events
+  string symbol       = 7;   // empty where irrelevant
+
+  oneof payload {
+    Tick              tick           = 10;
+    Bar1m             bar_1m        = 11;
+    Signal            signal        = 12;
+    GateDecision      gate_decision = 13;
+    OrderIntent       order         = 14;
+    ExecutionFill     fill          = 15;
+    RiskAlert         risk_alert    = 16;
+    PortfolioSnapshot snapshot      = 17;
+    PositionUpdate    position      = 18;
+    DecisionEvent     decision      = 19;
+  }
+}
+
+// Batch of envelopes (for bulk transfer).
+message EventBatch {
+  repeated EventEnvelope events = 1;
+}

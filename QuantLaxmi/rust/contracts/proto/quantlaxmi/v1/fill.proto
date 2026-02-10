@@ -1,0 +1,34 @@
+// QuantLaxmi Signal Contract v1 — Execution Fill
+//
+// Maps to:
+//   Python: FillPayload (payloads.py)
+//   Rust:   FillEvent, ExecutionFillRecord (models/events.rs)
+
+syntax = "proto3";
+package quantlaxmi.v1;
+
+import "quantlaxmi/v1/common.proto";
+
+// Execution fill (from broker or simulator).
+message ExecutionFill {
+  string     schema_version      = 1;
+  int64      ts_ns               = 2;   // nanoseconds since epoch
+  string     session_id          = 3;
+  uint64     seq                 = 4;   // monotonic sequence
+  optional uint64 parent_intent_seq = 5;
+  string     strategy_id         = 6;
+  string     symbol              = 7;
+  Side       side                = 8;
+  FixedPoint quantity            = 9;
+  FixedPoint price               = 10;
+  optional FixedPoint fee        = 11;
+  string     venue               = 12;
+  string     correlation_id      = 13;  // UUID
+  FillType   fill_type           = 14;
+  string     digest              = 15;  // SHA-256 hex of canonical bytes
+  string     fill_id             = 16;
+  string     order_id            = 17;  // UUID
+  optional string parent_decision_id = 18;  // UUID
+  string     commission_asset    = 19;
+  bool       is_final            = 20;  // true if order fully filled
+}

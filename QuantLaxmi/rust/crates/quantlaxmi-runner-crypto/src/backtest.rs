@@ -1037,7 +1037,7 @@ pub struct ExchangeConfig {
 impl Default for ExchangeConfig {
     fn default() -> Self {
         Self {
-            fee_bps: 10.0, // 0.1% taker fee
+            fee_bps: 10.0, // 10 bps = 0.1% (Binance retail taker fee)
             initial_cash: 10_000.0,
             use_perp_prices: true,
         }

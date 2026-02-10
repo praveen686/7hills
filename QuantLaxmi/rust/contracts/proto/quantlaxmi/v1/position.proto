@@ -1,0 +1,48 @@
+// QuantLaxmi Signal Contract v1 — Position Types
+//
+// Maps to:
+//   Python: PortfolioState, SnapshotPayload (risk/, payloads.py)
+//   Rust:   PositionUpdate, PortfolioSnapshot (models/events.rs)
+
+syntax = "proto3";
+package quantlaxmi.v1;
+
+import "quantlaxmi/v1/common.proto";
+
+// Single instrument position.
+message PositionUpdate {
+  string symbol          = 1;
+  double quantity        = 2;
+  double avg_price       = 3;
+  double unrealized_pnl  = 4;
+  string strategy_id     = 5;
+  string direction       = 6;   // "long", "short", "flat"
+  double weight          = 7;   // portfolio weight
+}
+
+// Full portfolio snapshot (periodic).
+message PortfolioSnapshot {
+  Timestamp ts               = 1;
+  double    total_equity     = 2;
+  double    peak_equity      = 3;
+  double    cash             = 4;
+  double    margin_used      = 5;
+  double    portfolio_dd     = 6;
+  double    total_exposure   = 7;
+  double    vpin             = 8;
+  int32     position_count   = 9;
+  string    regime           = 10;
+  repeated PositionUpdate positions         = 11;
+  map<string, double> strategy_equity       = 12;
+  map<string, double> strategy_dd           = 13;
+  repeated string     active_breakers       = 14;
+}
+
+// Position key for lookups.
+message PositionKey {
+  string strategy_id     = 1;
+  string symbol          = 2;
+  InstrumentType instrument_type = 3;
+  double strike          = 4;
+  string expiry          = 5;
+}

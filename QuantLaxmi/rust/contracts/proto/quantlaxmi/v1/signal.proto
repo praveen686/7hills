@@ -1,0 +1,85 @@
+// QuantLaxmi Signal Contract v1 — Signal & TargetPosition
+//
+// Maps to:
+//   Python: Signal (protocol.py), SignalPayload (payloads.py)
+//   Rust:   DecisionEvent, SignalEvent (models/events.rs)
+
+syntax = "proto3";
+package quantlaxmi.v1;
+
+import "quantlaxmi/v1/common.proto";
+
+// Strategy signal (pre-gate). Emitted by Python strategies via scan().
+message Signal {
+  string          strategy_id     = 1;
+  string          symbol          = 2;
+  string          direction       = 3;   // "long", "short", "flat"
+  double          conviction      = 4;   // [0, 1]
+  InstrumentType  instrument_type = 5;
+  double          strike          = 6;   // 0.0 for futures
+  string          expiry          = 7;   // ISO date, empty for futures
+  int32           ttl_bars        = 8;   // time-to-live in bars
+  string          regime          = 9;   // regime label at signal time
+  string          reasoning       = 10;  // human-readable explanation
+  map<string, string> metadata    = 11;  // strategy-specific key-values
+}
+
+// Allocated target position (post-MetaAllocator, pre-gate).
+message TargetPosition {
+  string          strategy_id     = 1;
+  string          symbol          = 2;
+  string          direction       = 3;   // "long", "short", "flat"
+  double          weight          = 4;   // portfolio weight [0, 1]
+  InstrumentType  instrument_type = 5;
+  double          strike          = 6;
+  string          expiry          = 7;
+  double          conviction      = 8;
+  map<string, string> metadata    = 9;
+}
+
+// Rust-side decision event (fixed-point, deterministic).
+message DecisionEvent {
+  Timestamp          ts                        = 1;
+  string             decision_id               = 2;   // UUID
+  string             strategy_id               = 3;
+  string             symbol                    = 4;
+  string             decision_type             = 5;   // "entry", "exit", "rebalance", "hold"
+  int32              direction                 = 6;   // +1=long, -1=short, 0=neutral
+  FixedPoint         target_qty                = 7;
+  FixedPoint         reference_price           = 8;   // mid price at decision time
+  MarketSnapshot     market_snapshot           = 9;
+  int64              confidence_mantissa       = 10;  // exponent=-4 (10000=1.0)
+  string             metadata_json             = 11;  // serde_json::Value as JSON string
+  CorrelationContext ctx                       = 12;
+}
+
+// Versioned market snapshot at decision time.
+message MarketSnapshot {
+  oneof version {
+    MarketSnapshotV1 v1 = 1;
+    MarketSnapshotV2 v2 = 2;
+  }
+}
+
+message MarketSnapshotV1 {
+  int64 bid_price_mantissa = 1;
+  int64 ask_price_mantissa = 2;
+  int64 bid_qty_mantissa   = 3;
+  int64 ask_qty_mantissa   = 4;
+  int32 price_exponent     = 5;
+  int32 qty_exponent       = 6;
+  int64 spread_bps_mantissa = 7;  // exponent=-2
+  int64 book_ts_ns         = 8;
+}
+
+message MarketSnapshotV2 {
+  int64  bid_price_mantissa = 1;
+  int64  ask_price_mantissa = 2;
+  int64  bid_qty_mantissa   = 3;
+  int64  ask_qty_mantissa   = 4;
+  int32  price_exponent     = 5;
+  int32  qty_exponent       = 6;
+  int64  spread_bps_mantissa = 7;
+  int64  book_ts_ns         = 8;
+  uint32 l1_state_bits      = 9;  // 2-bit FieldState slots per field
+}

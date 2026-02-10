@@ -1,0 +1,45 @@
+// QuantLaxmi Signal Contract v1 — Order Types
+//
+// Maps to:
+//   Python: OrderPayload (payloads.py)
+//   Rust:   OrderEvent, OrderIntentRecord (models/events.rs)
+
+syntax = "proto3";
+package quantlaxmi.v1;
+
+import "quantlaxmi/v1/common.proto";
+
+// Order intent (pre-execution). Flows Python → Rust executor.
+message OrderIntent {
+  string          schema_version  = 1;
+  int64           ts_ns           = 2;   // nanoseconds since epoch
+  string          session_id      = 3;
+  uint64          seq             = 4;   // monotonic sequence
+  string          strategy_id     = 5;
+  string          symbol          = 6;
+  Side            side            = 7;
+  OrderType       order_type      = 8;
+  FixedPoint      quantity        = 9;
+  optional FixedPoint limit_price = 10;
+  Permission      permission      = 11;
+  optional string refuse_reason   = 12;
+  string          correlation_id  = 13;  // UUID
+  string          digest          = 14;  // SHA-256 hex of canonical bytes
+}
+
+// Order status update (from broker or simulator).
+message OrderStatusUpdate {
+  string      order_id          = 1;   // UUID
+  string      parent_decision_id = 2;  // UUID link to originating decision
+  string      intent_id         = 3;   // UUID
+  Timestamp   ts                = 4;
+  string      symbol            = 5;
+  Side        side              = 6;
+  OrderStatus status            = 7;
+  double      filled_quantity   = 8;
+  double      avg_price         = 9;
+  double      commission        = 10;
+  string      broker_order_id   = 11;
+  string      rejection_reason  = 12;
+  string      product_type      = 13;  // "NRML", "MIS", etc.
+}

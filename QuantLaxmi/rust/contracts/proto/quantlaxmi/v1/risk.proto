@@ -1,0 +1,71 @@
+// QuantLaxmi Signal Contract v1 — Risk Management
+//
+// Maps to:
+//   Python: GateResult, RiskCheckResult, RiskLimits, RiskAlertPayload
+//   Rust:   RiskEvent, RiskConfig, RiskViolation, StrategyCircuitBreaker
+
+syntax = "proto3";
+package quantlaxmi.v1;
+
+import "quantlaxmi/v1/common.proto";
+import "quantlaxmi/v1/signal.proto";
+
+// Risk gate result enum.
+enum GateResult {
+  GATE_RESULT_UNSPECIFIED          = 0;
+  GATE_RESULT_PASS                 = 1;
+  GATE_RESULT_BLOCK_VPIN           = 2;
+  GATE_RESULT_BLOCK_DD_PORTFOLIO   = 3;
+  GATE_RESULT_BLOCK_DD_STRATEGY    = 4;
+  GATE_RESULT_BLOCK_CONCENTRATION  = 5;
+  GATE_RESULT_BLOCK_EXPOSURE       = 6;
+  GATE_RESULT_REDUCE_SIZE          = 7;
+}
+
+// Gate decision (result of risk check on a signal).
+message GateDecision {
+  uint64       signal_seq       = 1;   // sequence of upstream Signal event
+  GateResult   gate             = 2;
+  bool         approved         = 3;
+  double       adjusted_weight  = 4;
+  string       reason           = 5;
+  double       vpin             = 6;
+  double       portfolio_dd     = 7;
+  double       strategy_dd      = 8;
+  double       total_exposure   = 9;
+}
+
+// Risk alert (breaker, VPIN, drawdown).
+message RiskAlert {
+  string alert_type      = 1;   // "vpin_toxic", "dd_portfolio", "breaker_on", etc.
+  string previous_state  = 2;
+  string new_state       = 3;
+  double threshold       = 4;
+  double current_value   = 5;
+  string detail          = 6;
+  optional string symbol      = 7;
+  optional string strategy_id = 8;
+}
+
+// Risk limits configuration.
+message RiskLimits {
+  double max_portfolio_dd       = 1;   // default 0.05
+  double max_strategy_dd        = 2;   // default 0.03
+  double max_single_instrument  = 3;   // default 0.20
+  double max_single_stock_fno   = 4;   // default 0.05
+  double vpin_block_threshold   = 5;   // default 0.70
+  double max_total_exposure     = 6;   // default 1.50
+  double max_correlated_exposure = 7;  // default 0.40
+}
+
+// Strategy circuit breaker state.
+message CircuitBreakerState {
+  string strategy_id        = 1;
+  bool   is_open            = 2;
+  uint32 consecutive_losses = 3;
+  uint32 loss_threshold     = 4;
+  optional int64 opened_at_ns = 5;  // nanoseconds since epoch
+  uint64 cooldown_secs      = 6;
+  double daily_pnl          = 7;
+  double daily_loss_limit   = 8;
+}

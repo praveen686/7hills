@@ -1,4 +1,4 @@
-.PHONY: help install test test-unit lint format run-api run-ui run-engine collect-nse collect-telegram rust-build rust-test rust-check
+.PHONY: help install test test-unit lint format run-api run-ui run-engine collect-nse collect-telegram rust-build rust-test rust-check proto pybridge-build pybridge-test
 
 help:                     ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -44,3 +44,13 @@ rust-test:                ## Run Rust tests
 
 rust-check:               ## Check Rust compilation
 	cd rust && cargo check
+
+proto:                    ## Compile protobuf for Python + Rust
+	@echo "Protobuf stubs: use 'protoc' or 'buf generate' with rust/contracts/proto/"
+	@echo "Proto files at: rust/contracts/proto/quantlaxmi/v1/*.proto"
+
+pybridge-build:           ## Build PyO3 extension (quantlaxmi_rs)
+	cd rust/crates/quantlaxmi-pybridge && maturin develop --release
+
+pybridge-test:            ## Test PyO3 bridge import
+	python -c "import quantlaxmi_rs; print(f'quantlaxmi_rs v{quantlaxmi_rs.__version__}')"

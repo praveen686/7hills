@@ -41,6 +41,9 @@ members = [
     # Application binaries
     "apps/quantlaxmi-india",
     "apps/quantlaxmi-crypto",
+
+    # PyO3 bridge (Python hot-path acceleration)
+    "crates/quantlaxmi-pybridge",
 ]
 resolver = "2"
 
@@ -84,6 +87,9 @@ arrow = { version = "53", default-features = false, features = ["ipc"] }
 parquet = { version = "53", default-features = false, features = ["arrow", "snap"] }
 good_lp = { version = "1.8", default-features = false, features = ["microlp"] }
 tempfile = "3.10"
+prost = "0.13"
+prost-types = "0.13"
+pyo3 = "0.22"
 
 # Memory-safe build profiles to prevent OOM during compilation/tests
 [profile.dev]
