@@ -205,7 +205,23 @@ _TIER2 = [
         optional=True,
         base_url="https://www.nseindia.com",
     ),
+    NSEFile(
+        name="pre_open_fo.json",
+        url_template="api/market-data-pre-open?key=FO",
+        date_format="DDMMYYYY",
+        tier=2,
+        optional=True,
+        base_url="https://www.nseindia.com",
+    ),
+    NSEFile(
+        name="oi_spurts.json",
+        url_template="api/live-analysis-oi-spurts-contracts",
+        date_format="DDMMYYYY",
+        tier=2,
+        optional=True,
+        base_url="https://www.nseindia.com",
+    ),
 ]
 
-# All 23 files
+# All 25 files
 ALL_FILES: list[NSEFile] = _TIER1 + _TIER2

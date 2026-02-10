@@ -137,7 +137,7 @@ class TestNSEFileUrl:
 
 class TestAllFiles:
     def test_total_file_count(self):
-        assert len(ALL_FILES) == 23
+        assert len(ALL_FILES) == 25
 
     def test_tier1_count(self):
         tier1 = [f for f in ALL_FILES if f.tier == 1]
@@ -145,7 +145,7 @@ class TestAllFiles:
 
     def test_tier2_count(self):
         tier2 = [f for f in ALL_FILES if f.tier == 2]
-        assert len(tier2) == 14
+        assert len(tier2) == 16
 
     def test_unique_names(self):
         names = [f.name for f in ALL_FILES]
@@ -158,7 +158,7 @@ class TestAllFiles:
 
     def test_optional_files(self):
         optional = {f.name for f in ALL_FILES if f.optional}
-        assert optional == {"security_ban.csv", "bulk_deals.csv", "block_deals.csv", "top_gainers.json"}
+        assert optional == {"security_ban.csv", "bulk_deals.csv", "block_deals.csv", "top_gainers.json", "pre_open_fo.json", "oi_spurts.json"}
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ class TestWeekendSkip:
             result = collector.collect(monday)
 
         # All files should be "missing" (404)
-        assert result.missing == 23
+        assert result.missing == 25
         assert result.downloaded == 0
 
 
@@ -224,7 +224,7 @@ class TestIdempotency:
         collector = NSEDailyCollector(base_dir=tmp_path)
         # No session needed — all files should be skipped before any HTTP call
         result = collector.collect(d)
-        assert result.skipped == 23
+        assert result.skipped == 25
         assert result.downloaded == 0
 
     def test_redownload_empty_files(self, tmp_path):
@@ -251,7 +251,7 @@ class TestIdempotency:
             result = collector.collect(d)
 
         # The empty file should be attempted (missing/404), rest are missing too
-        assert result.missing == 23
+        assert result.missing == 25
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +278,7 @@ class TestDownloadSuccess:
             collector._www_session = mock_session
             result = collector.collect(d)
 
-        assert result.downloaded == 23
+        assert result.downloaded == 25
         assert result.failed == 0
 
         # Verify files on disk
@@ -301,11 +301,11 @@ class TestTierFiltering:
 
     def test_tier2_includes_all(self, tmp_path):
         collector = NSEDailyCollector(base_dir=tmp_path, tier=2)
-        assert len(collector.files) == 23
+        assert len(collector.files) == 25
 
     def test_no_tier_includes_all(self, tmp_path):
         collector = NSEDailyCollector(base_dir=tmp_path)
-        assert len(collector.files) == 23
+        assert len(collector.files) == 25
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +354,7 @@ class TestBackfill:
             results = collector.backfill(date(2026, 2, 5), date(2026, 2, 5))
 
         assert len(results) == 1
-        assert results[0].downloaded == 23
+        assert results[0].downloaded == 25
 
     def test_backfill_creates_date_dirs(self, tmp_path):
         mock_resp = MagicMock()

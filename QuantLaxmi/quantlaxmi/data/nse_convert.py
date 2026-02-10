@@ -80,6 +80,8 @@ REGISTRY: list[NseFileSpec] = [
     NseFileSpec("fo_mktlots.csv",        "nse_fo_mktlots",        "fo_mktlots", optional=True),
     NseFileSpec("52wk_highlow.csv",      "nse_52wk_highlow",      "52wk", optional=True),
     NseFileSpec("top_gainers.json",     "nse_top_gainers",       "gainers_json", optional=True),
+    NseFileSpec("pre_open_fo.json",    "nse_preopen",           "preopen_json", optional=True),
+    NseFileSpec("oi_spurts.json",      "nse_oi_spurts",         "oi_spurts_json", optional=True),
 ]
 
 REGISTRY_MAP: dict[str, NseFileSpec] = {s.category: s for s in REGISTRY}
@@ -368,6 +370,180 @@ def parse_gainers_json(path: Path) -> pd.DataFrame | None:
     return df
 
 
+def parse_preopen_json(path: Path) -> pd.DataFrame | None:
+    """Parse pre-open FnO market data JSON (L2 book snapshot).
+
+    Extracts IEP, final quantity, turnover, and 5-level bid/ask book
+    per symbol.  Computes OFI = sum(bid_qty) - sum(ask_qty).
+    """
+    data = json.loads(path.read_text())
+
+    # NSE wraps in {"data": [...]}
+    items = data if isinstance(data, list) else data.get("data", [])
+    if not isinstance(items, list) or not items:
+        return None
+
+    rows: list[dict] = []
+    for item in items:
+        meta = item.get("metadata", item)
+        detail = item.get("detail", {})
+        preopen_book = detail.get("preOpenMarket", {}).get("preopen", [])
+
+        row: dict = {
+            "symbol": meta.get("symbol", ""),
+            "iep": pd.to_numeric(meta.get("iep", meta.get("IEP")), errors="coerce"),
+            "final_quantity": pd.to_numeric(
+                meta.get("finalQuantity", meta.get("tottrdqty", 0)), errors="coerce"
+            ),
+            "total_turnover": pd.to_numeric(
+                meta.get("totalTurnover", meta.get("tottrdval", 0)), errors="coerce"
+            ),
+        }
+
+        # Split into buy and sell sides based on quantity
+        buy_entries = []
+        sell_entries = []
+        for entry in preopen_book:
+            price = pd.to_numeric(entry.get("price", 0), errors="coerce") or 0
+            buy_qty = pd.to_numeric(entry.get("buyQty", 0), errors="coerce") or 0
+            sell_qty = pd.to_numeric(entry.get("sellQty", 0), errors="coerce") or 0
+            if buy_qty > 0:
+                buy_entries.append((price, buy_qty))
+            if sell_qty > 0:
+                sell_entries.append((price, sell_qty))
+
+        # Sort: bids descending, asks ascending
+        buy_entries.sort(key=lambda x: -x[0])
+        sell_entries.sort(key=lambda x: x[0])
+
+        total_bid = 0.0
+        total_ask = 0.0
+        for i in range(5):
+            if i < len(buy_entries):
+                row[f"bid{i+1}_price"] = buy_entries[i][0]
+                row[f"bid{i+1}_qty"] = buy_entries[i][1]
+                total_bid += buy_entries[i][1]
+            else:
+                row[f"bid{i+1}_price"] = None
+                row[f"bid{i+1}_qty"] = 0.0
+            if i < len(sell_entries):
+                row[f"ask{i+1}_price"] = sell_entries[i][0]
+                row[f"ask{i+1}_qty"] = sell_entries[i][1]
+                total_ask += sell_entries[i][1]
+            else:
+                row[f"ask{i+1}_price"] = None
+                row[f"ask{i+1}_qty"] = 0.0
+
+        row["ofi"] = total_bid - total_ask
+        rows.append(row)
+
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
+
+
+def parse_oi_spurts_json(path: Path) -> pd.DataFrame | None:
+    """Parse OI spurts contracts JSON (4 categories of OI build-up/unwinding).
+
+    Categories: long_build_up, short_build_up, long_unwinding, short_covering
+    (mapped to oi_build_call, oi_build_put, oi_unwind_call, oi_unwind_put).
+    """
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        return None
+
+    # NSE returns {"data": [...]} with each item having a "type" or the data
+    # is keyed by category name
+    category_map = {
+        "long_build_up": "oi_build_call",
+        "short_build_up": "oi_build_put",
+        "long_unwinding": "oi_unwind_call",
+        "short_covering": "oi_unwind_put",
+        # Alternative key names NSE may use
+        "Long Build Up": "oi_build_call",
+        "Short Build Up": "oi_build_put",
+        "Long Unwinding": "oi_unwind_call",
+        "Short Covering": "oi_unwind_put",
+    }
+
+    rows: list[dict] = []
+
+    # Try keyed format: {"long_build_up": {"data": [...]}, ...}
+    for api_key, category in category_map.items():
+        cat_data = data.get(api_key, {})
+        items = cat_data.get("data", cat_data) if isinstance(cat_data, dict) else cat_data
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            rows.append({
+                "category": category,
+                "symbol": item.get("symbol", ""),
+                "instrument": item.get("instrument", ""),
+                "expiry_date": item.get("expiryDate", item.get("expiry_date", "")),
+                "option_type": item.get("optionType", item.get("option_type", "")),
+                "strike_price": pd.to_numeric(
+                    item.get("strikePrice", item.get("strike_price", 0)), errors="coerce"
+                ),
+                "ltp": pd.to_numeric(item.get("ltp", 0), errors="coerce"),
+                "pchange": pd.to_numeric(
+                    item.get("pChange", item.get("pchange", 0)), errors="coerce"
+                ),
+                "latest_oi": pd.to_numeric(
+                    item.get("latestOI", item.get("latest_oi", 0)), errors="coerce"
+                ),
+                "prev_oi": pd.to_numeric(
+                    item.get("previousOI", item.get("prev_oi", 0)), errors="coerce"
+                ),
+                "change_in_oi": pd.to_numeric(
+                    item.get("changeInOI", item.get("change_in_oi", 0)), errors="coerce"
+                ),
+                "volume": pd.to_numeric(item.get("volume", 0), errors="coerce"),
+                "underlying_value": pd.to_numeric(
+                    item.get("underlyingValue", item.get("underlying_value", 0)),
+                    errors="coerce",
+                ),
+            })
+
+    # Fallback: flat list with "type" field
+    if not rows:
+        flat_items = data.get("data", [])
+        if isinstance(flat_items, list):
+            for item in flat_items:
+                cat_raw = item.get("type", item.get("category", "unknown"))
+                category = category_map.get(cat_raw, cat_raw)
+                rows.append({
+                    "category": category,
+                    "symbol": item.get("symbol", ""),
+                    "instrument": item.get("instrument", ""),
+                    "expiry_date": item.get("expiryDate", ""),
+                    "option_type": item.get("optionType", ""),
+                    "strike_price": pd.to_numeric(
+                        item.get("strikePrice", 0), errors="coerce"
+                    ),
+                    "ltp": pd.to_numeric(item.get("ltp", 0), errors="coerce"),
+                    "pchange": pd.to_numeric(
+                        item.get("pChange", 0), errors="coerce"
+                    ),
+                    "latest_oi": pd.to_numeric(
+                        item.get("latestOI", 0), errors="coerce"
+                    ),
+                    "prev_oi": pd.to_numeric(
+                        item.get("previousOI", 0), errors="coerce"
+                    ),
+                    "change_in_oi": pd.to_numeric(
+                        item.get("changeInOI", 0), errors="coerce"
+                    ),
+                    "volume": pd.to_numeric(item.get("volume", 0), errors="coerce"),
+                    "underlying_value": pd.to_numeric(
+                        item.get("underlyingValue", 0), errors="coerce"
+                    ),
+                })
+
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
+
+
 # Parser dispatch
 _PARSERS = {
     "csv": parse_csv,
@@ -384,6 +560,8 @@ _PARSERS = {
     "fo_mktlots": parse_fo_mktlots,
     "52wk": parse_52wk,
     "gainers_json": parse_gainers_json,
+    "preopen_json": parse_preopen_json,
+    "oi_spurts_json": parse_oi_spurts_json,
 }
 
 

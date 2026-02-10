@@ -1,6 +1,6 @@
 """MegaFeatureBuilder -- aggregate ALL available data sources into a daily feature matrix.
 
-Extracts ~160-212 features from every available data source, aligns them to
+Extracts ~160-250 features from every available data source, aligns them to
 daily frequency, and returns a single DataFrame suitable for the TFT model.
 
 Feature groups
@@ -16,6 +16,11 @@ Feature groups
 9. Futures Premium    (nse_settlement_prices)    ~10 features
 10. FII/DII Activity  (nse_fii_stats)            ~10 features
 11. Divergence Flow   (nse_participant_oi DFF)   ~12 features
+12. News Sentiment    (FinBERT on headline archive)~11 features
+21. Contract Delta    (nse_contract_delta)       ~8 features
+22. Delta-Eq OI       (nse_combined_oi_deleq)    ~6 features
+23. Pre-Open OFI      (nse_preopen)              ~8 features
+24. OI Spurts         (nse_oi_spurts)            ~6 features
 
 Design principles
 -----------------
@@ -234,6 +239,11 @@ class MegaFeatureBuilder:
             ("ext_options", self._build_extended_options_features, (ticker, start_date, end_date)),
             ("divergence_flow", self._build_divergence_flow_features, (start_date, end_date)),
             ("crypto_alpha", self._build_crypto_alpha_features, (start_date, end_date)),
+            ("news_sentiment", self._build_news_sentiment_features, (start_date, end_date)),
+            ("contract_delta", self._build_contract_delta_features, (ticker, start_date, end_date)),
+            ("deltaeq_oi", self._build_deltaeq_oi_features, (start_date, end_date)),
+            ("preopen_ofi", self._build_preopen_ofi_features, (start_date, end_date)),
+            ("oi_spurts", self._build_oi_spurts_features, (start_date, end_date)),
         ]
 
         for name, fn, args in builders:
@@ -369,6 +379,7 @@ class MegaFeatureBuilder:
                         bars = pq.read_table(pfiles[0]).to_pandas()
                         if bars.empty:
                             continue
+                        bars = bars.sort_index()
                         for c in ["open", "high", "low", "close", "volume"]:
                             bars[c] = pd.to_numeric(bars[c], errors="coerce")
                         records.append({
@@ -379,7 +390,8 @@ class MegaFeatureBuilder:
                             "close": float(bars["close"].iloc[-1]),
                             "volume": float(bars["volume"].sum()),
                         })
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Bar processing failed for %s: %s", d_str, e)
                         continue
                 if records:
                     kite_df = pd.DataFrame(records)
@@ -417,8 +429,8 @@ class MegaFeatureBuilder:
                     raw[col] = pd.to_numeric(raw[col], errors="coerce")
                 nse_df = raw.dropna(subset=["close"]).set_index("date").sort_index()
                 nse_df = nse_df[~nse_df.index.duplicated(keep="last")]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("NSE index query failed: %s", e)
 
         # --- Merge: Kite OHLCV as base, augment with NSE valuations ---
         if not kite_df.empty:
@@ -1314,8 +1326,8 @@ class MegaFeatureBuilder:
                         if total_fvol > 0:
                             vol_first_30_frac = np.nansum(fvol[:30]) / total_fvol
                             vol_last_30_frac = np.nansum(fvol[-30:]) / total_fvol
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Futures volume query failed for %s: %s", d_str, e)
 
                 # Intraday realized vol (from 1-min returns)
                 c_series = pd.Series(c)
@@ -1400,7 +1412,8 @@ class MegaFeatureBuilder:
                     df = pq.read_table(parquet_files[0]).to_pandas()
                     df["_date_str"] = d_str
                     frames.append(df)
-                except Exception:
+                except Exception as e:
+                    logger.debug("Parquet read failed for %s: %s", parquet_files[0], e)
                     continue
 
             if not frames:
@@ -2271,3 +2284,396 @@ class MegaFeatureBuilder:
         except Exception:
             logger.exception("Crypto alpha features failed")
             return pd.DataFrame()
+
+    def _build_news_sentiment_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """11 news sentiment features from FinBERT-scored headline archive.
+
+        Features: ns_sent_mean, ns_sent_std, ns_sent_max, ns_sent_min,
+        ns_pos_ratio, ns_neg_ratio, ns_confidence_mean, ns_news_count,
+        ns_sent_5d_ma, ns_news_count_5d, ns_sent_momentum — all causal (T+1 lag).
+        """
+        try:
+            from quantlaxmi.features.news_sentiment import NewsSentimentBuilder
+
+            builder = NewsSentimentBuilder()
+            return builder.build(start_date, end_date)
+        except Exception:
+            logger.exception("News sentiment features failed")
+            return pd.DataFrame()
+
+    # ==================================================================
+    # GROUP 21: Contract Delta (nse_contract_delta)  (~8 features)
+    # ==================================================================
+
+    def _build_contract_delta_features(
+        self, ticker: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """Contract delta factor features from nse_contract_delta.
+
+        Schema: Date, Symbol, Expiry day, Strike Price, Option Type, Delta Factor.
+        Features: cd_mean_delta, cd_mean_delta_chg, cd_put_call_delta_ratio,
+        cd_atm_delta_near, cd_delta_skew, cd_n_contracts,
+        cd_delta_dispersion, cd_delta_z21 — all causal.
+        """
+        try:
+            raw = self.store.sql(
+                """
+                SELECT date,
+                       "Symbol" as symbol,
+                       CAST("Delta Factor" AS DOUBLE) as delta_factor,
+                       "Option Type" as option_type,
+                       CAST("Strike Price" AS DOUBLE) as strike_price
+                FROM nse_contract_delta
+                WHERE date BETWEEN ? AND ?
+                ORDER BY date
+                """,
+                [start_date, end_date],
+            )
+        except Exception:
+            logger.warning("nse_contract_delta query failed")
+            return pd.DataFrame()
+
+        if raw.empty:
+            return pd.DataFrame()
+
+        raw["date"] = pd.to_datetime(raw["date"])
+
+        # Filter to index contracts matching ticker
+        idx_contracts = raw[raw["symbol"].str.upper() == ticker.upper()].copy()
+        if idx_contracts.empty:
+            logger.debug("No contract delta data for %s, using market-wide", ticker)
+            idx_contracts = raw.copy()
+
+        records: list[dict] = []
+        for dt, grp in idx_contracts.groupby("date"):
+            row: dict = {"date": dt}
+            d = grp["delta_factor"].values.astype(np.float64)
+            opt_type = grp["option_type"].fillna("").str.upper()
+
+            # Mean delta factor across all contracts
+            row["cd_mean_delta"] = float(np.nanmean(d))
+
+            # Number of contracts (market activity proxy)
+            row["cd_n_contracts"] = float(len(d))
+
+            # Put/Call delta ratio: mean |put delta| / mean |call delta|
+            call_mask = opt_type.str.contains("CE|CALL", na=False)
+            put_mask = opt_type.str.contains("PE|PUT", na=False)
+            avg_call = float(np.nanmean(np.abs(d[call_mask.values]))) if call_mask.any() else np.nan
+            avg_put = float(np.nanmean(np.abs(d[put_mask.values]))) if put_mask.any() else np.nan
+            row["cd_put_call_delta_ratio"] = (
+                avg_put / avg_call if not np.isnan(avg_call) and avg_call > 0 else np.nan
+            )
+
+            # ATM delta: mean delta factor near 0.5 (|delta| between 0.3 and 0.7)
+            abs_d = np.abs(d)
+            atm_mask = (abs_d > 0.3) & (abs_d < 0.7)
+            row["cd_atm_delta_near"] = float(np.nanmean(abs_d[atm_mask])) if atm_mask.any() else np.nan
+
+            # Delta skew: avg call delta factor - avg |put delta factor|
+            if not np.isnan(avg_call) and not np.isnan(avg_put):
+                row["cd_delta_skew"] = avg_call - avg_put
+            else:
+                row["cd_delta_skew"] = np.nan
+
+            # Delta dispersion: std of delta factors
+            row["cd_delta_dispersion"] = float(np.nanstd(d, ddof=1)) if len(d) > 1 else np.nan
+
+            records.append(row)
+
+        if not records:
+            return pd.DataFrame()
+
+        result = pd.DataFrame(records).set_index("date").sort_index()
+
+        # Daily change in mean delta
+        result["cd_mean_delta_chg"] = result["cd_mean_delta"].diff()
+
+        # 21-day z-score of mean delta
+        result["cd_delta_z21"] = _rolling_zscore(
+            result["cd_mean_delta"].values, 21
+        )
+
+        return result
+
+    # ==================================================================
+    # GROUP 22: Delta-Eq OI (nse_combined_oi_deleq)  (~6 features)
+    # ==================================================================
+
+    def _build_deltaeq_oi_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """Delta-equivalent OI features from nse_combined_oi_deleq (215 symbols).
+
+        Schema: Date, ISIN, Scrip Name, Symbol, Open Interest,
+        Delta Equivalent Open Interest Contract wise,
+        Delta Equivalent Open Interest Portfolio wise.
+
+        Features: deleq_total_oi_z21, deleq_total_deltaeq_z21,
+        deleq_concentration, deleq_chg_pct, deleq_breadth,
+        deleq_oi_vs_deltaeq — all causal.
+        """
+        try:
+            raw = self.store.sql(
+                """
+                SELECT date,
+                       "Symbol" as symbol,
+                       CAST("Open Interest" AS DOUBLE) as oi,
+                       CAST("Delta Equivalent Open Interest Contract wise" AS DOUBLE) as deltaeq_cw
+                FROM nse_combined_oi_deleq
+                WHERE date BETWEEN ? AND ?
+                ORDER BY date
+                """,
+                [start_date, end_date],
+            )
+        except Exception:
+            logger.warning("nse_combined_oi_deleq query failed")
+            return pd.DataFrame()
+
+        if raw.empty:
+            return pd.DataFrame()
+
+        raw["date"] = pd.to_datetime(raw["date"])
+
+        records: list[dict] = []
+        for dt, grp in raw.groupby("date"):
+            row: dict = {"date": dt}
+            oi = grp["oi"].values.astype(np.float64)
+            deltaeq = grp["deltaeq_cw"].values.astype(np.float64)
+
+            total_oi = np.nansum(oi)
+            total_deltaeq = np.nansum(np.abs(deltaeq))
+
+            row["deleq_total_oi"] = total_oi
+            row["deleq_total_deltaeq"] = total_deltaeq
+
+            # Concentration: HHI-like — top-5 share of total delta-eq OI
+            abs_deleq = np.abs(deltaeq)
+            abs_deleq_sorted = np.sort(abs_deleq[~np.isnan(abs_deleq)])
+            if len(abs_deleq_sorted) >= 5 and total_deltaeq > 0:
+                top5 = abs_deleq_sorted[-5:]
+                row["deleq_concentration"] = float(np.sum(top5)) / total_deltaeq
+            else:
+                row["deleq_concentration"] = np.nan
+
+            # Breadth: fraction of symbols with positive delta-eq
+            valid_deleq = deltaeq[~np.isnan(deltaeq)]
+            if len(valid_deleq) > 0:
+                row["deleq_breadth"] = float(np.sum(valid_deleq > 0)) / len(valid_deleq)
+            else:
+                row["deleq_breadth"] = np.nan
+
+            # OI vs delta-eq ratio (leverage proxy)
+            row["deleq_oi_vs_deltaeq"] = (
+                total_oi / total_deltaeq if total_deltaeq > 0 else np.nan
+            )
+
+            records.append(row)
+
+        if not records:
+            return pd.DataFrame()
+
+        result = pd.DataFrame(records).set_index("date").sort_index()
+
+        # Day-over-day change (using .diff() for safety)
+        result["deleq_chg_pct"] = result["deleq_total_deltaeq"].pct_change()
+
+        # Rolling z-scores
+        result["deleq_total_oi_z21"] = _rolling_zscore(
+            result["deleq_total_oi"].values, 21
+        )
+        result["deleq_total_deltaeq_z21"] = _rolling_zscore(
+            result["deleq_total_deltaeq"].values, 21
+        )
+
+        # Drop raw totals (keep z-scored versions)
+        result.drop(columns=["deleq_total_oi", "deleq_total_deltaeq"], inplace=True)
+
+        return result
+
+    # ==================================================================
+    # GROUP 23: Pre-Open OFI (nse_preopen)  (~8 features)
+    # ==================================================================
+
+    def _build_preopen_ofi_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """Pre-open order flow features from nse_preopen (207 FnO stocks).
+
+        Features: preopen_ofi_mean, preopen_ofi_skew, preopen_spread_mean,
+        preopen_spread_std, preopen_iep_gap, preopen_depth_imb,
+        preopen_vol_surprise, preopen_participation — all causal (same day).
+        """
+        try:
+            raw = self.store.sql(
+                """
+                SELECT date, symbol, iep, final_quantity, total_turnover,
+                       ofi, bid1_price, ask1_price,
+                       bid1_qty, bid2_qty, bid3_qty, bid4_qty, bid5_qty,
+                       ask1_qty, ask2_qty, ask3_qty, ask4_qty, ask5_qty
+                FROM nse_preopen
+                WHERE date BETWEEN ? AND ?
+                ORDER BY date
+                """,
+                [start_date, end_date],
+            )
+        except Exception:
+            logger.warning("nse_preopen query failed")
+            return pd.DataFrame()
+
+        if raw.empty:
+            return pd.DataFrame()
+
+        raw["date"] = pd.to_datetime(raw["date"])
+
+        records: list[dict] = []
+        for dt, grp in raw.groupby("date"):
+            row: dict = {"date": dt}
+            ofi_vals = grp["ofi"].values.astype(np.float64)
+
+            # Mean OFI across all FnO stocks
+            row["preopen_ofi_mean"] = float(np.nanmean(ofi_vals))
+
+            # OFI skewness
+            if len(ofi_vals) > 2:
+                m = np.nanmean(ofi_vals)
+                s = np.nanstd(ofi_vals, ddof=1)
+                if s > 0:
+                    row["preopen_ofi_skew"] = float(
+                        np.nanmean(((ofi_vals - m) / s) ** 3)
+                    )
+                else:
+                    row["preopen_ofi_skew"] = 0.0
+            else:
+                row["preopen_ofi_skew"] = np.nan
+
+            # Bid-ask spread
+            bid1 = grp["bid1_price"].values.astype(np.float64)
+            ask1 = grp["ask1_price"].values.astype(np.float64)
+            mid = (bid1 + ask1) / 2.0
+            spread = np.where(mid > 0, (ask1 - bid1) / mid, np.nan)
+            row["preopen_spread_mean"] = float(np.nanmean(spread))
+            row["preopen_spread_std"] = float(np.nanstd(spread, ddof=1)) if len(spread) > 1 else np.nan
+
+            # IEP gap (would need prev close — approximate with bid1 as proxy)
+            iep = grp["iep"].values.astype(np.float64)
+            if np.nansum(bid1 > 0) > 0:
+                gaps = np.abs(iep - bid1) / np.maximum(bid1, 1.0)
+                row["preopen_iep_gap"] = float(np.nanmean(gaps))
+            else:
+                row["preopen_iep_gap"] = np.nan
+
+            # Depth imbalance
+            bid_cols = ["bid1_qty", "bid2_qty", "bid3_qty", "bid4_qty", "bid5_qty"]
+            ask_cols = ["ask1_qty", "ask2_qty", "ask3_qty", "ask4_qty", "ask5_qty"]
+            total_bid_qty = sum(
+                grp[c].fillna(0).astype(np.float64).values for c in bid_cols
+            )
+            total_ask_qty = sum(
+                grp[c].fillna(0).astype(np.float64).values for c in ask_cols
+            )
+            denom = total_bid_qty + total_ask_qty
+            imb = np.where(denom > 0, (total_bid_qty - total_ask_qty) / denom, np.nan)
+            row["preopen_depth_imb"] = float(np.nanmean(imb))
+
+            # Turnover
+            turnover = grp["total_turnover"].values.astype(np.float64)
+            row["_preopen_turnover"] = float(np.nansum(turnover))
+
+            # Participation: count of stocks with positive volume
+            qty = grp["final_quantity"].values.astype(np.float64)
+            row["preopen_participation"] = float(np.nansum(qty > 0))
+
+            records.append(row)
+
+        if not records:
+            return pd.DataFrame()
+
+        result = pd.DataFrame(records).set_index("date").sort_index()
+
+        # Vol surprise: turnover z-scored vs 21d rolling
+        if "_preopen_turnover" in result.columns:
+            result["preopen_vol_surprise"] = _rolling_zscore(
+                result["_preopen_turnover"].values, 21
+            )
+            result.drop(columns=["_preopen_turnover"], inplace=True)
+
+        return result
+
+    # ==================================================================
+    # GROUP 24: OI Spurts (nse_oi_spurts)  (~6 features)
+    # ==================================================================
+
+    def _build_oi_spurts_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """OI spurt features from nse_oi_spurts (4 build-up/unwinding categories).
+
+        Features: oisp_build_count, oisp_unwind_count, oisp_build_unwind_ratio,
+        oisp_net_oi_change, oisp_call_put_build, oisp_max_oi_change_pct — all causal.
+        """
+        try:
+            raw = self.store.sql(
+                """
+                SELECT date, category, change_in_oi, pchange, latest_oi, prev_oi
+                FROM nse_oi_spurts
+                WHERE date BETWEEN ? AND ?
+                ORDER BY date
+                """,
+                [start_date, end_date],
+            )
+        except Exception:
+            logger.warning("nse_oi_spurts query failed")
+            return pd.DataFrame()
+
+        if raw.empty:
+            return pd.DataFrame()
+
+        raw["date"] = pd.to_datetime(raw["date"])
+
+        records: list[dict] = []
+        for dt, grp in raw.groupby("date"):
+            row: dict = {"date": dt}
+            cats = grp["category"].fillna("").str.lower()
+
+            build_mask = cats.str.contains("build", na=False)
+            unwind_mask = cats.str.contains("unwind", na=False)
+
+            build_count = int(build_mask.sum())
+            unwind_count = int(unwind_mask.sum())
+
+            row["oisp_build_count"] = float(build_count)
+            row["oisp_unwind_count"] = float(unwind_count)
+
+            total = build_count + unwind_count
+            row["oisp_build_unwind_ratio"] = (
+                build_count / total if total > 0 else 0.5
+            )
+
+            # Net OI change across all spurt contracts
+            oi_chg = grp["change_in_oi"].values.astype(np.float64)
+            row["oisp_net_oi_change"] = float(np.nansum(oi_chg))
+
+            # Call vs Put builds
+            call_build = cats.str.contains("call", na=False) & build_mask
+            put_build = cats.str.contains("put", na=False) & build_mask
+            n_call_build = int(call_build.sum())
+            n_put_build = int(put_build.sum())
+            row["oisp_call_put_build"] = (
+                n_call_build / n_put_build if n_put_build > 0 else np.nan
+            )
+
+            # Max absolute % change in OI
+            pchg = grp["pchange"].values.astype(np.float64)
+            row["oisp_max_oi_change_pct"] = (
+                float(np.nanmax(np.abs(pchg))) if len(pchg) > 0 else np.nan
+            )
+
+            records.append(row)
+
+        if not records:
+            return pd.DataFrame()
+
+        return pd.DataFrame(records).set_index("date").sort_index()
