@@ -37,3 +37,5 @@ class RiskLimits:
     vpin_block_threshold: float = 0.70
     max_total_exposure: float = 1.50
     max_correlated_exposure: float = 0.40
+    max_portfolio_vega: float = 50000.0
+    max_portfolio_theta: float = -25000.0

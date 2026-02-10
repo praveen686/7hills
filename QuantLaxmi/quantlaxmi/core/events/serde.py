@@ -73,6 +73,7 @@ def serialize_envelope(envelope: EventEnvelope) -> str:
       - Deterministic output for identical input
     """
     d = {
+        "schema_version": envelope.schema_version,
         "ts": envelope.ts,
         "seq": envelope.seq,
         "run_id": envelope.run_id,
@@ -96,6 +97,7 @@ def deserialize_envelope(line: str) -> EventEnvelope:
         raise ValueError(f"Invalid JSONL: {e}") from e
 
     return EventEnvelope(
+        schema_version=d.get("schema_version", "1.0"),
         ts=d["ts"],
         seq=d["seq"],
         run_id=d["run_id"],

@@ -60,6 +60,7 @@ class Orchestrator:
         risk_manager: RiskManager | None = None,
         state_file: Path = DEFAULT_STATE_FILE,
         event_log: EventLogWriter | None = None,
+        reconciler: "PositionReconciler | None" = None,
     ):
         self.store = store
         self.registry = registry or StrategyRegistry()
@@ -67,6 +68,7 @@ class Orchestrator:
         self.risk_manager = risk_manager or RiskManager()
         self.state = PortfolioState.load(state_file)
         self._state_file = state_file
+        self._reconciler = reconciler
 
         # Event infrastructure (Phase 2)
         self._run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
@@ -147,6 +149,66 @@ class Orchestrator:
         self.state.last_regime = regime.regime.value
 
         logger.info("VIX regime: %s (VIX=%.1f)", regime.regime.value, regime.vix)
+
+        # 1b. Check circuit breaker BEFORE processing signals
+        if self.risk_manager.circuit_breaker_active:
+            logger.warning(
+                "CIRCUIT BREAKER ACTIVE on %s — auto-flattening all positions",
+                d.isoformat(),
+            )
+
+            # Emit risk alert for circuit breaker flatten
+            cb_alert = RiskAlertPayload(
+                alert_type="circuit_breaker_flatten",
+                new_state="flattening",
+                threshold=0.0,
+                current_value=0.0,
+                detail="Circuit breaker active — forcing closure of all open positions",
+            )
+            self._event_log.emit(
+                event_type=EventType.RISK_ALERT.value,
+                source="orchestrator",
+                payload=cb_alert.to_dict(),
+            )
+
+            # Force-close all open positions
+            active = self.state.active_positions()
+            pos_dicts = [
+                {
+                    "strategy_id": pos.strategy_id,
+                    "symbol": pos.symbol,
+                    "instrument_type": pos.instrument_type,
+                }
+                for pos in active
+            ]
+            flat_targets = self.risk_manager.positions_to_flatten(pos_dicts)
+
+            for target in flat_targets:
+                action = self._execute_target(target, 0.0, d)
+                if action:
+                    summary["actions"].append(action)
+
+            # Emit portfolio snapshot
+            self._emit_snapshot()
+
+            # Update equity history and state (same as normal flow)
+            day_pnl = self.state.equity - self.state.equity_at_open
+            drawdown = self.state.portfolio_dd
+            self.state.equity_history.append({
+                "date": d.isoformat(),
+                "equity": self.state.equity,
+                "drawdown": drawdown,
+                "day_pnl": day_pnl,
+            })
+            self.state.equity_at_open = self.state.equity
+
+            self.state.last_scan_date = d.isoformat()
+            self.state.last_scan_time = datetime.now(timezone.utc).isoformat()
+            self.state.scan_count += 1
+            self._save()
+
+            self._log_summary(summary)
+            return summary
 
         # 2. Collect signals from all strategies
         all_signals: list[Signal] = []
@@ -245,7 +307,20 @@ class Orchestrator:
         self.state.scan_count += 1
         self._save()
 
-        # 8. Log summary
+        # 8. End-of-day reconciliation (if reconciler is wired)
+        if self._reconciler is not None:
+            try:
+                internal_positions = {
+                    pos.symbol: {"qty": 1, "avg_price": pos.entry_price}
+                    for pos in self.state.active_positions()
+                }
+                result = self._reconciler.reconcile(internal_positions)
+                if not result.is_clean:
+                    logger.warning("Reconciliation mismatch: %s", result.summary())
+            except Exception as e:
+                logger.error("Reconciliation failed: %s", e)
+
+        # 9. Log summary
         self._log_summary(summary)
 
         return summary
@@ -383,6 +458,23 @@ class Orchestrator:
             )
             if trade:
                 self._total_trades += 1
+
+                # Emit fill event for close
+                fill_payload = FillPayload(
+                    order_id=str(uuid.uuid4())[:8],
+                    fill_id=str(uuid.uuid4())[:8],
+                    side="sell",
+                    quantity=1,
+                    price=exit_price,
+                    fees=0.0,
+                    is_partial=False,
+                )
+                self._exec_journal.log_fill(
+                    strategy_id=target.strategy_id,
+                    symbol=target.symbol,
+                    payload=fill_payload,
+                )
+
                 return {
                     "action": "close",
                     "strategy": target.strategy_id,
@@ -421,6 +513,22 @@ class Orchestrator:
         )
         self.state.open_position(pos)
         self._total_trades += 1
+
+        # Emit fill event for open
+        fill_payload = FillPayload(
+            order_id=str(uuid.uuid4())[:8],
+            fill_id=str(uuid.uuid4())[:8],
+            side="buy",
+            quantity=1,
+            price=spot,
+            fees=0.0,
+            is_partial=False,
+        )
+        self._exec_journal.log_fill(
+            strategy_id=target.strategy_id,
+            symbol=target.symbol,
+            payload=fill_payload,
+        )
 
         return {
             "action": "open",

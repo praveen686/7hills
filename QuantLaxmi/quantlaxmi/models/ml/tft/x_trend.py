@@ -636,7 +636,9 @@ if HAS_TORCH:
         mean_ret = strategy_returns.mean()
         std_ret = strategy_returns.std(correction=1)
         if std_ret < 1e-8:
-            return torch.tensor(0.0, device=positions.device, requires_grad=True)
+            # Return a small differentiable penalty that encourages
+            # the model to take positions
+            return -torch.abs(positions).mean() * 0.01
         return -(mean_ret / std_ret) * annualize
 
     def gaussian_nll_loss(

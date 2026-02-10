@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import pickle
+import shutil
 import subprocess
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -151,8 +152,13 @@ class CheckpointManager:
         Root directory for checkpoints. Defaults to "checkpoints".
     """
 
-    def __init__(self, base_dir: str | Path = "checkpoints") -> None:
+    def __init__(
+        self,
+        base_dir: str | Path = "checkpoints",
+        max_checkpoints: int = 5,
+    ) -> None:
         self.base_dir = Path(base_dir)
+        self.max_checkpoints = max_checkpoints
 
     # ------------------------------------------------------------------
     # Save
@@ -251,6 +257,9 @@ class CheckpointManager:
         # Upload to Weights & Biases
         if _HAS_WANDB:
             self._upload_to_wandb(ckpt_dir, metadata)
+
+        # Rotate old checkpoints
+        self._rotate_old_checkpoints(metadata.model_type)
 
         return ckpt_dir
 
@@ -408,6 +417,34 @@ class CheckpointManager:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _rotate_old_checkpoints(self, model_type: str) -> None:
+        """Delete oldest checkpoints beyond ``max_checkpoints``.
+
+        When ``max_checkpoints`` is 0 or negative, rotation is disabled
+        and all checkpoints are kept.
+        """
+        if self.max_checkpoints <= 0:
+            return
+
+        existing = self.list_checkpoints(model_type)
+        if len(existing) <= self.max_checkpoints:
+            return
+
+        # existing is sorted by version; oldest come first
+        to_delete = existing[: len(existing) - self.max_checkpoints]
+        for ckpt in to_delete:
+            ckpt_path = Path(ckpt["path"])
+            try:
+                shutil.rmtree(ckpt_path)
+                logger.info(
+                    "Rotated old checkpoint: %s (v%d)",
+                    ckpt_path, ckpt["version"],
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to delete old checkpoint: %s", ckpt_path
+                )
 
     def _next_version(self, model_type: str) -> int:
         """Compute next version number for a model type."""

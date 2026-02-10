@@ -1,7 +1,7 @@
-"""RL Algorithms — Monte Carlo, TD, Q-Learning, Policy Gradient, Bandits.
+"""RL Algorithms — Monte Carlo, TD, Q-Learning, Policy Gradient, Bandits, Offline RL, Distributional.
 
 Implements Chapters 11-15 of "Foundations of RL with Applications in Finance"
-by Ashwin Rao & Tikhon Jelvis.
+by Ashwin Rao & Tikhon Jelvis, plus modern offline RL and distributional RL methods.
 
 Modules
 -------
@@ -10,6 +10,8 @@ td_learning : Temporal-Difference methods — TD(0), TD(lambda), SARSA (Ch 12)
 q_learning  : Q-Learning, DQN, Double DQN, LSPI (Ch 13)
 policy_gradient : REINFORCE, Actor-Critic, A2C, NPG, DDPG (Ch 14)
 bandits     : Multi-Armed and Contextual Bandits (Ch 15)
+offline_rl  : CQL, IQL, TD3+BC for offline/batch RL
+distributional_rl : C51, QR-DQN, IQN, RiskAwareTrader (Bellemare+ 2017, Dabney+ 2018)
 """
 from __future__ import annotations
 
@@ -48,6 +50,28 @@ from quantlaxmi.models.rl.algorithms.policy_gradient import (
     A2C,
     NaturalPolicyGradient,
     DeterministicPolicyGradient,
+)
+
+# -- PPO & SAC (Advanced Policy Gradient) ----------------------------------
+from quantlaxmi.models.rl.algorithms.ppo_sac import (
+    PPO,
+    SAC,
+)
+
+# -- Offline RL (CQL, IQL, TD3+BC) -----------------------------------------
+from quantlaxmi.models.rl.algorithms.offline_rl import (
+    CQL,
+    IQL,
+    TD3BC,
+    OfflineReplayBuffer,
+)
+
+# -- Distributional RL (C51, QR-DQN, IQN) ----------------------------------
+from quantlaxmi.models.rl.algorithms.distributional_rl import (
+    C51,
+    QRDQN,
+    IQN,
+    RiskAwareTrader,
 )
 
 # -- Bandits (Ch 15) -------------------------------------------------------
@@ -91,6 +115,19 @@ __all__ = [
     "A2C",
     "NaturalPolicyGradient",
     "DeterministicPolicyGradient",
+    # PPO & SAC
+    "PPO",
+    "SAC",
+    # Offline RL
+    "CQL",
+    "IQL",
+    "TD3BC",
+    "OfflineReplayBuffer",
+    # Distributional RL
+    "C51",
+    "QRDQN",
+    "IQN",
+    "RiskAwareTrader",
     # Bandits
     "BanditArm",
     "GaussianArm",

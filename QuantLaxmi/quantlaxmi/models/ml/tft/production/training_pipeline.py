@@ -44,11 +44,57 @@ except ImportError:
 
 try:
     import torch
+    import torch.utils.data as _torch_data
     _HAS_TORCH = True
     _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 except ImportError:
     _HAS_TORCH = False
     _DEVICE = None
+    _torch_data = None  # type: ignore
+
+
+# ============================================================================
+# Dataset for DataLoader
+# ============================================================================
+
+
+class _TFTDataset:
+    """Wraps numpy arrays as a torch Dataset for use with DataLoader.
+
+    Parameters
+    ----------
+    X_tgt : np.ndarray  (N, seq_len, n_features)
+    X_ctx : np.ndarray  (N, n_context, ctx_len, n_features)
+    X_tid : np.ndarray  (N,)  int64
+    X_cid : np.ndarray  (N, n_context)  int64
+    Y     : np.ndarray  (N,)  float32
+    """
+
+    def __init__(
+        self,
+        X_tgt: np.ndarray,
+        X_ctx: np.ndarray,
+        X_tid: np.ndarray,
+        X_cid: np.ndarray,
+        Y: np.ndarray,
+    ) -> None:
+        self.X_tgt = X_tgt
+        self.X_ctx = X_ctx
+        self.X_tid = X_tid
+        self.X_cid = X_cid
+        self.Y = Y
+
+    def __len__(self) -> int:
+        return len(self.Y)
+
+    def __getitem__(self, idx: int) -> tuple:
+        return (
+            torch.tensor(self.X_tgt[idx], dtype=torch.float32),
+            torch.tensor(self.X_ctx[idx], dtype=torch.float32),
+            torch.tensor(self.X_tid[idx], dtype=torch.int64),
+            torch.tensor(self.X_cid[idx], dtype=torch.int64),
+            torch.tensor(self.Y[idx], dtype=torch.float32),
+        )
 
 try:
     import wandb
@@ -132,6 +178,16 @@ class TrainingPipelineConfig:
     position_smooth: float = 0.3
     patience: int = 15
 
+    # Phase 5 early stopping patience (0 = disabled)
+    phase5_patience: int = 10
+
+    # AMP (Automatic Mixed Precision) — only active on CUDA
+    use_amp: bool = True
+
+    # Cosine annealing LR with warmup
+    use_cosine_lr: bool = True
+    warmup_fraction: float = 0.1  # warmup for first 10% of training steps
+
 
 # ============================================================================
 # Result
@@ -153,6 +209,46 @@ class TrainingResult:
     max_drawdown_oos: float = 0.0
     elapsed_seconds: float = 0.0
     phase_times: dict[str, float] = field(default_factory=dict)
+
+
+# ============================================================================
+# LR Scheduler Helper
+# ============================================================================
+
+
+def _build_cosine_warmup_scheduler(
+    optimizer: "torch.optim.Optimizer",
+    warmup_steps: int,
+    total_steps: int,
+) -> "torch.optim.lr_scheduler.LambdaLR":
+    """Build a cosine annealing LR scheduler with linear warmup.
+
+    During warmup (step < warmup_steps): lr scales linearly from 0 to base_lr.
+    After warmup: lr follows cosine decay from base_lr to 0.
+
+    Parameters
+    ----------
+    optimizer : torch optimizer
+    warmup_steps : int
+        Number of warmup steps.
+    total_steps : int
+        Total training steps (warmup + cosine decay).
+
+    Returns
+    -------
+    LambdaLR scheduler (call .step() per batch).
+    """
+    import torch.optim.lr_scheduler as lr_sched
+
+    def lr_lambda(current_step: int) -> float:
+        if current_step < warmup_steps:
+            # Linear warmup
+            return float(current_step) / float(max(1, warmup_steps))
+        # Cosine decay
+        progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+        return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+    return lr_sched.LambdaLR(optimizer, lr_lambda)
 
 
 # ============================================================================
@@ -413,22 +509,32 @@ class TrainingPipeline:
                 fold_idx, start, train_end, cfg.purge_gap, test_start, test_end,
             )
 
-            # Normalize
-            train_feats = features[start:train_end]
-            flat = train_feats.reshape(-1, n_features)
-            valid = ~np.any(np.isnan(flat), axis=1)
-            if valid.sum() < 30:
+            # Normalize — per-asset to avoid cross-asset scale contamination
+            train_feats = features[start:train_end]  # (train_window, n_assets, n_features)
+            # Compute per-asset mean/std
+            feat_mean = np.zeros((n_assets, n_features))
+            feat_std = np.ones((n_assets, n_features))
+            total_valid = 0
+            for a in range(n_assets):
+                af = train_feats[:, a, :]  # (train_window, n_features)
+                valid_a = ~np.any(np.isnan(af), axis=1)
+                total_valid += valid_a.sum()
+                if valid_a.sum() >= 10:
+                    feat_mean[a] = np.nanmean(af[valid_a], axis=0)
+                    s = np.nanstd(af[valid_a], axis=0, ddof=1)
+                    feat_std[a] = np.where(s > 1e-10, s, 1.0)
+            if total_valid < 30:
                 start += x_cfg.step_size
                 continue
 
-            feat_mean = np.nanmean(flat[valid], axis=0)
-            feat_std = np.nanstd(flat[valid], axis=0, ddof=1)
-            feat_std = np.where(feat_std > 1e-10, feat_std, 1.0)
             # Only normalize the relevant slice (train+test window + seq lookback)
             norm_lo = max(0, start - x_cfg.seq_len)
             norm_hi = test_end
             norm_features = np.full_like(features, np.nan)
-            norm_features[norm_lo:norm_hi] = (features[norm_lo:norm_hi] - feat_mean) / feat_std
+            for a in range(n_assets):
+                norm_features[norm_lo:norm_hi, a, :] = (
+                    features[norm_lo:norm_hi, a, :] - feat_mean[a]
+                ) / feat_std[a]
 
             # Build episodes
             X_tgt, X_ctx, X_tid, X_cid, Y = [], [], [], [], []
@@ -473,6 +579,34 @@ class TrainingPipeline:
 
             total_epochs = cfg.exploration_pretrain_epochs + cfg.exploration_finetune_epochs
 
+            # AMP setup (only on CUDA)
+            use_amp = cfg.use_amp and _HAS_TORCH and _DEVICE is not None and _DEVICE.type == "cuda"
+            scaler = torch.amp.GradScaler("cuda") if use_amp else None
+
+            # Build DataLoader for training subset
+            _pin = _DEVICE is not None and _DEVICE.type == "cuda"
+            train_dataset = _TFTDataset(
+                X_tgt_arr[:n_train], X_ctx_arr[:n_train],
+                X_tid_arr[:n_train], X_cid_arr[:n_train],
+                Y_arr[:n_train],
+            )
+            train_loader = _torch_data.DataLoader(
+                train_dataset,
+                batch_size=x_cfg.batch_size,
+                shuffle=True,
+                pin_memory=_pin,
+                num_workers=2,
+                persistent_workers=True,
+            )
+
+            # Cosine annealing LR with warmup
+            n_batches_per_epoch = len(train_loader)
+            total_steps = total_epochs * n_batches_per_epoch
+            scheduler = None
+            if cfg.use_cosine_lr and total_steps > 1:
+                warmup_steps = max(1, int(total_steps * cfg.warmup_fraction))
+                scheduler = _build_cosine_warmup_scheduler(optimizer, warmup_steps, total_steps)
+
             epoch_iter = range(total_epochs)
             if _HAS_TQDM:
                 epoch_iter = tqdm(
@@ -482,27 +616,42 @@ class TrainingPipeline:
 
             for epoch in epoch_iter:
                 model.train()
-                perm = rng.permutation(n_train)
 
-                for bs in range(0, n_train, x_cfg.batch_size):
-                    bi = perm[bs: bs + x_cfg.batch_size]
-                    tgt_seq = torch.tensor(X_tgt_arr[bi], device=_DEVICE)
-                    ctx_set = torch.tensor(X_ctx_arr[bi], device=_DEVICE)
-                    tgt_id = torch.tensor(X_tid_arr[bi], device=_DEVICE)
-                    ctx_id = torch.tensor(X_cid_arr[bi], device=_DEVICE)
-                    y_batch = torch.tensor(Y_arr[bi], device=_DEVICE)
-
-                    if x_cfg.loss_mode == "joint_mle":
-                        mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                        loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), x_cfg.mle_weight)
-                    else:
-                        pos = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                        loss = sharpe_loss(pos.squeeze(-1), y_batch)
+                for tgt_seq, ctx_set, tgt_id, ctx_id, y_batch in train_loader:
+                    tgt_seq = tgt_seq.to(_DEVICE, non_blocking=_pin)
+                    ctx_set = ctx_set.to(_DEVICE, non_blocking=_pin)
+                    tgt_id = tgt_id.to(_DEVICE, non_blocking=_pin)
+                    ctx_id = ctx_id.to(_DEVICE, non_blocking=_pin)
+                    y_batch = y_batch.to(_DEVICE, non_blocking=_pin)
 
                     optimizer.zero_grad()
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
+
+                    if use_amp:
+                        with torch.amp.autocast("cuda"):
+                            if x_cfg.loss_mode == "joint_mle":
+                                mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                                loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), x_cfg.mle_weight)
+                            else:
+                                pos = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                                loss = sharpe_loss(pos.squeeze(-1), y_batch)
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        if x_cfg.loss_mode == "joint_mle":
+                            mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), x_cfg.mle_weight)
+                        else:
+                            pos = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = sharpe_loss(pos.squeeze(-1), y_batch)
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
+
+                    if scheduler is not None:
+                        scheduler.step()
 
                 if _HAS_TQDM and hasattr(epoch_iter, 'set_postfix'):
                     epoch_iter.set_postfix(loss=f"{loss.item():.4f}")
@@ -746,6 +895,34 @@ class TrainingPipeline:
         fold_idx = 0
         start = 0
 
+        # ---- Bug #10: Mid-fold crash recovery ----
+        # Check for partial checkpoint from a previous interrupted run
+        checkpoint_dir = Path(cfg.checkpoint_base_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        partial_path = checkpoint_dir / "phase5_partial.pt"
+        if partial_path.exists():
+            try:
+                partial = torch.load(partial_path, weights_only=False)
+                completed_folds = partial.get("completed_folds", [])
+                fold_metrics = partial.get("fold_results", [])
+                all_oos_returns = partial.get("all_oos_returns", [])
+                last_model_state = partial.get("model_state")
+                last_norm_means = partial.get("norm_means")
+                last_norm_stds = partial.get("norm_stds")
+                resume_fold = len(completed_folds)
+                logger.info(
+                    "Resuming Phase 5 from fold %d (%d folds completed previously)",
+                    resume_fold, resume_fold,
+                )
+                # Advance start and fold_idx to skip completed folds
+                for _ in range(resume_fold):
+                    start += x_cfg.step_size
+                    fold_idx += 1
+            except Exception as e:
+                logger.warning(
+                    "Could not load partial checkpoint (%s) — starting fresh", e
+                )
+
         while start + x_cfg.train_window + cfg.purge_gap + x_cfg.test_window <= n_days:
             train_end = start + x_cfg.train_window
             test_start = train_end + cfg.purge_gap
@@ -756,22 +933,32 @@ class TrainingPipeline:
                 fold_idx, start, train_end, cfg.purge_gap, test_start, test_end,
             )
 
-            # Normalize
-            train_feats = features[start:train_end]
-            flat = train_feats.reshape(-1, n_features)
-            valid = ~np.any(np.isnan(flat), axis=1)
-            if valid.sum() < 30:
+            # Normalize — per-asset to avoid cross-asset scale contamination
+            train_feats = features[start:train_end]  # (train_window, n_assets, n_features)
+            # Compute per-asset mean/std
+            feat_mean = np.zeros((n_assets, n_features))
+            feat_std = np.ones((n_assets, n_features))
+            total_valid = 0
+            for a in range(n_assets):
+                af = train_feats[:, a, :]  # (train_window, n_features)
+                valid_a = ~np.any(np.isnan(af), axis=1)
+                total_valid += valid_a.sum()
+                if valid_a.sum() >= 10:
+                    feat_mean[a] = np.nanmean(af[valid_a], axis=0)
+                    s = np.nanstd(af[valid_a], axis=0, ddof=1)
+                    feat_std[a] = np.where(s > 1e-10, s, 1.0)
+            if total_valid < 30:
                 start += x_cfg.step_size
                 continue
 
-            feat_mean = np.nanmean(flat[valid], axis=0)
-            feat_std = np.nanstd(flat[valid], axis=0, ddof=1)
-            feat_std = np.where(feat_std > 1e-10, feat_std, 1.0)
             # Only normalize the relevant slice (train+test window + seq lookback)
             norm_lo = max(0, start - x_cfg.seq_len)
             norm_hi = test_end
             norm_features = np.full_like(features, np.nan)
-            norm_features[norm_lo:norm_hi] = (features[norm_lo:norm_hi] - feat_mean) / feat_std
+            for a in range(n_assets):
+                norm_features[norm_lo:norm_hi, a, :] = (
+                    features[norm_lo:norm_hi, a, :] - feat_mean[a]
+                ) / feat_std[a]
 
             last_norm_means = feat_mean
             last_norm_stds = feat_std
@@ -821,6 +1008,38 @@ class TrainingPipeline:
             best_val_sharpe = -np.inf
             best_state = None
 
+            # ---- Bug #19: Early stopping ----
+            early_stop_patience = getattr(cfg, 'phase5_patience', 10)
+            patience_counter = 0
+
+            # AMP setup (only on CUDA)
+            use_amp = cfg.use_amp and _HAS_TORCH and _DEVICE is not None and _DEVICE.type == "cuda"
+            scaler = torch.amp.GradScaler("cuda") if use_amp else None
+
+            # Build DataLoader for training subset
+            _pin = _DEVICE is not None and _DEVICE.type == "cuda"
+            train_dataset = _TFTDataset(
+                X_tgt_arr[:n_train], X_ctx_arr[:n_train],
+                X_tid_arr[:n_train], X_cid_arr[:n_train],
+                Y_arr[:n_train],
+            )
+            train_loader = _torch_data.DataLoader(
+                train_dataset,
+                batch_size=x_cfg.batch_size,
+                shuffle=True,
+                pin_memory=_pin,
+                num_workers=2,
+                persistent_workers=True,
+            )
+
+            # Cosine annealing LR with warmup
+            n_batches_per_epoch = len(train_loader)
+            total_steps = total_epochs * n_batches_per_epoch
+            scheduler = None
+            if cfg.use_cosine_lr and total_steps > 1:
+                warmup_steps = max(1, int(total_steps * cfg.warmup_fraction))
+                scheduler = _build_cosine_warmup_scheduler(optimizer, warmup_steps, total_steps)
+
             epoch_iter = range(total_epochs)
             if _HAS_TQDM:
                 epoch_iter = tqdm(
@@ -830,29 +1049,45 @@ class TrainingPipeline:
 
             for epoch in epoch_iter:
                 model.train()
-                perm = rng.permutation(n_train)
                 epoch_loss = 0.0
                 n_batches = 0
 
-                for bs in range(0, n_train, x_cfg.batch_size):
-                    bi = perm[bs: bs + x_cfg.batch_size]
-                    tgt_seq = torch.tensor(X_tgt_arr[bi], device=_DEVICE)
-                    ctx_set = torch.tensor(X_ctx_arr[bi], device=_DEVICE)
-                    tgt_id = torch.tensor(X_tid_arr[bi], device=_DEVICE)
-                    ctx_id = torch.tensor(X_cid_arr[bi], device=_DEVICE)
-                    y_batch = torch.tensor(Y_arr[bi], device=_DEVICE)
-
-                    if x_cfg.loss_mode == "joint_mle":
-                        mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                        loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), x_cfg.mle_weight)
-                    else:
-                        pos = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                        loss = sharpe_loss(pos.squeeze(-1), y_batch)
+                for tgt_seq, ctx_set, tgt_id, ctx_id, y_batch in train_loader:
+                    tgt_seq = tgt_seq.to(_DEVICE, non_blocking=_pin)
+                    ctx_set = ctx_set.to(_DEVICE, non_blocking=_pin)
+                    tgt_id = tgt_id.to(_DEVICE, non_blocking=_pin)
+                    ctx_id = ctx_id.to(_DEVICE, non_blocking=_pin)
+                    y_batch = y_batch.to(_DEVICE, non_blocking=_pin)
 
                     optimizer.zero_grad()
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
+
+                    if use_amp:
+                        with torch.amp.autocast("cuda"):
+                            if x_cfg.loss_mode == "joint_mle":
+                                mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                                loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), x_cfg.mle_weight)
+                            else:
+                                pos = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                                loss = sharpe_loss(pos.squeeze(-1), y_batch)
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        if x_cfg.loss_mode == "joint_mle":
+                            mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), x_cfg.mle_weight)
+                        else:
+                            pos = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = sharpe_loss(pos.squeeze(-1), y_batch)
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
+
+                    if scheduler is not None:
+                        scheduler.step()
+
                     epoch_loss += loss.item()
                     n_batches += 1
 
@@ -880,7 +1115,10 @@ class TrainingPipeline:
 
                     if val_sharpe > best_val_sharpe:
                         best_val_sharpe = val_sharpe
+                        patience_counter = 0
                         best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                    else:
+                        patience_counter += 1
 
                 if _HAS_TQDM and hasattr(epoch_iter, 'set_postfix'):
                     avg_loss = epoch_loss / max(n_batches, 1)
@@ -888,6 +1126,14 @@ class TrainingPipeline:
                         loss=f"{avg_loss:.4f}",
                         val_sharpe=f"{best_val_sharpe:.3f}",
                     )
+
+                # ---- Bug #19: Early stopping check ----
+                if early_stop_patience > 0 and patience_counter >= early_stop_patience:
+                    logger.info(
+                        "Early stopping at epoch %d (patience=%d, best_val_sharpe=%.3f)",
+                        epoch, early_stop_patience, best_val_sharpe,
+                    )
+                    break
 
             if best_state is not None:
                 model.load_state_dict(best_state)
@@ -959,6 +1205,27 @@ class TrainingPipeline:
                         pass
 
             last_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+            # ---- Bug #10: Save partial checkpoint after each completed fold ----
+            try:
+                partial_checkpoint = {
+                    'completed_folds': list(range(fold_idx + 1)),
+                    'fold_results': fold_metrics,
+                    'all_oos_returns': all_oos_returns,
+                    'model_state': last_model_state,
+                    'optimizer_state': optimizer.state_dict(),
+                    'norm_means': last_norm_means,
+                    'norm_stds': last_norm_stds,
+                }
+                checkpoint_dir.mkdir(parents=True, exist_ok=True)
+                torch.save(partial_checkpoint, partial_path)
+                logger.info(
+                    "Saved partial checkpoint after fold %d to %s",
+                    fold_idx, partial_path,
+                )
+            except Exception as e:
+                logger.warning("Failed to save partial checkpoint: %s", e)
+
             del model
             torch.cuda.empty_cache()
 
@@ -1020,6 +1287,14 @@ class TrainingPipeline:
                     last_model_state, metadata, selector, optuna_study,
                 )
                 result.checkpoint_path = ckpt_dir
+
+                # Clean up partial checkpoint after successful full save
+                if partial_path.exists():
+                    try:
+                        partial_path.unlink()
+                        logger.info("Removed partial checkpoint %s (full save succeeded)", partial_path)
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.error(
                     "Checkpoint save failed: %s — training results are still "

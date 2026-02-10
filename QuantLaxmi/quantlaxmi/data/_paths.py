@@ -30,6 +30,7 @@ NSE_DAILY_DIR = Path(
 KITE_1MIN_DIR = DATA_ROOT / "kite_1min"
 BINANCE_DIR = DATA_ROOT / "binance"
 TICK_DIR = MARKET_DIR / "ticks"
+MACRO_DIR = DATA_ROOT / "macro"
 
 # Strategy and portfolio state
 STRATEGY_STATE = _PROJECT_ROOT / "data" / "strategy_state"

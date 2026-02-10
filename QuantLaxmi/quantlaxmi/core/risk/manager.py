@@ -28,6 +28,7 @@ class GateResult(Enum):
     BLOCK_DD_STRATEGY = "block_dd_strategy"
     BLOCK_CONCENTRATION = "block_concentration"
     BLOCK_EXPOSURE = "block_exposure"
+    BLOCK_GREEKS = "block_greeks"
     REDUCE_SIZE = "reduce_size"
 
 
@@ -56,6 +57,8 @@ class PortfolioState:
     strategy_equity: dict = field(default_factory=dict)  # strategy_id → equity
     strategy_peaks: dict = field(default_factory=dict)   # strategy_id → peak equity
     vpin: float = 0.0                                    # current VPIN reading
+    portfolio_vega: float = 0.0                          # current portfolio vega (notional)
+    portfolio_theta: float = 0.0                         # current portfolio theta (daily)
 
     @property
     def portfolio_dd(self) -> float:
@@ -176,6 +179,32 @@ class RiskManager:
                 ),
             )
 
+        # Layer 2b: Greeks Limits (vega and theta)
+        if abs(state.portfolio_vega) > self.limits.max_portfolio_vega:
+            return RiskCheckResult(
+                target=target,
+                gate=GateResult.BLOCK_GREEKS,
+                approved=False,
+                adjusted_weight=0.0,
+                reason=(
+                    f"Portfolio vega={state.portfolio_vega:.0f} "
+                    f"exceeds limit {self.limits.max_portfolio_vega:.0f}"
+                ),
+            )
+
+        # theta is negative (bleed), so check if more negative than limit
+        if state.portfolio_theta < self.limits.max_portfolio_theta:
+            return RiskCheckResult(
+                target=target,
+                gate=GateResult.BLOCK_GREEKS,
+                approved=False,
+                adjusted_weight=0.0,
+                reason=(
+                    f"Portfolio theta={state.portfolio_theta:.0f} "
+                    f"exceeds limit {self.limits.max_portfolio_theta:.0f}"
+                ),
+            )
+
         # Layer 3: Concentration Limits
         adjusted_weight = target.weight
 
@@ -236,6 +265,46 @@ class RiskManager:
     @property
     def circuit_breaker_active(self) -> bool:
         return self._circuit_breaker_active
+
+    def positions_to_flatten(
+        self,
+        active_positions: list[dict],
+    ) -> list[TargetPosition]:
+        """Generate flat targets for all open positions when circuit breaker is active.
+
+        Parameters
+        ----------
+        active_positions : list[dict]
+            Each dict must have: strategy_id, symbol, instrument_type.
+            Typically comes from PortfolioState.active_positions().
+
+        Returns
+        -------
+        list[TargetPosition]
+            Flat targets for every open position, or empty list if
+            circuit breaker is not active.
+        """
+        if not self._circuit_breaker_active:
+            return []
+
+        targets: list[TargetPosition] = []
+        for pos in active_positions:
+            targets.append(TargetPosition(
+                strategy_id=pos["strategy_id"],
+                symbol=pos["symbol"],
+                direction="flat",
+                weight=0.0,
+                instrument_type=pos.get("instrument_type", "FUT"),
+                metadata={"exit_reason": "circuit_breaker"},
+            ))
+
+        if targets:
+            logger.warning(
+                "Circuit breaker auto-flatten: %d positions queued for closure",
+                len(targets),
+            )
+
+        return targets
 
     def reset_circuit_breaker(self) -> None:
         self._circuit_breaker_active = False

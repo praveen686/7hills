@@ -53,6 +53,9 @@ select = ["E4", "E7", "E9", "F", "W", "I"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: marks tests that download models from HuggingFace (deselect with '-m \"not slow\"')",
+]
 
 [tool.mypy]
 python_version = "3.11"

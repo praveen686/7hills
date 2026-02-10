@@ -79,6 +79,9 @@ class TunerConfig:
     max_daily_turnover: float = 0.5
     patience: int = 8
 
+    # AMP (Automatic Mixed Precision) — only active on CUDA
+    use_amp: bool = True
+
     # Optuna
     study_name: str = "tft_hp_tuning"
     storage: Optional[str] = None  # e.g. "sqlite:///optuna.db"
@@ -466,6 +469,10 @@ class HPTuner:
         n_val = max(1, int(n_total * 0.2))
         n_train = n_total - n_val
 
+        # AMP setup (only on CUDA when enabled in config)
+        use_amp = self.config.use_amp and _HAS_TORCH and _DEVICE is not None and _DEVICE.type == "cuda"
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
+
         # Combined pretrain + finetune in abbreviated form
         total_epochs = self.config.pretrain_epochs + self.config.finetune_epochs
         best_state = None
@@ -484,17 +491,31 @@ class HPTuner:
                 ctx_id = torch.tensor(X_cid[batch_idx], device=_DEVICE)
                 y_batch = torch.tensor(Y[batch_idx], device=_DEVICE)
 
-                if cfg.loss_mode == "joint_mle":
-                    mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                    loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), cfg.mle_weight)
-                else:
-                    positions = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                    loss = sharpe_loss(positions.squeeze(-1), y_batch)
-
                 optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+
+                if use_amp:
+                    with torch.amp.autocast("cuda", enabled=True):
+                        if cfg.loss_mode == "joint_mle":
+                            mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), cfg.mle_weight)
+                        else:
+                            positions = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = sharpe_loss(positions.squeeze(-1), y_batch)
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    if cfg.loss_mode == "joint_mle":
+                        mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                        loss = joint_loss(mu, log_sigma, y_batch.unsqueeze(-1), cfg.mle_weight)
+                    else:
+                        positions = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                        loss = sharpe_loss(positions.squeeze(-1), y_batch)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    optimizer.step()
 
             # Validation Sharpe
             if n_val > 0:

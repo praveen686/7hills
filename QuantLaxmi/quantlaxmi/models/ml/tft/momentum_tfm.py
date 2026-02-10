@@ -126,6 +126,26 @@ class MomentumTFMConfig:
     position_smooth: float = 0.3     # exponential smoothing factor for new signals
     max_daily_turnover: float = 0.5  # max position change per day
 
+    # Multi-horizon forecasting (default off for backward compat)
+    multi_horizon: bool = False
+    # Auxiliary horizon offsets and loss weights
+    # Main T+1 always has weight 1.0; these are the auxiliary ones
+    aux_horizons: tuple[int, ...] = (2, 3, 5)
+    aux_weights: tuple[float, ...] = (0.3, 0.2, 0.1)
+
+    # ALiBi positional encoding (default on)
+    use_alibi: bool = True
+
+    # Use scaled dot-product attention (Flash Attention backend when available)
+    use_sdpa: bool = True
+
+    # Temporal and static covariate encoders (Lim et al., 2021)
+    use_temporal_covariates: bool = True
+    use_static_covariates: bool = True
+    n_temporal_features: int = 6   # day_of_week, month, day_of_month, is_expiry_week, is_monthly_expiry, quarter
+    n_static_categories: int = 4   # NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY
+    static_embed_dim: int = 8
+
     # Derived
     n_features: int = field(init=False)
 
@@ -201,8 +221,16 @@ def _bollinger_pctb(close: np.ndarray, window: int = 20,
 
 def _changepoint_features(close: np.ndarray,
                           penalty: float = 3.0,
-                          lookback: int = 5) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Changepoint features via PELT algorithm (ruptures library).
+                          lookback: int = 5,
+                          min_window: int = 30,
+                          refit_every: int = 5) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Causal changepoint features via PELT algorithm (ruptures library).
+
+    Uses an expanding window so that features at time *t* depend only on
+    ``close[:t+1]`` — no future data is ever seen.
+
+    PELT is refitted every ``refit_every`` bars for efficiency; intermediate
+    bars carry forward the most recent result.
 
     Returns
     -------
@@ -218,78 +246,116 @@ def _changepoint_features(close: np.ndarray,
     cp_distance = np.ones(n)  # default: far from any changepoint
     cp_magnitude = np.zeros(n)
 
-    if not HAS_RUPTURES or n < 30:
+    if not HAS_RUPTURES or n < min_window:
         return cp_indicator, cp_distance, cp_magnitude
 
-    # Run PELT on log-returns for better statistical properties
+    # Full log-returns series (we'll slice causally below)
     log_returns = np.diff(np.log(close))
     if len(log_returns) < 20:
         return cp_indicator, cp_distance, cp_magnitude
 
-    try:
-        algo = ruptures.Pelt(model="rbf", min_size=5).fit(log_returns.reshape(-1, 1))
-        changepoints = algo.predict(pen=penalty)
-        # ruptures returns indices (1-based, last element is len(signal))
-        changepoints = [cp for cp in changepoints if cp < len(log_returns)]
-    except Exception:
-        logger.debug("PELT changepoint detection failed; skipping")
-        return cp_indicator, cp_distance, cp_magnitude
+    # Track last-known changepoints for carry-forward between refits
+    last_changepoints: list[int] = []
+    last_fit_t = -1
 
-    if not changepoints:
-        return cp_indicator, cp_distance, cp_magnitude
+    for t in range(min_window, n):
+        # Refit periodically for efficiency
+        if last_fit_t < 0 or (t - last_fit_t) >= refit_every:
+            try:
+                # CAUSAL: only use log_returns up to time t
+                # log_returns[i] = log(close[i+1]) - log(close[i]),
+                # so log_returns[:t] uses close[:t+1] which is causal at time t.
+                lr_causal = log_returns[:t]
+                algo = ruptures.Pelt(model="rbf", min_size=5).fit(
+                    lr_causal.reshape(-1, 1)
+                )
+                changepoints = algo.predict(pen=penalty)
+                # ruptures returns indices (1-based, last element is len(signal))
+                changepoints = [cp for cp in changepoints if cp < len(lr_causal)]
+                last_changepoints = changepoints
+                last_fit_t = t
+            except Exception:
+                # Keep previous changepoints on failure
+                pass
 
-    for i in range(n):
-        # Find nearest changepoint (offset +1 because log_returns is diff'd)
+        if not last_changepoints:
+            continue
+
+        # Find nearest changepoint to current bar
         nearest_dist = n  # large default
         nearest_cp = -1
-        for cp in changepoints:
-            cp_idx = cp + 1  # map back to close index
-            dist = abs(i - cp_idx)
+        for cp in last_changepoints:
+            cp_idx = cp + 1  # map from log_returns index back to close index
+            dist = abs(t - cp_idx)
             if dist < nearest_dist:
                 nearest_dist = dist
                 nearest_cp = cp_idx
 
         # Binary indicator: changepoint within lookback
         if nearest_dist <= lookback:
-            cp_indicator[i] = 1.0
+            cp_indicator[t] = 1.0
 
         # Normalized distance
-        cp_distance[i] = min(nearest_dist / max(lookback, 1), 1.0)
+        cp_distance[t] = min(nearest_dist / max(lookback, 1), 1.0)
 
         # Magnitude at nearest changepoint
         if 0 < nearest_cp < n:
-            cp_magnitude[i] = (close[nearest_cp] - close[max(0, nearest_cp - 1)]) / close[
-                max(0, nearest_cp - 1)
-            ]
+            cp_magnitude[t] = (
+                (close[nearest_cp] - close[max(0, nearest_cp - 1)])
+                / close[max(0, nearest_cp - 1)]
+            )
 
     return cp_indicator, cp_distance, cp_magnitude
 
 
-def _hmm_regime_features(returns: np.ndarray, n_states: int = 3) -> np.ndarray:
-    """Hidden Markov Model regime probabilities.
+def _hmm_regime_features(returns: np.ndarray, n_states: int = 3,
+                         min_window: int = 120,
+                         refit_every: int = 20) -> np.ndarray:
+    """Causal HMM regime probabilities using expanding-window forward filter.
+
+    At each time *t* (>= ``min_window``), ``predict_proba`` is called on
+    ``returns[:t+1]`` so that only data up to *t* is used — no future data
+    leaks into the posterior.  The HMM is refitted every ``refit_every``
+    bars for efficiency; between refits the same model parameters are reused
+    but the causal window still expands each bar.
 
     Returns an (n, n_states) array of posterior state probabilities.
     If hmmlearn is unavailable or fitting fails, returns zeros.
     """
     n = len(returns)
-    if not HAS_HMM or n < 60:
+    if not HAS_HMM or n < min_window:
         return np.zeros((n, n_states))
 
+    posteriors = np.zeros((n, n_states))
+
     try:
-        model = GaussianHMM(
-            n_components=n_states,
-            covariance_type="diag",
-            n_iter=50,
-            random_state=42,
-            verbose=False,
-        )
-        X = returns.reshape(-1, 1)
-        model.fit(X)
-        posteriors = model.predict_proba(X)
-        return posteriors
+        last_fit = -1
+        model = None
+        for t in range(min_window, n):
+            # Refit periodically for efficiency
+            if model is None or (t - last_fit) >= refit_every:
+                model = GaussianHMM(
+                    n_components=n_states,
+                    covariance_type="diag",
+                    n_iter=50,
+                    random_state=42,
+                    verbose=False,
+                )
+                X_train = returns[:t].reshape(-1, 1)
+                model.fit(X_train)
+                last_fit = t
+
+            # Forward-only: predict on data up to t (causal).
+            # predict_proba on [0..t] runs forward-backward on that window
+            # only, so data from t+1..T is never seen.
+            X_causal = returns[: t + 1].reshape(-1, 1)
+            probs = model.predict_proba(X_causal)
+            posteriors[t] = probs[-1]  # only take the last row (time t)
     except Exception:
         logger.debug("HMM fitting failed; returning zeros")
         return np.zeros((n, n_states))
+
+    return posteriors
 
 
 def build_features(close: np.ndarray,
@@ -567,27 +633,331 @@ if HAS_TORCH:
 
             return output
 
+    class TemporalCovariateEncoder(nn.Module):
+        """Temporal Covariate Encoder (Lim et al., 2021).
+
+        Takes integer-coded temporal features and embeds each via learned
+        embeddings, then projects the concatenated embeddings down to
+        hidden_dim.
+
+        Temporal features:
+        - day_of_week: Embedding(7, 4)
+        - month: Embedding(12, 4)
+        - day_of_month: Embedding(31, 4)
+        - is_expiry_week: Embedding(2, 2)
+        - is_monthly_expiry: Embedding(2, 2)
+        - quarter: Embedding(4, 2)
+        Total temporal embedding dim = 18
+        """
+
+        def __init__(self, hidden_dim: int):
+            super().__init__()
+            self.day_of_week_embed = nn.Embedding(7, 4)
+            self.month_embed = nn.Embedding(12, 4)
+            self.day_of_month_embed = nn.Embedding(31, 4)
+            self.is_expiry_week_embed = nn.Embedding(2, 2)
+            self.is_monthly_expiry_embed = nn.Embedding(2, 2)
+            self.quarter_embed = nn.Embedding(4, 2)
+
+            self.total_embed_dim = 4 + 4 + 4 + 2 + 2 + 2  # = 18
+            self.projection = nn.Linear(self.total_embed_dim, hidden_dim)
+            self.layer_norm = nn.LayerNorm(hidden_dim)
+
+        def forward(self, temporal_features: torch.Tensor) -> torch.Tensor:
+            """Embed temporal features.
+
+            Parameters
+            ----------
+            temporal_features : Tensor of shape (batch, seq_len, 6)
+                Integer-coded temporal features:
+                [day_of_week(0-6), month(0-11), day_of_month(0-30),
+                 is_expiry_week(0-1), is_monthly_expiry(0-1), quarter(0-3)]
+
+            Returns
+            -------
+            Tensor of shape (batch, seq_len, hidden_dim)
+            """
+            dow = self.day_of_week_embed(temporal_features[:, :, 0].long())      # (B, S, 4)
+            month = self.month_embed(temporal_features[:, :, 1].long())           # (B, S, 4)
+            dom = self.day_of_month_embed(temporal_features[:, :, 2].long())      # (B, S, 4)
+            expiry_wk = self.is_expiry_week_embed(temporal_features[:, :, 3].long())  # (B, S, 2)
+            monthly_exp = self.is_monthly_expiry_embed(temporal_features[:, :, 4].long())  # (B, S, 2)
+            quarter = self.quarter_embed(temporal_features[:, :, 5].long())       # (B, S, 2)
+
+            concat = torch.cat([dow, month, dom, expiry_wk, monthly_exp, quarter], dim=-1)  # (B, S, 18)
+            projected = self.projection(concat)  # (B, S, hidden_dim)
+            return self.layer_norm(projected)
+
+    class StaticCovariateEncoder(nn.Module):
+        """Static Covariate Encoder (Lim et al., 2021).
+
+        Takes an asset index (0-3 for NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY)
+        and produces four context vectors:
+        - c_s: for variable selection gating
+        - c_e: for post-LSTM enrichment
+        - c_h: for LSTM hidden state initialization
+        - c_c: for LSTM cell state initialization
+        """
+
+        def __init__(self, n_categories: int, embed_dim: int, hidden_dim: int,
+                     lstm_layers: int = 2):
+            super().__init__()
+            self.embedding = nn.Embedding(n_categories, embed_dim)
+            self.lstm_layers = lstm_layers
+
+            # Four context projections
+            self.fc_s = nn.Linear(embed_dim, hidden_dim)  # variable selection
+            self.fc_e = nn.Linear(embed_dim, hidden_dim)  # enrichment
+            self.fc_h = nn.Linear(embed_dim, hidden_dim)  # LSTM hidden init
+            self.fc_c = nn.Linear(embed_dim, hidden_dim)  # LSTM cell init
+
+        def forward(self, asset_id: torch.Tensor
+                    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            """Compute context vectors from asset identity.
+
+            Parameters
+            ----------
+            asset_id : Tensor of shape (batch,) — integer asset indices (0-3)
+
+            Returns
+            -------
+            c_s : (batch, hidden_dim) — variable selection context
+            c_e : (batch, hidden_dim) — enrichment context
+            c_h : (lstm_layers, batch, hidden_dim) — LSTM hidden init
+            c_c : (lstm_layers, batch, hidden_dim) — LSTM cell init
+            """
+            embed = self.embedding(asset_id.long())  # (batch, embed_dim)
+            c_s = self.fc_s(embed)   # (batch, hidden_dim)
+            c_e = self.fc_e(embed)   # (batch, hidden_dim)
+
+            # Expand for multi-layer LSTM: (lstm_layers, batch, hidden_dim)
+            c_h_single = self.fc_h(embed)  # (batch, hidden_dim)
+            c_c_single = self.fc_c(embed)  # (batch, hidden_dim)
+            c_h = c_h_single.unsqueeze(0).expand(self.lstm_layers, -1, -1).contiguous()
+            c_c = c_c_single.unsqueeze(0).expand(self.lstm_layers, -1, -1).contiguous()
+
+            return c_s, c_e, c_h, c_c
+
+    class ALiBi(nn.Module):
+        """Attention with Linear Biases (Press et al., 2022).
+
+        Adds position-dependent linear bias to attention scores:
+            bias[h, i, j] = -m_h * |i - j|
+        where m_h = 2^(-8*h/n_heads) is a geometric sequence of slopes.
+
+        No learnable parameters -- purely geometric positional encoding.
+        """
+
+        def __init__(self, n_heads: int):
+            super().__init__()
+            self.n_heads = n_heads
+            # Compute slopes: m_h = 2^(-8*h/n_heads) for h in 1..n_heads
+            slopes = torch.tensor([
+                2.0 ** (-8.0 * i / n_heads) for i in range(1, n_heads + 1)
+            ])
+            self.register_buffer("slopes", slopes)  # (n_heads,)
+
+        def forward(self, seq_len: int) -> torch.Tensor:
+            """Compute ALiBi bias matrix.
+
+            Parameters
+            ----------
+            seq_len : int
+                Sequence length.
+
+            Returns
+            -------
+            bias : Tensor of shape (n_heads, seq_len, seq_len)
+                Attention bias to add to QK^T / sqrt(d_k).
+            """
+            # |i - j| distance matrix
+            positions = torch.arange(seq_len, device=self.slopes.device)
+            distance = torch.abs(positions.unsqueeze(0) - positions.unsqueeze(1))  # (S, S)
+            # bias[h, i, j] = -m_h * |i - j|
+            bias = -self.slopes.view(-1, 1, 1) * distance.unsqueeze(0).float()
+            return bias  # (n_heads, S, S)
+
+    class SDPAttention(nn.Module):
+        """Scaled Dot-Product Attention using torch.nn.functional.scaled_dot_product_attention.
+
+        Automatically uses Flash Attention 2 or memory-efficient attention when
+        available on the hardware. Falls back to standard math attention otherwise.
+
+        Replaces nn.MultiheadAttention for the self-attention layer.
+        """
+
+        def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1,
+                     use_alibi: bool = True):
+            super().__init__()
+            self.embed_dim = embed_dim
+            self.num_heads = num_heads
+            self.head_dim = embed_dim // num_heads
+            assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+
+            self.q_proj = nn.Linear(embed_dim, embed_dim)
+            self.k_proj = nn.Linear(embed_dim, embed_dim)
+            self.v_proj = nn.Linear(embed_dim, embed_dim)
+            self.out_proj = nn.Linear(embed_dim, embed_dim)
+            self.dropout_p = dropout
+
+            self.alibi = ALiBi(num_heads) if use_alibi else None
+
+            # Check if scaled_dot_product_attention is available (PyTorch 2.0+)
+            self._has_sdpa = hasattr(F, "scaled_dot_product_attention")
+
+        def forward(self, x: torch.Tensor, is_causal: bool = True,
+                    need_weights: bool = False
+                    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+            """Self-attention with optional ALiBi bias and causal masking.
+
+            Parameters
+            ----------
+            x : Tensor of shape (batch, seq_len, embed_dim)
+            is_causal : bool
+                If True, apply causal masking.
+            need_weights : bool
+                If True, return attention weights (disables Flash path).
+
+            Returns
+            -------
+            output : Tensor of shape (batch, seq_len, embed_dim)
+            attn_weights : Optional Tensor of shape (batch, n_heads, seq_len, seq_len)
+            """
+            B, S, E = x.shape
+            H = self.num_heads
+            D = self.head_dim
+
+            Q = self.q_proj(x).view(B, S, H, D).transpose(1, 2)  # (B, H, S, D)
+            K = self.k_proj(x).view(B, S, H, D).transpose(1, 2)
+            V = self.v_proj(x).view(B, S, H, D).transpose(1, 2)
+
+            # Build attention bias from ALiBi
+            attn_bias = None
+            if self.alibi is not None:
+                attn_bias = self.alibi(S)  # (H, S, S)
+
+            # Add causal mask to bias
+            if is_causal and attn_bias is not None:
+                causal = torch.triu(
+                    torch.full((S, S), float("-inf"), device=x.device),
+                    diagonal=1,
+                )  # (S, S)
+                attn_bias = attn_bias + causal.unsqueeze(0)  # (H, S, S)
+
+            dropout_p = self.dropout_p if self.training else 0.0
+
+            if self._has_sdpa and not need_weights:
+                # Use SDPA (Flash Attention 2 / memory-efficient backend)
+                # When we have attn_bias, we must NOT use is_causal=True
+                # since causality is already in the bias
+                if attn_bias is not None:
+                    # Expand bias to (B, H, S, S)
+                    attn_mask = attn_bias.unsqueeze(0).expand(B, -1, -1, -1)
+                    out = F.scaled_dot_product_attention(
+                        Q, K, V,
+                        attn_mask=attn_mask,
+                        dropout_p=dropout_p,
+                        is_causal=False,  # causal already in mask
+                    )
+                else:
+                    out = F.scaled_dot_product_attention(
+                        Q, K, V,
+                        dropout_p=dropout_p,
+                        is_causal=is_causal,
+                    )
+                attn_weights = None
+            else:
+                # Fallback: manual attention computation
+                scale = math.sqrt(D)
+                scores = torch.matmul(Q, K.transpose(-2, -1)) / scale  # (B, H, S, S)
+                if attn_bias is not None:
+                    scores = scores + attn_bias.unsqueeze(0)
+                elif is_causal:
+                    causal = torch.triu(
+                        torch.full((S, S), float("-inf"), device=x.device),
+                        diagonal=1,
+                    )
+                    scores = scores + causal
+                attn_weights = torch.softmax(scores, dim=-1)
+                if dropout_p > 0:
+                    attn_weights = F.dropout(attn_weights, p=dropout_p, training=self.training)
+                out = torch.matmul(attn_weights, V)
+
+            # Reshape back
+            out = out.transpose(1, 2).contiguous().view(B, S, E)
+            out = self.out_proj(out)
+            return out, attn_weights
+
     class MomentumTransformerModel(nn.Module):
         """Full Momentum Transformer architecture.
 
         Components:
         1. Variable Selection Network (feature importance)
-        2. 2-layer LSTM encoder
-        3. Multi-head self-attention over encoded sequence
-        4. Output head: Linear -> Tanh -> position in [-1, 1]
+        2. Optional Temporal Covariate Encoder (day_of_week, month, etc.)
+        3. Optional Static Covariate Encoder (asset identity)
+        4. 2-layer LSTM encoder (with optional static-initialized hidden state)
+        5. Multi-head self-attention over encoded sequence (SDPA + ALiBi)
+        6. Output head: Linear -> Tanh -> position in [-1, 1]
+        7. Optional multi-horizon auxiliary heads (T+2, T+3, T+5)
         """
 
         def __init__(self, n_features: int, hidden_dim: int = 64,
                      lstm_layers: int = 2, n_heads: int = 4,
-                     dropout: float = 0.1):
+                     dropout: float = 0.1, use_sdpa: bool = True,
+                     use_alibi: bool = True, multi_horizon: bool = False,
+                     aux_horizons: tuple[int, ...] = (2, 3, 5),
+                     use_temporal_covariates: bool = False,
+                     use_static_covariates: bool = False,
+                     n_static_categories: int = 4,
+                     static_embed_dim: int = 8):
             super().__init__()
             self.n_features = n_features
             self.hidden_dim = hidden_dim
+            self.multi_horizon = multi_horizon
+            self.aux_horizons = aux_horizons
+            self.use_sdpa = use_sdpa
+            self.use_temporal_covariates = use_temporal_covariates
+            self.use_static_covariates = use_static_covariates
+            self.lstm_layers = lstm_layers
 
             # 1. Variable Selection Network
             self.vsn = VariableSelectionNetwork(n_features, hidden_dim, dropout)
 
-            # 2. LSTM encoder
+            # 2. Temporal Covariate Encoder (optional)
+            self.temporal_encoder = None
+            if use_temporal_covariates:
+                self.temporal_encoder = TemporalCovariateEncoder(hidden_dim)
+
+            # 3. Static Covariate Encoder (optional)
+            self.static_encoder = None
+            if use_static_covariates:
+                self.static_encoder = StaticCovariateEncoder(
+                    n_categories=n_static_categories,
+                    embed_dim=static_embed_dim,
+                    hidden_dim=hidden_dim,
+                    lstm_layers=lstm_layers,
+                )
+                # Gating for static context on VSN output
+                self.static_vsn_gate = nn.Sequential(
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.Sigmoid(),
+                )
+                # Enrichment layer for post-LSTM features
+                self.static_enrichment_grn = GatedResidualNetwork(
+                    hidden_dim, hidden_dim, hidden_dim, dropout,
+                    context_dim=hidden_dim,
+                )
+
+            # Determine LSTM input size: hidden_dim from VSN + hidden_dim from temporal (if enabled)
+            lstm_input_dim = hidden_dim
+            if use_temporal_covariates:
+                lstm_input_dim = hidden_dim * 2
+            # Projection to hidden_dim if temporal covariates change the input size
+            self.lstm_input_proj = None
+            if lstm_input_dim != hidden_dim:
+                self.lstm_input_proj = nn.Linear(lstm_input_dim, hidden_dim)
+
+            # 4. LSTM encoder
             self.lstm = nn.LSTM(
                 input_size=hidden_dim,
                 hidden_size=hidden_dim,
@@ -597,19 +967,29 @@ if HAS_TORCH:
             )
             self.lstm_norm = nn.LayerNorm(hidden_dim)
 
-            # 3. Multi-head attention
-            self.self_attn = nn.MultiheadAttention(
-                embed_dim=hidden_dim,
-                num_heads=n_heads,
-                dropout=dropout,
-                batch_first=True,
-            )
+            # 5. Multi-head attention (SDPA with ALiBi or legacy nn.MHA)
+            if use_sdpa:
+                self.self_attn = SDPAttention(
+                    embed_dim=hidden_dim,
+                    num_heads=n_heads,
+                    dropout=dropout,
+                    use_alibi=use_alibi,
+                )
+                self._legacy_attn = False
+            else:
+                self.self_attn = nn.MultiheadAttention(
+                    embed_dim=hidden_dim,
+                    num_heads=n_heads,
+                    dropout=dropout,
+                    batch_first=True,
+                )
+                self._legacy_attn = True
             self.attn_norm = nn.LayerNorm(hidden_dim)
             self.attn_grn = GatedResidualNetwork(
                 hidden_dim, hidden_dim, hidden_dim, dropout
             )
 
-            # 4. Output head — predict position signal for the last timestep
+            # 6. Output head — predict position signal for the last timestep
             self.output_head = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim // 2),
                 nn.ELU(),
@@ -626,73 +1006,156 @@ if HAS_TORCH:
                 nn.Linear(hidden_dim // 2, 1),
             )
 
-        def forward(self, x: torch.Tensor,
-                    return_attention: bool = False
-                    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-            """
+            # 7. Multi-horizon auxiliary heads (share LSTM encoder)
+            self.aux_heads = nn.ModuleDict()
+            if multi_horizon:
+                for h in aux_horizons:
+                    self.aux_heads[f"T+{h}"] = nn.Sequential(
+                        nn.Linear(hidden_dim, hidden_dim // 2),
+                        nn.ELU(),
+                        nn.Dropout(dropout),
+                        nn.Linear(hidden_dim // 2, 1),
+                        nn.Tanh(),
+                    )
+
+        def _encode(self, x: torch.Tensor,
+                    temporal_features: Optional[torch.Tensor] = None,
+                    asset_id: Optional[torch.Tensor] = None,
+                    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+            """Shared encoder: VSN -> LSTM -> Attention.
+
             Parameters
             ----------
             x : Tensor of shape (batch, seq_len, n_features)
+            temporal_features : Tensor of shape (batch, seq_len, 6), optional
+                Integer-coded temporal covariates.
+            asset_id : Tensor of shape (batch,), optional
+                Integer asset index for static covariates.
 
-            Returns
-            -------
-            position : Tensor of shape (batch, 1) -- values in [-1, 1]
-            attn_weights : Tensor of shape (batch, seq_len, seq_len), optional
+            Returns (last_hidden, attn_out, attn_weights).
             """
             # 1. Variable selection
             vsn_out = self.vsn(x)  # (batch, seq_len, hidden_dim)
 
-            # 2. LSTM encoding
-            lstm_out, _ = self.lstm(vsn_out)  # (batch, seq_len, hidden_dim)
+            # 1b. Static covariate: gate VSN output with c_s
+            c_s, c_e, c_h, c_c = None, None, None, None
+            if self.static_encoder is not None and asset_id is not None:
+                c_s, c_e, c_h, c_c = self.static_encoder(asset_id)
+                # Gate VSN output: vsn_out * sigmoid(c_s)
+                gate = self.static_vsn_gate(c_s)  # (batch, hidden_dim)
+                vsn_out = vsn_out * gate.unsqueeze(1)  # broadcast over seq_len
+
+            # 2. Temporal covariate embedding (optional)
+            lstm_input = vsn_out
+            if self.temporal_encoder is not None and temporal_features is not None:
+                temporal_embed = self.temporal_encoder(temporal_features)  # (batch, seq_len, hidden_dim)
+                lstm_input = torch.cat([vsn_out, temporal_embed], dim=-1)  # (batch, seq_len, 2*hidden_dim)
+
+            # Project back to hidden_dim if needed
+            if self.lstm_input_proj is not None:
+                lstm_input = self.lstm_input_proj(lstm_input)
+
+            # 3. LSTM encoding (with optional static-initialized hidden state)
+            if c_h is not None and c_c is not None:
+                lstm_out, _ = self.lstm(lstm_input, (c_h, c_c))
+            else:
+                lstm_out, _ = self.lstm(lstm_input)
             lstm_out = self.lstm_norm(lstm_out)
 
-            # 3. Multi-head self-attention (causal mask to prevent look-ahead)
-            seq_len = lstm_out.size(1)
-            causal_mask = torch.triu(
-                torch.ones(seq_len, seq_len, device=lstm_out.device, dtype=torch.bool),
-                diagonal=1,
-            )  # True means "mask out" for nn.MultiheadAttention
+            # 3b. Static enrichment: enrich post-LSTM features with c_e
+            if self.static_encoder is not None and c_e is not None:
+                lstm_out = self.static_enrichment_grn(
+                    lstm_out, context=c_e.unsqueeze(1).expand_as(lstm_out)
+                )
 
-            attn_out, attn_weights = self.self_attn(
-                lstm_out, lstm_out, lstm_out,
-                attn_mask=causal_mask,
-                need_weights=True,
-            )
+            # 4. Multi-head self-attention (causal mask to prevent look-ahead)
+            if self._legacy_attn:
+                seq_len = lstm_out.size(1)
+                causal_mask = torch.triu(
+                    torch.ones(seq_len, seq_len, device=lstm_out.device, dtype=torch.bool),
+                    diagonal=1,
+                )
+                attn_out, attn_weights = self.self_attn(
+                    lstm_out, lstm_out, lstm_out,
+                    attn_mask=causal_mask,
+                    need_weights=True,
+                )
+            else:
+                attn_out, attn_weights = self.self_attn(
+                    lstm_out, is_causal=True, need_weights=False,
+                )
+
             attn_out = self.attn_norm(lstm_out + attn_out)
             attn_out = self.attn_grn(attn_out)
 
-            # 4. Take the last timestep's representation
             last_hidden = attn_out[:, -1, :]  # (batch, hidden_dim)
+            return last_hidden, attn_out, attn_weights
 
-            # Position signal
+        def forward(self, x: torch.Tensor,
+                    temporal_features: Optional[torch.Tensor] = None,
+                    asset_id: Optional[torch.Tensor] = None,
+                    return_attention: bool = False
+                    ) -> torch.Tensor | tuple[torch.Tensor, ...]:
+            """
+            Parameters
+            ----------
+            x : Tensor of shape (batch, seq_len, n_features)
+            temporal_features : Tensor of shape (batch, seq_len, 6), optional
+                Integer-coded temporal covariates. Only used if
+                use_temporal_covariates=True.
+            asset_id : Tensor of shape (batch,), optional
+                Integer asset index (0-3). Only used if use_static_covariates=True.
+            return_attention : bool
+                If True, return attention weights as the last element.
+
+            Returns
+            -------
+            If multi_horizon=False:
+                position : Tensor of shape (batch, 1) -- values in [-1, 1]
+            If multi_horizon=True:
+                (position_T1, position_T2, position_T3, position_T5) each (batch, 1)
+            If return_attention=True, attn_weights is appended as the last element.
+            """
+            last_hidden, attn_out, attn_weights = self._encode(
+                x, temporal_features=temporal_features, asset_id=asset_id,
+            )
+
+            # Main T+1 position signal
             position = self.output_head(last_hidden)  # (batch, 1)
+
+            if self.multi_horizon:
+                aux_preds = {}
+                for key, head in self.aux_heads.items():
+                    aux_preds[key] = head(last_hidden)  # (batch, 1)
+                # Return (T+1, T+2, T+3, T+5, ...) in order
+                results = [position]
+                for h in self.aux_horizons:
+                    results.append(aux_preds[f"T+{h}"])
+                if return_attention:
+                    results.append(attn_weights)
+                return tuple(results)
 
             if return_attention:
                 return position, attn_weights
             return position
 
-        def classify(self, x: torch.Tensor) -> torch.Tensor:
+        def classify(self, x: torch.Tensor,
+                     temporal_features: Optional[torch.Tensor] = None,
+                     asset_id: Optional[torch.Tensor] = None,
+                     ) -> torch.Tensor:
             """Pre-training classification: predict next-day return sign.
 
-            Returns logits (batch, 1) — apply sigmoid for probability.
+            Parameters
+            ----------
+            x : Tensor of shape (batch, seq_len, n_features)
+            temporal_features : optional temporal covariates
+            asset_id : optional asset identity
+
+            Returns logits (batch, 1) -- apply sigmoid for probability.
             """
-            vsn_out = self.vsn(x)
-            lstm_out, _ = self.lstm(vsn_out)
-            lstm_out = self.lstm_norm(lstm_out)
-
-            seq_len = lstm_out.size(1)
-            causal_mask = torch.triu(
-                torch.ones(seq_len, seq_len, device=lstm_out.device, dtype=torch.bool),
-                diagonal=1,
+            last_hidden, _, _ = self._encode(
+                x, temporal_features=temporal_features, asset_id=asset_id,
             )
-            attn_out, _ = self.self_attn(
-                lstm_out, lstm_out, lstm_out,
-                attn_mask=causal_mask,
-            )
-            attn_out = self.attn_norm(lstm_out + attn_out)
-            attn_out = self.attn_grn(attn_out)
-
-            last_hidden = attn_out[:, -1, :]
             return self.cls_head(last_hidden)
 
     # ------------------------------------------------------------------
@@ -718,12 +1181,58 @@ if HAS_TORCH:
         mean_ret = strategy_returns.mean()
         std_ret = strategy_returns.std(correction=1)
 
-        # Avoid division by zero
+        # Avoid division by zero — return a small differentiable penalty
+        # that encourages the model to take positions
         if std_ret < 1e-8:
-            return torch.tensor(0.0, device=positions.device, requires_grad=True)
+            return -torch.abs(positions).mean() * 0.01
 
         sharpe = mean_ret / std_ret * annualize
         return -sharpe
+
+    def multi_horizon_loss(
+        predictions: tuple[torch.Tensor, ...],
+        returns_dict: dict[int, torch.Tensor],
+        aux_weights: tuple[float, ...] = (0.3, 0.2, 0.1),
+        aux_horizons: tuple[int, ...] = (2, 3, 5),
+    ) -> torch.Tensor:
+        """Multi-horizon Sharpe loss.
+
+        L = L_T+1 + w2*L_T+2 + w3*L_T+3 + w5*L_T+5
+
+        Parameters
+        ----------
+        predictions : tuple of Tensors
+            (pos_T1, pos_T2, pos_T3, pos_T5) each (batch, 1)
+        returns_dict : dict[int, Tensor]
+            Mapping from horizon (1, 2, 3, 5) to return tensors (batch,).
+        aux_weights : tuple[float]
+            Weights for auxiliary horizons.
+        aux_horizons : tuple[int]
+            Horizon offsets.
+
+        Returns
+        -------
+        Scalar loss tensor.
+        """
+        # Main T+1 loss
+        pos_t1 = predictions[0].squeeze(-1)
+        ret_t1 = returns_dict[1]
+        total_loss = sharpe_loss(pos_t1, ret_t1)
+
+        # Auxiliary losses
+        for i, (h, w) in enumerate(zip(aux_horizons, aux_weights)):
+            if h not in returns_dict:
+                continue
+            pos_h = predictions[i + 1].squeeze(-1)
+            ret_h = returns_dict[h]
+            # Only compute on valid (non-NaN) samples
+            valid = ~torch.isnan(ret_h)
+            if valid.sum() < 2:
+                continue
+            aux_loss = sharpe_loss(pos_h[valid], ret_h[valid])
+            total_loss = total_loss + w * aux_loss
+
+        return total_loss
 
 
 # ============================================================================
@@ -1054,6 +1563,10 @@ def _walk_forward_torch(features: np.ndarray, returns: np.ndarray,
             lstm_layers=cfg.lstm_layers,
             n_heads=cfg.n_heads,
             dropout=cfg.dropout,
+            use_sdpa=cfg.use_sdpa,
+            use_alibi=cfg.use_alibi,
+            multi_horizon=cfg.multi_horizon,
+            aux_horizons=cfg.aux_horizons,
         ).to(_DEVICE)
 
         # Pre-train with classification loss

@@ -46,11 +46,12 @@ class EventEnvelope:
         Typed payload (schema depends on event_type).
     """
 
-    ts: str
-    seq: int
-    run_id: str
-    event_type: str
-    source: str
+    schema_version: str = "1.0"
+    ts: str = ""
+    seq: int = 0
+    run_id: str = ""
+    event_type: str = ""
+    source: str = ""
     strategy_id: str = ""
     symbol: str = ""
     payload: dict = field(default_factory=dict)
@@ -70,6 +71,7 @@ class EventEnvelope:
         if ts is None:
             ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         return EventEnvelope(
+            schema_version="1.0",
             ts=ts,
             seq=seq,
             run_id=run_id,

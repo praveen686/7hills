@@ -22,6 +22,8 @@ Feature groups
 23. Pre-Open OFI      (nse_preopen)              ~8 features
 24. OI Spurts         (nse_oi_spurts)            ~6 features
 25. Crypto Expanded   (Binance FAPI)             ~30 features
+26. Cross-Asset       (nse_index_close multi)     ~6 features
+27. Macroeconomic     (RBI rate, INR/USD, crude, US10Y) ~8 features
 
 Design principles
 -----------------
@@ -41,6 +43,7 @@ Usage
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import warnings
@@ -165,14 +168,82 @@ class MegaFeatureBuilder:
         kite_1min_dir: str | Path | None = None,
         binance_dir: str | Path | None = None,
         tick_dir: str | Path | None = None,
+        cache_dir: str | Path | None = None,
+        use_cache: bool = True,
+        clip_sigma: Optional[float] = 5.0,
     ):
         self._market_dir = Path(market_dir) if market_dir else _DATA_ROOT / "market"
         self._kite_dir = Path(kite_1min_dir) if kite_1min_dir else _KITE_1MIN_DIR
         self._binance_dir = Path(binance_dir) if binance_dir else _BINANCE_DIR
         self._tick_dir = Path(tick_dir) if tick_dir else _TICK_DIR
+        self.clip_sigma = clip_sigma
+
+        # Feature cache settings
+        self._cache_dir = Path(cache_dir) if cache_dir else _DATA_ROOT / "feature_cache"
+        self._use_cache = use_cache
 
         # Lazy-loaded store
         self._store = None
+
+    # ------------------------------------------------------------------
+    # Cache helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _version_hash() -> str:
+        """Short hash of mega.py source for cache invalidation on code change."""
+        src = Path(__file__).read_bytes()
+        return hashlib.md5(src).hexdigest()[:8]
+
+    def _cache_key(self, symbol: str, start_date: str, end_date: str) -> str:
+        """Build the cache key string."""
+        return f"{symbol}_{start_date}_{end_date}_{self._version_hash()}"
+
+    def _cache_path(self, symbol: str, start_date: str, end_date: str) -> Path:
+        """Full path to the cached Parquet file."""
+        key = self._cache_key(symbol, start_date, end_date)
+        return self._cache_dir / f"{key}.parquet"
+
+    def _load_from_cache(
+        self, symbol: str, start_date: str, end_date: str,
+    ) -> tuple[pd.DataFrame, list[str]] | None:
+        """Try to load features from cache. Returns None on miss."""
+        if not self._use_cache:
+            return None
+        path = self._cache_path(symbol, start_date, end_date)
+        if not path.exists():
+            logger.info("Cache MISS: %s", path.name)
+            return None
+        try:
+            df = pd.read_parquet(path)
+            feature_names = list(df.columns)
+            logger.info(
+                "Cache HIT: %s (%d features, %d rows)",
+                path.name, len(feature_names), len(df),
+            )
+            return df, feature_names
+        except Exception:
+            logger.exception("Cache read failed for %s, recomputing", path.name)
+            return None
+
+    def _save_to_cache(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        df: pd.DataFrame,
+    ) -> None:
+        """Save features to cache."""
+        if not self._use_cache:
+            return
+        path = self._cache_path(symbol, start_date, end_date)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(path)
+            logger.info("Cache SAVE: %s (%d features, %d rows)",
+                        path.name, len(df.columns), len(df))
+        except Exception:
+            logger.exception("Cache save failed for %s", path.name)
 
     @property
     def store(self):
@@ -212,6 +283,11 @@ class MegaFeatureBuilder:
             symbol, start_date, end_date,
         )
 
+        # Check cache first
+        cached = self._load_from_cache(symbol, start_date, end_date)
+        if cached is not None:
+            return cached
+
         # Derive the underlying FnO ticker from the index name
         ticker = self._symbol_to_ticker(symbol)
 
@@ -246,6 +322,8 @@ class MegaFeatureBuilder:
             ("preopen_ofi", self._build_preopen_ofi_features, (start_date, end_date)),
             ("oi_spurts", self._build_oi_spurts_features, (start_date, end_date)),
             ("crypto_expanded", self._build_crypto_expanded_features, (start_date, end_date)),
+            ("cross_asset", self._build_cross_asset_features, (symbol, start_date, end_date)),
+            ("macro", self._build_macro_features, (start_date, end_date)),
         ]
 
         for name, fn, args in builders:
@@ -285,6 +363,25 @@ class MegaFeatureBuilder:
             combined.index.min(),
             combined.index.max(),
         )
+
+        # Save to cache for future calls
+        self._save_to_cache(symbol, start_date, end_date, combined)
+
+        # Outlier clipping: clip extreme values to [-clip_sigma, clip_sigma]
+        # to prevent +10 sigma values from destabilizing attention weights.
+        if self.clip_sigma is not None:
+            numeric_cols = combined.select_dtypes(include=[np.number]).columns.tolist()
+            if numeric_cols:
+                before = combined[numeric_cols]
+                n_clipped = (before.abs() >= self.clip_sigma).sum().sum()
+                combined[numeric_cols] = before.clip(
+                    -self.clip_sigma, self.clip_sigma,
+                )
+                if n_clipped > 0:
+                    logger.info(
+                        "Outlier clipping: %d values clipped to [%.1f, %.1f]",
+                        n_clipped, -self.clip_sigma, self.clip_sigma,
+                    )
 
         return combined, feature_names
 
@@ -2712,4 +2809,274 @@ class MegaFeatureBuilder:
             )
         except Exception:
             logger.exception("Crypto expanded features failed")
+            return pd.DataFrame()
+
+    # ==================================================================
+    # GROUP 26: Cross-Asset Features  (~6 features)
+    # ==================================================================
+
+    # All 4 tradeable indices
+    _ALL_INDEX_NAMES = [
+        "NIFTY 50", "NIFTY BANK", "NIFTY FINANCIAL SERVICES", "NIFTY MIDCAP SELECT",
+    ]
+
+    def _build_cross_asset_features(
+        self, primary_symbol: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """Cross-asset features comparing primary index with other indices.
+
+        Features:
+        - ca_nifty_bnf_corr_21d:   21-day rolling correlation of NIFTY vs BANKNIFTY returns
+        - ca_nifty_bnf_spread:     (BANKNIFTY_return - NIFTY_return) daily spread
+        - ca_nifty_bnf_spread_z21: z-score of spread over 21 days
+        - ca_relative_strength:    primary_return / avg(all_index_returns)
+        - ca_breadth_corr:         correlation of primary with equal-weight index basket
+        - ca_lead_lag_1d:          yesterday's return of the "other" major index
+
+        All features are causal (only use data available at or before each date).
+        """
+        import pyarrow.parquet as pq
+
+        lookback_start = (
+            pd.Timestamp(start_date) - pd.Timedelta(days=100)
+        ).strftime("%Y-%m-%d")
+
+        # ---------------------------------------------------------
+        # 1. Load close prices for all 4 indices from DuckDB or Kite
+        # ---------------------------------------------------------
+        index_closes: dict[str, pd.Series] = {}
+
+        for idx_name in self._ALL_INDEX_NAMES:
+            try:
+                raw = self.store.sql(
+                    'SELECT date, "Closing Index Value" as close '
+                    'FROM nse_index_close '
+                    'WHERE LOWER("Index Name") = LOWER(?) '
+                    'AND date BETWEEN ? AND ? '
+                    'ORDER BY date',
+                    [idx_name, lookback_start, end_date],
+                )
+                if raw.empty:
+                    continue
+                raw["date"] = pd.to_datetime(raw["date"])
+                raw["close"] = pd.to_numeric(raw["close"], errors="coerce")
+                raw = raw.dropna(subset=["close"]).set_index("date").sort_index()
+                raw = raw[~raw.index.duplicated(keep="last")]
+                index_closes[idx_name] = raw["close"]
+            except Exception as e:
+                logger.debug("Cross-asset: failed to load %s: %s", idx_name, e)
+                continue
+
+        if len(index_closes) < 2:
+            logger.warning("Cross-asset: need at least 2 indices, got %d", len(index_closes))
+            return pd.DataFrame()
+
+        # ---------------------------------------------------------
+        # 2. Build aligned returns DataFrame
+        # ---------------------------------------------------------
+        prices = pd.DataFrame(index_closes)
+        prices = prices.sort_index().ffill()
+        returns = np.log(prices / prices.shift(1))
+
+        feats: dict[str, pd.Series] = {}
+
+        # ---------------------------------------------------------
+        # 3. NIFTY-BANKNIFTY correlation (21d rolling)
+        # ---------------------------------------------------------
+        nifty_col = "NIFTY 50"
+        bnf_col = "NIFTY BANK"
+
+        if nifty_col in returns.columns and bnf_col in returns.columns:
+            feats["ca_nifty_bnf_corr_21d"] = (
+                returns[nifty_col]
+                .rolling(21, min_periods=21)
+                .corr(returns[bnf_col])
+            )
+
+            # ---------------------------------------------------------
+            # 4. Spread = BANKNIFTY return - NIFTY return
+            # ---------------------------------------------------------
+            spread = returns[bnf_col] - returns[nifty_col]
+            feats["ca_nifty_bnf_spread"] = spread
+
+            # Z-score of spread over 21 days
+            spread_mean = spread.rolling(21, min_periods=21).mean()
+            spread_std = spread.rolling(21, min_periods=21).std(ddof=1)
+            feats["ca_nifty_bnf_spread_z21"] = (
+                (spread - spread_mean) / spread_std.replace(0, np.nan)
+            )
+
+        # ---------------------------------------------------------
+        # 5. Relative strength: primary return / avg(all returns)
+        # ---------------------------------------------------------
+        primary_upper = primary_symbol.upper().strip()
+        if primary_upper in returns.columns:
+            avg_return = returns.mean(axis=1)
+            # Avoid division by zero
+            safe_avg = avg_return.replace(0, np.nan)
+            feats["ca_relative_strength"] = returns[primary_upper] / safe_avg
+        else:
+            feats["ca_relative_strength"] = pd.Series(np.nan, index=returns.index)
+
+        # ---------------------------------------------------------
+        # 6. Breadth correlation: correlation of primary with equal-weight basket
+        # ---------------------------------------------------------
+        if primary_upper in returns.columns:
+            other_cols = [c for c in returns.columns if c != primary_upper]
+            if other_cols:
+                basket_return = returns[other_cols].mean(axis=1)
+                feats["ca_breadth_corr"] = (
+                    returns[primary_upper]
+                    .rolling(21, min_periods=21)
+                    .corr(basket_return)
+                )
+            else:
+                feats["ca_breadth_corr"] = pd.Series(np.nan, index=returns.index)
+        else:
+            feats["ca_breadth_corr"] = pd.Series(np.nan, index=returns.index)
+
+        # ---------------------------------------------------------
+        # 7. Lead-lag: yesterday's return of the "other" major index
+        # ---------------------------------------------------------
+        # NIFTY <-> BANKNIFTY are the two major indices
+        if primary_upper == nifty_col and bnf_col in returns.columns:
+            feats["ca_lead_lag_1d"] = returns[bnf_col].shift(1)
+        elif primary_upper == bnf_col and nifty_col in returns.columns:
+            feats["ca_lead_lag_1d"] = returns[nifty_col].shift(1)
+        elif nifty_col in returns.columns:
+            # For FINNIFTY/MIDCPNIFTY, use NIFTY as the "other" major
+            feats["ca_lead_lag_1d"] = returns[nifty_col].shift(1)
+        else:
+            feats["ca_lead_lag_1d"] = pd.Series(np.nan, index=returns.index)
+
+        # ---------------------------------------------------------
+        # 8. Assemble and trim
+        # ---------------------------------------------------------
+        result = pd.DataFrame(feats, index=returns.index)
+        result = result.loc[start_date:end_date]
+        return result
+
+    # ==================================================================
+    # GROUP 27: Macroeconomic (RBI rate, INR/USD, Crude, US10Y)  (~8 features)
+    # ==================================================================
+
+    def _build_macro_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """~8 macroeconomic regime features from static CSV files.
+
+        Features: macro_rbi_rate, macro_rbi_rate_chg, macro_inr_usd_return_5d,
+        macro_inr_usd_vol_21d, macro_crude_return_5d, macro_crude_z21,
+        macro_us10y_level, macro_us10y_chg_5d — all causal.
+
+        Data is loaded from CSV files in ``common/data/macro/``.
+        If a file is missing, the corresponding features are NaN (graceful
+        degradation).
+        """
+        try:
+            from quantlaxmi.data._paths import DATA_ROOT
+            macro_dir = DATA_ROOT / "macro"
+
+            feats: dict[str, pd.Series] = {}
+
+            # We need a date range to build the feature index
+            # Use a generous pre-buffer for rolling computations
+            buffer_start = str(
+                pd.Timestamp(start_date) - pd.Timedelta(days=60)
+            )
+
+            # ---- RBI Repo Rate (step function) ----
+            rbi_path = macro_dir / "rbi_rates.csv"
+            if rbi_path.exists():
+                rbi = pd.read_csv(rbi_path, parse_dates=["date"])
+                rbi = rbi.set_index("date").sort_index()
+
+                # Create a daily step function by forward-filling
+                daily_idx = pd.date_range(buffer_start, end_date, freq="D")
+                rbi_daily = rbi["rate"].reindex(daily_idx).ffill()
+                # Back-fill the first value for dates before the first decision
+                rbi_daily = rbi_daily.bfill()
+
+                feats["macro_rbi_rate"] = rbi_daily
+
+                # Change since the previous rate decision (in bps)
+                # Compute the rate at the prior decision date
+                rate_at_decisions = rbi["rate"]
+                prev_rate = rate_at_decisions.shift(1)
+                # Map each day to the change since the last decision
+                rbi_chg = (rate_at_decisions - prev_rate) * 100  # bps
+                rbi_chg_daily = rbi_chg.reindex(daily_idx).ffill().fillna(0.0)
+                feats["macro_rbi_rate_chg"] = rbi_chg_daily
+            else:
+                logger.warning("Macro: rbi_rates.csv not found at %s", rbi_path)
+
+            # ---- INR/USD ----
+            inr_path = macro_dir / "inr_usd.csv"
+            if inr_path.exists():
+                inr = pd.read_csv(inr_path, parse_dates=["date"])
+                inr = inr.set_index("date").sort_index()
+                inr_close = inr["close"]
+
+                # 5-day return (depreciation = positive, i.e. INR weakening)
+                inr_ret_5d = inr_close.pct_change(5)
+                feats["macro_inr_usd_return_5d"] = inr_ret_5d
+
+                # 21-day realized volatility (annualized)
+                inr_ret_1d = inr_close.pct_change(1)
+                inr_vol_21d = inr_ret_1d.rolling(21, min_periods=21).std(ddof=1) * np.sqrt(252)
+                feats["macro_inr_usd_vol_21d"] = inr_vol_21d
+            else:
+                logger.warning("Macro: inr_usd.csv not found at %s", inr_path)
+
+            # ---- Crude Oil (Brent) ----
+            crude_path = macro_dir / "crude_brent.csv"
+            if crude_path.exists():
+                crude = pd.read_csv(crude_path, parse_dates=["date"])
+                crude = crude.set_index("date").sort_index()
+                crude_close = crude["close"]
+
+                # 5-day return
+                feats["macro_crude_return_5d"] = crude_close.pct_change(5)
+
+                # 21-day z-score of price level
+                crude_mean = crude_close.rolling(21, min_periods=21).mean()
+                crude_std = crude_close.rolling(21, min_periods=21).std(ddof=1)
+                feats["macro_crude_z21"] = (
+                    (crude_close - crude_mean)
+                    / crude_std.replace(0, np.nan)
+                )
+            else:
+                logger.warning("Macro: crude_brent.csv not found at %s", crude_path)
+
+            # ---- US 10-Year Treasury Yield ----
+            us10y_path = macro_dir / "us10y_yield.csv"
+            if us10y_path.exists():
+                us10y = pd.read_csv(us10y_path, parse_dates=["date"])
+                us10y = us10y.set_index("date").sort_index()
+                us10y_level = us10y["yield_pct"]
+
+                # Level (raw)
+                feats["macro_us10y_level"] = us10y_level
+
+                # 5-day change in bps
+                feats["macro_us10y_chg_5d"] = us10y_level.diff(5) * 100  # bps
+            else:
+                logger.warning("Macro: us10y_yield.csv not found at %s", us10y_path)
+
+            if not feats:
+                return pd.DataFrame()
+
+            # Combine all features, align to common index
+            result = pd.DataFrame(feats)
+            result.index.name = "date"
+            result = result.sort_index()
+
+            # Filter to requested date range
+            result = result.loc[start_date:end_date]
+
+            logger.info("Macro features: %d columns, %d rows", len(result.columns), len(result))
+            return result
+
+        except Exception:
+            logger.exception("Macro features failed")
             return pd.DataFrame()

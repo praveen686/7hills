@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backfill historical news headlines from GDELT + score with FinBERT.
+"""Backfill historical news headlines from GDELT + crypto sources + score with FinBERT.
 
 Usage:
     # Full backfill (India + crypto, last 12 months)
@@ -16,6 +16,9 @@ Usage:
 
     # Skip FinBERT scoring (just fetch headlines)
     python research/scripts/backfill_news.py --no-score
+
+    # Skip crypto news collectors (only GDELT)
+    python research/scripts/backfill_news.py --no-crypto-news
 
     # Verify features build correctly
     python research/scripts/backfill_news.py --verify
@@ -36,17 +39,18 @@ logger = logging.getLogger("backfill_news")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Backfill news from GDELT + score with FinBERT")
+    parser = argparse.ArgumentParser(description="Backfill news from GDELT + crypto sources + score with FinBERT")
     parser.add_argument("--start", default=None, help="Start date YYYY-MM-DD (default: 12 months ago)")
     parser.add_argument("--end", default=None, help="End date YYYY-MM-DD (default: today)")
     parser.add_argument(
         "--categories", nargs="+",
         default=["india_market", "india_stocks", "crypto", "us_market", "us_stocks", "europe", "intl"],
         choices=["india_market", "india_stocks", "crypto", "us_market", "us_stocks", "europe", "intl"],
-        help="Which categories to fetch (default: all)",
+        help="Which GDELT categories to fetch (default: all)",
     )
     parser.add_argument("--chunk-days", type=int, default=7, help="Days per GDELT request chunk")
     parser.add_argument("--no-score", action="store_true", help="Skip FinBERT scoring")
+    parser.add_argument("--no-crypto-news", action="store_true", help="Skip crypto news collectors (CryptoPanic, CoinGecko, etc.)")
     parser.add_argument("--verify", action="store_true", help="Build features after backfill to verify")
     args = parser.parse_args()
 
@@ -70,6 +74,25 @@ def main() -> None:
         chunk_days=args.chunk_days,
     )
     logger.info("GDELT: %d new headlines archived", n_new)
+
+    # --- Step 1b: Crypto news backfill ---
+    if not args.no_crypto_news:
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("Step 1b: Crypto news historical backfill")
+        logger.info("  Sources: CryptoPanic, CoinGecko, Fear & Greed, CryptoCompare")
+        logger.info("  Date range: %s to %s", start_date, end_date)
+        logger.info("=" * 60)
+
+        from quantlaxmi.data.collectors.news.crypto_news import backfill_all_crypto_news
+
+        n_crypto = backfill_all_crypto_news(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        logger.info("Crypto news: %d new headlines archived", n_crypto)
+    else:
+        logger.info("Skipping crypto news collectors (--no-crypto-news)")
 
     # --- Step 2: FinBERT scoring ---
     if not args.no_score:

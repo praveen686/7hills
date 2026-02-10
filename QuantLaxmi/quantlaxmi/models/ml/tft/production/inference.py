@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -115,12 +116,16 @@ class TFTInferencePipeline:
         norm_means: np.ndarray,
         norm_stds: np.ndarray,
         checkpoint_dir: Optional[Path] = None,
+        inference_timeout: float = 30.0,
+        drift_monitor: Optional[Any] = None,
     ) -> None:
         self.model = model
         self.metadata = metadata
         self.norm_means = norm_means
         self.norm_stds = norm_stds
         self.checkpoint_dir = checkpoint_dir
+        self.inference_timeout = inference_timeout
+        self._drift_monitor = drift_monitor
 
         self._feature_names = metadata.feature_names
         self._asset_names = metadata.asset_names or list(_SYMBOL_MAP.keys())
@@ -256,11 +261,60 @@ class TFTInferencePipeline:
                 metadata={"error": "no_features"},
             )
 
-        # Normalize using saved stats
-        norm_features = (features - self.norm_means) / self.norm_stds
+        # Normalize using saved stats (guard against zero std — Bug #17)
+        safe_stds = np.where(self.norm_stds > 1e-10, self.norm_stds, 1.0)
+        norm_features = (features - self.norm_means) / safe_stds
 
-        # Forward pass
-        positions, confidences, raw = self._forward(norm_features)
+        # Drift monitoring (Bug #24) — check before model forward
+        if self._drift_monitor is not None:
+            try:
+                # Flatten features for drift check: (n_days * n_assets, n_features)
+                flat_features = features.reshape(-1, features.shape[-1])
+                # Use zero predictions placeholder (pre-forward)
+                dummy_preds = np.zeros(flat_features.shape[0])
+                drift_report = self._drift_monitor.check_drift(flat_features, dummy_preds)
+                if drift_report.overall_status == "critical":
+                    logger.warning(
+                        "Feature drift detected: %d features drifted, status=%s",
+                        len(drift_report.drifted_features),
+                        drift_report.overall_status,
+                    )
+            except Exception as e:
+                logger.error("Drift monitor check failed: %s", e)
+
+        # Forward pass with timeout guard (Bug #7)
+        # Use a daemon thread so a hung forward pass cannot block the process.
+        # ThreadPoolExecutor creates non-daemon threads that prevent clean exit
+        # when the forward pass hangs (e.g. a stuck GPU op or test mock with
+        # time.sleep).  A daemon thread is abandoned on timeout and gets reaped
+        # automatically when the process exits.
+        _forward_result: list = []          # mutable container for thread result
+        _forward_error: list = []           # mutable container for thread exception
+
+        def _run_forward():
+            try:
+                _forward_result.append(self._forward(norm_features))
+            except Exception as exc:
+                _forward_error.append(exc)
+
+        worker = threading.Thread(target=_run_forward, daemon=True)
+        worker.start()
+        worker.join(timeout=self.inference_timeout)
+
+        if worker.is_alive():
+            # Thread is still running — timed out
+            logger.error(
+                "Inference timed out after %.1fs for %s",
+                self.inference_timeout,
+                d,
+            )
+            return self._safe_default(d)
+
+        if _forward_error:
+            logger.error("Inference forward pass failed: %s", _forward_error[0])
+            return self._safe_default(d)
+
+        positions, confidences, raw = _forward_result[0]
 
         # Get feature importance
         feat_imp = self._get_feature_importance()
@@ -316,6 +370,15 @@ class TFTInferencePipeline:
     # ------------------------------------------------------------------
     # Internal methods
     # ------------------------------------------------------------------
+
+    def _safe_default(self, d: date) -> InferenceResult:
+        """Return a zero-signal result when inference fails or times out."""
+        return InferenceResult(
+            date=d,
+            positions={a: 0.0 for a in self._asset_names},
+            confidences={a: 0.0 for a in self._asset_names},
+            metadata={"error": "timeout", "timeout_s": self.inference_timeout},
+        )
 
     def _build_features(
         self,
