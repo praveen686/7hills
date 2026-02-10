@@ -16,9 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from quantlaxmi.data._paths import STRATEGY_STATE
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_STRATEGY_DIR = Path("data/strategy_state")
+DEFAULT_STRATEGY_DIR = STRATEGY_STATE
 
 
 class StrategyReader:

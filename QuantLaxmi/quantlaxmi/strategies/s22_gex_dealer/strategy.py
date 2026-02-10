@@ -228,8 +228,8 @@ def _get_lot_size(store: MarketDataStore, d: date) -> int:
         )
         if df is not None and not df.empty:
             return int(df.iloc[0]["lot_size"])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Lot size lookup failed for date %s: %s", d, e)
     return LOT_SIZE  # fallback
 
 

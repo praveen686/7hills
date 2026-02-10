@@ -414,8 +414,8 @@ def _build_close_series(
                         spot = float(nifty_opts["UndrlygPric"].iloc[0])
                         if spot > 0:
                             closes[d] = spot
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Spot price lookup failed for %s on %s: %s", symbol, d, e)
         d += timedelta(days=1)
 
     if not closes:

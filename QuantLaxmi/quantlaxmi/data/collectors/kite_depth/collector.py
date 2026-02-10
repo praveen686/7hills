@@ -25,6 +25,8 @@ import pandas as pd
 from quantlaxmi.data.collectors.auth import headless_login
 from quantlaxmi.data.zerodha import KiteTickFeed, load_zerodha_env
 
+from quantlaxmi.data._paths import KITE_DEPTH_DIR
+
 from .storage import DepthStore, DepthStoreConfig, DepthTick
 from .tokens import (
     FuturesToken,
@@ -68,7 +70,7 @@ class DepthCollector:
         futures_only: bool = False,
     ):
         if base_dir is None:
-            base_dir = Path("data/zerodha/5level")
+            base_dir = KITE_DEPTH_DIR
 
         self.config = DepthStoreConfig(
             base_dir=base_dir,

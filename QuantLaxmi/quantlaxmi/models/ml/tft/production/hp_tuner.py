@@ -20,6 +20,7 @@ Usage
 
 from __future__ import annotations
 
+import gc
 import logging
 import math
 import time
@@ -170,6 +171,7 @@ class HPTuner:
         def objective(trial: optuna.Trial) -> float:
             # Clear GPU cache before each trial
             if _HAS_TORCH and torch.cuda.is_available():
+                gc.collect()
                 torch.cuda.empty_cache()
             try:
                 return self._objective(
@@ -180,6 +182,7 @@ class HPTuner:
                     "Trial %d OOM with params: %s — skipping",
                     trial.number, trial.params,
                 )
+                gc.collect()
                 torch.cuda.empty_cache()
                 return float("-inf")
 
@@ -337,16 +340,17 @@ class HPTuner:
     def _sample_params(self, trial: "optuna.Trial") -> dict[str, Any]:
         """Sample hyperparameters from the search space.
 
-        Note: n_context and d_hidden upper bounds are constrained for T4 GPU
-        (16GB VRAM). With 80-276 features, n_context=32 + d_hidden=128 causes OOM.
+        gc.collect() + torch.cuda.empty_cache() between trials now properly frees
+        VRAM, so the full search space (including d_hidden=128, n_context=32) fits
+        on the T4 16GB GPU.
         """
         return {
-            "d_hidden": trial.suggest_categorical("d_hidden", [32, 48, 64, 96]),
+            "d_hidden": trial.suggest_categorical("d_hidden", [32, 48, 64, 96, 128]),
             "n_heads": trial.suggest_categorical("n_heads", [2, 4, 8]),
             "lstm_layers": trial.suggest_categorical("lstm_layers", [1, 2, 3]),
             "dropout": trial.suggest_float("dropout", 0.05, 0.3),
             "seq_len": trial.suggest_categorical("seq_len", [21, 42, 63]),
-            "n_context": trial.suggest_categorical("n_context", [8, 16]),
+            "n_context": trial.suggest_categorical("n_context", [8, 16, 32]),
             "lr": trial.suggest_float("lr", 3e-4, 3e-3, log=True),
             "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64]),
             "mle_weight": trial.suggest_float("mle_weight", 0.01, 0.2),
@@ -524,6 +528,7 @@ class HPTuner:
         )
 
         del model
+        gc.collect()
         torch.cuda.empty_cache()
         return oos_sharpe
 

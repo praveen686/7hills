@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from datetime import date
 from pathlib import Path
 
+from quantlaxmi.data._paths import STRATEGY_STATE
 from quantlaxmi.data.store import MarketDataStore
 from quantlaxmi.strategies.protocol import Signal
 
@@ -30,8 +31,8 @@ class BaseStrategy(ABC):
       - ``_scan_impl(d, store)`` — the actual scanning logic
     """
 
-    def __init__(self, state_dir: Path | str = Path("data/strategy_state")):
-        self._state_dir = Path(state_dir)
+    def __init__(self, state_dir: Path | str | None = None):
+        self._state_dir = Path(state_dir) if state_dir else STRATEGY_STATE
         self._state: dict = {}
         self._load_state()
 
@@ -112,3 +113,36 @@ class BaseStrategy(ABC):
     def update_state(self, updates: dict) -> None:
         self._state.update(updates)
         self._save_state()
+
+    # ------------------------------------------------------------------
+    # CUSUM event filter (AFML integration)
+    # ------------------------------------------------------------------
+
+    def cusum_events(
+        self, close: "pd.Series", threshold_mult: float = 1.0
+    ) -> "pd.DatetimeIndex":
+        """Get CUSUM-filtered event timestamps for adaptive sampling.
+
+        Uses AFML's symmetric CUSUM filter with an adaptive threshold
+        based on daily volatility. Events fire on statistically
+        significant mean shifts — sparse in calm markets, frequent
+        in volatile regimes.
+
+        Parameters
+        ----------
+        close : pd.Series
+            Price series with DatetimeIndex.
+        threshold_mult : float
+            Multiplier on daily vol for the CUSUM threshold.
+            Higher = fewer events, lower = more events.
+
+        Returns
+        -------
+        pd.DatetimeIndex
+            Timestamps at which CUSUM events fired.
+        """
+        from quantlaxmi.models.afml import cusum_filter, get_daily_vol
+
+        daily_vol = get_daily_vol(close)
+        threshold = daily_vol * threshold_mult
+        return cusum_filter(close, threshold=threshold)

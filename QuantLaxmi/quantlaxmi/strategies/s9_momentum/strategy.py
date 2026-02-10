@@ -207,7 +207,8 @@ class S9MomentumStrategy(BaseStrategy):
                 score = self._score_stock(sym, d, fno, delivery, hist_delivery)
                 if score is not None:
                     scores.append(score)
-            except Exception:
+            except Exception as e:
+                logger.debug("Score failed for %s: %s", sym, e)
                 continue
 
         # Assign ranks

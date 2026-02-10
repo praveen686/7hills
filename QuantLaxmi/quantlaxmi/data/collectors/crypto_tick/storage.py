@@ -24,6 +24,8 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from quantlaxmi.data._paths import CRYPTO_TICK_DATA
+
 logger = logging.getLogger(__name__)
 
 
@@ -183,7 +185,7 @@ class _SymbolWriter:
 
 @dataclass
 class TickStoreConfig:
-    base_dir: Path = field(default_factory=lambda: Path("data/ticks"))
+    base_dir: Path = field(default_factory=lambda: CRYPTO_TICK_DATA)
     flush_interval_sec: float = 300.0       # flush every 5 min
     flush_threshold: int = 50_000           # or every 50K ticks per symbol
 

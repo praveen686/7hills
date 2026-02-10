@@ -19,10 +19,13 @@ Book reference: Ch 10.2 (Optimal Execution), Almgren & Chriss (2001),
 """
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 try:
     import torch
@@ -381,7 +384,8 @@ class OptimalExecutionAgent:
 
                 try:
                     result = env.step(act)
-                except Exception:
+                except Exception as e:
+                    logger.warning("Execution agent env step failed: %s", e)
                     break
 
                 states.append(state_arr)

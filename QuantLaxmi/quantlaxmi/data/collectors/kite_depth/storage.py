@@ -25,6 +25,8 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from quantlaxmi.data._paths import KITE_DEPTH_DIR
+
 logger = logging.getLogger(__name__)
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -299,7 +301,7 @@ class _DepthSymbolWriter:
 @dataclass
 class DepthStoreConfig:
     base_dir: Path = field(
-        default_factory=lambda: Path("data/zerodha/5level")
+        default_factory=lambda: KITE_DEPTH_DIR
     )
     flush_interval_sec: float = 60.0
     flush_threshold: int = 10_000

@@ -50,6 +50,12 @@ except ImportError:
     _HAS_TORCH = False
     _DEVICE = None
 
+try:
+    import wandb
+    _HAS_WANDB = True
+except ImportError:
+    _HAS_WANDB = False
+
 
 # ============================================================================
 # Configuration
@@ -82,7 +88,7 @@ class TrainingPipelineConfig:
 
     # Phase 4: HP tuning
     tuning_n_trials: int = 40
-    tuning_timeout_seconds: int = 14400  # 4 hours
+    tuning_timeout_seconds: int = 0  # 0 = no timeout (use n_trials as stopping criterion)
 
     # Phase 5: Production pass
     production_pretrain_epochs: int = 30
@@ -93,6 +99,19 @@ class TrainingPipelineConfig:
 
     # Purge gap (days between train end and test start to prevent look-ahead)
     purge_gap: int = 5
+
+    # Target mode: "forward_return" (default) or "triple_barrier"
+    target_mode: str = "forward_return"
+    # Triple barrier params (only used when target_mode="triple_barrier")
+    tb_pt_sl: tuple[float, float] = (1.0, 1.0)
+    tb_num_days: int = 5
+    tb_min_ret: float = 0.0
+
+    # CV mode: "walk_forward" (default) or "cpcv"
+    cv_mode: str = "walk_forward"
+    # CPCV params (only used when cv_mode="cpcv")
+    cpcv_n_splits: int = 10
+    cpcv_n_test_groups: int = 2
 
     # Checkpoint
     checkpoint_base_dir: str = "checkpoints"
@@ -152,6 +171,7 @@ class TrainingPipeline:
     def __init__(self, config: Optional[TrainingPipelineConfig] = None) -> None:
         self.config = config or TrainingPipelineConfig()
         self._progress_bar = None
+        self._wandb_run = None
 
     def run(self) -> TrainingResult:
         """Execute the full 5-phase pipeline.
@@ -166,6 +186,38 @@ class TrainingPipeline:
         cfg = self.config
         result = TrainingResult()
         t0 = time.time()
+
+        # Initialize W&B run for experiment tracking
+        if _HAS_WANDB:
+            try:
+                self._wandb_run = wandb.init(
+                    project="quantlaxmi-tft",
+                    job_type="training",
+                    name=f"pipeline_{cfg.model_type}_{time.strftime('%Y%m%d_%H%M%S')}",
+                    config={
+                        "start_date": cfg.start_date,
+                        "end_date": cfg.end_date,
+                        "symbols": cfg.symbols,
+                        "d_hidden": cfg.d_hidden,
+                        "n_heads": cfg.n_heads,
+                        "lstm_layers": cfg.lstm_layers,
+                        "dropout": cfg.dropout,
+                        "seq_len": cfg.seq_len,
+                        "lr": cfg.lr,
+                        "batch_size": cfg.batch_size,
+                        "loss_mode": cfg.loss_mode,
+                        "purge_gap": cfg.purge_gap,
+                        "production_pretrain_epochs": cfg.production_pretrain_epochs,
+                        "production_finetune_epochs": cfg.production_finetune_epochs,
+                        "tuning_n_trials": cfg.tuning_n_trials,
+                        "skip_feature_selection": cfg.skip_feature_selection,
+                        "skip_tuning": cfg.skip_tuning,
+                    },
+                )
+                logger.info("W&B run initialized: %s", self._wandb_run.url)
+            except Exception as e:
+                logger.warning("W&B init failed (continuing without): %s", e)
+                self._wandb_run = None
 
         phases = [
             ("Phase 1: Pre-filter features", self._phase1_prefilter),
@@ -205,12 +257,39 @@ class TrainingPipeline:
             result.phase_times[phase_name] = elapsed
             logger.info("%s completed in %.1fs", phase_name, elapsed)
 
+            # Log phase timing to W&B
+            if self._wandb_run is not None:
+                try:
+                    self._wandb_run.log({
+                        f"phase_time/{phase_name}": elapsed,
+                    })
+                except Exception:
+                    pass
+
         result.elapsed_seconds = time.time() - t0
         logger.info(
             "Pipeline complete in %.1fs — Sharpe=%.3f, features=%d→%d",
             result.elapsed_seconds, result.sharpe_oos,
             result.n_features_initial, result.n_features_final,
         )
+
+        # Log final summary to W&B
+        if self._wandb_run is not None:
+            try:
+                self._wandb_run.summary.update({
+                    "sharpe_oos": result.sharpe_oos,
+                    "total_return_oos": result.total_return_oos,
+                    "max_drawdown_oos": result.max_drawdown_oos,
+                    "n_features_initial": result.n_features_initial,
+                    "n_features_prefiltered": result.n_features_prefiltered,
+                    "n_features_final": result.n_features_final,
+                    "elapsed_seconds": result.elapsed_seconds,
+                })
+                self._wandb_run.finish()
+                logger.info("W&B run finished successfully")
+            except Exception as e:
+                logger.warning("W&B finish failed: %s", e)
+
         return result
 
     # ------------------------------------------------------------------
@@ -345,7 +424,11 @@ class TrainingPipeline:
             feat_mean = np.nanmean(flat[valid], axis=0)
             feat_std = np.nanstd(flat[valid], axis=0, ddof=1)
             feat_std = np.where(feat_std > 1e-10, feat_std, 1.0)
-            norm_features = (features - feat_mean) / feat_std
+            # Only normalize the relevant slice (train+test window + seq lookback)
+            norm_lo = max(0, start - x_cfg.seq_len)
+            norm_hi = test_end
+            norm_features = np.full_like(features, np.nan)
+            norm_features[norm_lo:norm_hi] = (features[norm_lo:norm_hi] - feat_mean) / feat_std
 
             # Build episodes
             X_tgt, X_ctx, X_tid, X_cid, Y = [], [], [], [], []
@@ -500,6 +583,26 @@ class TrainingPipeline:
             (1.0 - len(kept_names) / max(len(current_names), 1)) * 100,
         )
 
+        # Log feature selection to W&B
+        if self._wandb_run is not None:
+            try:
+                self._wandb_run.log({
+                    "features/n_initial": result.n_features_initial,
+                    "features/n_prefiltered": len(current_names),
+                    "features/n_final": len(kept_names),
+                    "features/reduction_pct": (1.0 - len(kept_names) / max(len(current_names), 1)) * 100,
+                })
+                # Log top-20 feature weights as a table
+                if report.mean_vsn_weights:
+                    ranked = sorted(report.mean_vsn_weights.items(), key=lambda x: -x[1])[:20]
+                    table = wandb.Table(columns=["rank", "feature", "vsn_weight", "stability"])
+                    for i, (feat, weight) in enumerate(ranked, 1):
+                        stab = report.stability_scores.get(feat, 0.0)
+                        table.add_data(i, feat, weight, stab)
+                    self._wandb_run.log({"features/top_20_vsn": table})
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------
     # Phase 4: HP Tuning
     # ------------------------------------------------------------------
@@ -557,6 +660,27 @@ class TrainingPipeline:
         # Log fANOVA HP importances
         if tuning_result.hp_importances:
             state["hp_importances"] = tuning_result.hp_importances
+
+        # Log HP tuning results to W&B
+        if self._wandb_run is not None:
+            try:
+                self._wandb_run.log({
+                    "tuning/best_sharpe": tuning_result.best_sharpe,
+                    "tuning/n_trials": tuning_result.n_trials_completed,
+                })
+                # Log best params
+                for k, v in tuning_result.best_params.items():
+                    self._wandb_run.config.update({f"best_{k}": v})
+                # Log fANOVA importances
+                if tuning_result.hp_importances:
+                    table = wandb.Table(columns=["param", "importance"])
+                    for param, imp in sorted(
+                        tuning_result.hp_importances.items(), key=lambda x: -x[1]
+                    ):
+                        table.add_data(param, imp)
+                    self._wandb_run.log({"tuning/fanova_importances": table})
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Phase 5: Production pass
@@ -643,7 +767,11 @@ class TrainingPipeline:
             feat_mean = np.nanmean(flat[valid], axis=0)
             feat_std = np.nanstd(flat[valid], axis=0, ddof=1)
             feat_std = np.where(feat_std > 1e-10, feat_std, 1.0)
-            norm_features = (features - feat_mean) / feat_std
+            # Only normalize the relevant slice (train+test window + seq lookback)
+            norm_lo = max(0, start - x_cfg.seq_len)
+            norm_hi = test_end
+            norm_features = np.full_like(features, np.nan)
+            norm_features[norm_lo:norm_hi] = (features[norm_lo:norm_hi] - feat_mean) / feat_std
 
             last_norm_means = feat_mean
             last_norm_stds = feat_std
@@ -807,6 +935,28 @@ class TrainingPipeline:
                     "Fold %d OOS: Sharpe=%.3f (%d predictions)",
                     fold_idx, fold_sharpe, len(fold_returns),
                 )
+
+                # Log per-fold metrics to W&B
+                if self._wandb_run is not None:
+                    try:
+                        running_sharpe = 0.0
+                        if all_oos_returns:
+                            oos_so_far = np.array(all_oos_returns)
+                            running_sharpe = float(
+                                (oos_so_far.mean() / max(oos_so_far.std(ddof=1), 1e-8))
+                                * math.sqrt(252)
+                            )
+                        self._wandb_run.log({
+                            "fold/idx": fold_idx,
+                            "fold/sharpe_oos": float(fold_sharpe),
+                            "fold/n_predictions": len(fold_returns),
+                            "fold/mean_return": float(fold_arr.mean()),
+                            "fold/best_val_sharpe": float(best_val_sharpe),
+                            "running/sharpe_oos": running_sharpe,
+                            "running/n_returns": len(all_oos_returns),
+                        })
+                    except Exception:
+                        pass
 
             last_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             del model

@@ -15,9 +15,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from quantlaxmi.data._paths import PORTFOLIO_STATE
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_FILE = Path("data/state/portfolio.json")
+DEFAULT_STATE_FILE = PORTFOLIO_STATE
 
 
 @dataclass

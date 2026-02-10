@@ -19,12 +19,13 @@ from pathlib import Path
 
 from quantlaxmi.core.events.envelope import EventEnvelope
 from quantlaxmi.core.events.types import EventType
+from quantlaxmi.data._paths import EVENTS_DIR
 from quantlaxmi.engine.replay.reader import WalReader
 
 logger = logging.getLogger(__name__)
 
 # Default WAL directory
-DEFAULT_WAL_DIR = Path("data/events")
+DEFAULT_WAL_DIR = EVENTS_DIR
 
 
 class WalQueryService:

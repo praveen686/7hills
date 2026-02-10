@@ -35,6 +35,7 @@ from quantlaxmi.core.allocator.meta import MetaAllocator
 from quantlaxmi.core.risk.manager import RiskManager
 from quantlaxmi.core.events.envelope import EventEnvelope
 
+from quantlaxmi.data._paths import EVENTS_DIR
 from quantlaxmi.engine.orchestrator import Orchestrator
 from quantlaxmi.engine.live.event_log import EventLogWriter, read_event_log
 from quantlaxmi.engine.replay.reader import WalReader
@@ -106,7 +107,7 @@ class ReplayEngine:
         registry: StrategyRegistry,
         allocator: MetaAllocator | None = None,
         risk_manager: RiskManager | None = None,
-        ref_events_dir: Path | str = Path("data/events"),
+        ref_events_dir: Path | str = EVENTS_DIR,
         verify_hashes: bool = False,
     ):
         self._store = store

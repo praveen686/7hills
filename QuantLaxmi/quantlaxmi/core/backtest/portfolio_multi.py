@@ -146,7 +146,8 @@ def run_portfolio_backtest(
                 all_signals.extend(signals)
                 attr = result.strategy_attr[strategy.strategy_id]
                 attr.signals_count += len(signals)
-            except Exception:
+            except Exception as e:
+                logger.warning("Strategy %s scan failed: %s", strategy.strategy_id, e)
                 continue
 
         result.total_signals += len(all_signals)
@@ -294,8 +295,8 @@ def _get_spot(store: MarketDataStore, symbol: str, d: date) -> float:
         )
         if not df.empty:
             return float(df["close"].iloc[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("NSE index close lookup failed for %s on %s: %s", symbol, d_str, e)
 
     try:
         df = store.sql(
@@ -305,7 +306,7 @@ def _get_spot(store: MarketDataStore, symbol: str, d: date) -> float:
         )
         if not df.empty:
             return float(df["close"].iloc[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("FnO bhavcopy close lookup failed for %s on %s: %s", symbol, d_str, e)
 
     return 0.0

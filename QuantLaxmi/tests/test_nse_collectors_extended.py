@@ -559,10 +559,10 @@ class TestOiSpurtsFeatures:
 
 
 class TestMegaBuilderGroupCount:
-    """Verify total builder groups = 24."""
+    """Verify total builder groups = 25."""
 
-    def test_builders_list_has_24_entries(self):
-        """The builders list in build() should have 24 entries."""
+    def test_builders_list_has_25_entries(self):
+        """The builders list in build() should have 25 entries."""
         from quantlaxmi.features.mega import MegaFeatureBuilder
 
         builder = MegaFeatureBuilder()
@@ -572,7 +572,7 @@ class TestMegaBuilderGroupCount:
         source = inspect.getsource(builder.build)
         # Count lines that match the pattern ("name", self._build_
         count = source.count("self._build_")
-        assert count == 24, f"Expected 24 builder groups, found {count}"
+        assert count == 25, f"Expected 25 builder groups, found {count}"
 
 
 class TestNseFileRegistryCount:

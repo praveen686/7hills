@@ -18,6 +18,7 @@ from dataclasses import asdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from quantlaxmi.data._paths import EVENTS_DIR, SESSIONS_DIR
 from quantlaxmi.core.allocator.meta import MetaAllocator, TargetPosition
 from quantlaxmi.core.allocator.regime import VIXRegime, detect_regime
 from quantlaxmi.data.store import MarketDataStore
@@ -70,13 +71,13 @@ class Orchestrator:
         # Event infrastructure (Phase 2)
         self._run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
         self._event_log = event_log or EventLogWriter(
-            base_dir=Path("data/events"),
+            base_dir=EVENTS_DIR,
             run_id=self._run_id,
         )
         self._signal_journal = SignalJournal(self._event_log)
         self._exec_journal = ExecutionJournal(self._event_log)
         self._session = SessionManifest(
-            base_dir=Path("data/sessions"),
+            base_dir=SESSIONS_DIR,
             run_id=self._run_id,
         )
 
@@ -446,8 +447,8 @@ class Orchestrator:
             )
             if not df.empty:
                 return float(df["close"].iloc[0])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Index close lookup failed for %s: %s", symbol, e)
 
         # Fallback: try FnO close
         try:
@@ -459,8 +460,8 @@ class Orchestrator:
             )
             if not df.empty:
                 return float(df["close"].iloc[0])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("FnO close lookup failed for %s: %s", symbol, e)
 
         return 0.0
 

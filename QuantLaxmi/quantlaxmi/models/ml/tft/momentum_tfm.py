@@ -1186,7 +1186,8 @@ def _load_daily_close(
                 if np.isnan(day_close) or day_close <= 0:
                     continue
                 records.append({"date": d_str, "close": day_close})
-            except Exception:
+            except Exception as e:
+                logger.debug("Kite spot close read failed for %s: %s", d_str, e)
                 continue
 
         if records:

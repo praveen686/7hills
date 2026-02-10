@@ -83,8 +83,8 @@ def _get_nifty_close_series(store, start: date, end: date) -> pd.Series:
                         spot = float(nifty_opts["UndrlygPric"].iloc[0])
                         if spot > 0:
                             closes[d] = spot
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Spot price lookup failed on %s: %s", d, e)
         d += timedelta(days=1)
 
     if not closes:

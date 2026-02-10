@@ -26,6 +26,7 @@ from pathlib import Path
 from quantlaxmi.core.events.envelope import EventEnvelope
 from quantlaxmi.core.events.serde import serialize_envelope, deserialize_envelope
 from quantlaxmi.core.events.hashing import chain_hash, GENESIS
+from quantlaxmi.data._paths import EVENTS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class EventLogWriter:
 
     def __init__(
         self,
-        base_dir: Path | str = Path("data/events"),
+        base_dir: Path | str = EVENTS_DIR,
         run_id: str = "",
         fsync_policy: str = "batch",
         enable_hash_chain: bool = False,

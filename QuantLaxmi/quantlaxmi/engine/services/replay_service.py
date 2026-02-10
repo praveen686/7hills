@@ -16,6 +16,7 @@ from pathlib import Path
 
 from quantlaxmi.core.events.envelope import EventEnvelope
 from quantlaxmi.core.events.types import EventType
+from quantlaxmi.data._paths import EVENTS_DIR
 from quantlaxmi.engine.replay.reader import WalReader
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ _TIMELINE_TYPES = frozenset({
     EventType.SNAPSHOT.value,
 })
 
-DEFAULT_WAL_DIR = Path("data/events")
+DEFAULT_WAL_DIR = EVENTS_DIR
 
 
 class ReplayService:

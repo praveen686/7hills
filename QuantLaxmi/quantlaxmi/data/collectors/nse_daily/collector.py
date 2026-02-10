@@ -15,6 +15,8 @@ from pathlib import Path
 
 import requests
 
+from quantlaxmi.data._paths import NSE_DAILY_DIR
+
 from .files import ALL_FILES, BASE_URL, NSEFile
 
 logger = logging.getLogger(__name__)
@@ -58,7 +60,7 @@ class NSEDailyCollector:
     """Downloads NSE daily archive files into date-partitioned storage."""
 
     def __init__(self, base_dir: Path | None = None, tier: int | None = None, ingest: bool = True):
-        self.base_dir = base_dir or Path("data/nse/daily")
+        self.base_dir = base_dir or NSE_DAILY_DIR
         self.tier = tier
         self.ingest = ingest
         self._session: requests.Session | None = None

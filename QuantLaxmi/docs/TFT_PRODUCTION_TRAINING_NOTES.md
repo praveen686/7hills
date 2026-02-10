@@ -74,20 +74,69 @@ Full training with the best features (from Phase 3) and best HPs (from Phase 4).
 Variable Selection Network learn attention weights, then extract those weights
 across folds to identify the stable, high-importance subset.
 
-### Top Features by VSN Weight
+### All 73 Selected Features by VSN Weight
 
-| Rank | Feature                          | VSN Weight | Stability |
-|------|----------------------------------|------------|-----------|
-| 1    | `vix_level`                      | 4.5%       | 36%       |
-| 2    | `pvol_client_opt_put_net_z21`    | 4.2%       | 27%       |
-| 3    | `pvol_pro_opt_call_net`          | 2.7%       | 36%       |
-| 4    | `pvol_pro_opt_call_net_z21`      | 2.4%       | 55%       |
-| 5    | `mktact_total_value`             | 2.3%       | 27%       |
-| 6    | `pvol_dii_opt_put_net_z21`       | 1.6%       | 82%       |
+`*` = recommended for production (stability >= 25%)
 
-Feature #6 (`pvol_dii_opt_put_net_z21`) has the highest stability at 82%,
-meaning it was consistently important across nearly all folds. This is arguably
-more valuable than a higher raw weight with low stability.
+| Rank | Feature | VSN Weight | Stability |
+|------|---------|------------|-----------|
+| 1 | `vix_level` | 4.53% | 36.4% * |
+| 2 | `pvol_client_opt_put_net_z21` | 4.18% | 27.3% * |
+| 3 | `pvol_pro_opt_call_net` | 2.73% | 36.4% * |
+| 4 | `pvol_pro_opt_call_net_z21` | 2.44% | 54.5% * |
+| 5 | `mktact_total_value` | 2.32% | 27.3% * |
+| 6 | `pvol_dii_opt_put_net_z21` | 1.64% | 81.8% * |
+| 7 | `inst_dii_fut_idx_net` | 1.56% | 27.3% * |
+| 8 | `mktact_idx_fut_value` | 1.52% | 36.4% * |
+| 9 | `opt_dte` | 1.44% | 45.5% * |
+| 10 | `nsevol_mkt_avg_z21` | 1.38% | 36.4% * |
+| 11 | `vix_range_norm` | 1.30% | 45.5% * |
+| 12 | `fut_m1_basis_ann_z21` | 1.18% | 27.3% * |
+| 13 | `fii_bnf_fut_net_z21` | 1.10% | 45.5% * |
+| 14 | `ban_count` | 0.99% | 27.3% * |
+| 15 | `vix_ret_1d` | 0.98% | 54.5% * |
+| 16 | `brd_ret_dispersion` | 0.94% | 72.7% * |
+| 17 | `inst_dii_opt_idx_net_put` | 0.93% | 18.2% |
+| 18 | `brd_pct_down_3pct` | 0.86% | 45.5% * |
+| 19 | `inst_fii_opt_idx_net_call` | 0.79% | 36.4% * |
+| 20 | `optx_oi_pcr_zscore_21d` | 0.79% | 18.2% |
+| 21 | `optx_pcr_oi` | 0.74% | 36.4% * |
+| 22 | `pvol_dii_opt_put_net` | 0.72% | 36.4% * |
+| 23 | `px_gap` | 0.71% | 45.5% * |
+| 24 | `optx_term_slope` | 0.68% | 27.3% * |
+| 25 | `pvol_pro_long_ratio` | 0.67% | 45.5% * |
+| 26 | `intra_orb_width` | 0.67% | 36.4% * |
+| 27 | `opt_total_call_oi_chg` | 0.63% | 54.5% * |
+| 28 | `brd_ad_ratio` | 0.62% | 18.2% |
+| 29 | `pvol_dii_opt_call_net_z21` | 0.59% | 36.4% * |
+| 30 | `fii_idx_fut_oi` | 0.58% | 54.5% * |
+| 31 | `fut_total_oi_chg` | 0.56% | 27.3% * |
+| 32 | `fii_bnf_fut_net` | 0.55% | 18.2% |
+| 33 | `inst_pro_opt_idx_net_put` | 0.54% | 36.4% * |
+| 34 | `mktact_stk_fut_contracts` | 0.52% | 18.2% |
+| 35 | `pvol_dii_opt_call_net` | 0.52% | 36.4% * |
+| 36 | `brd_ad_ratio_ma5` | 0.51% | 27.3% * |
+| 37 | `opt_vwas_dist` | 0.48% | 45.5% * |
+| 38 | `crypto_btc_ret_1d` | 0.46% | 45.5% * |
+| 39 | `pvol_dii_fut_idx_net_z21` | 0.45% | 45.5% * |
+| 40 | `inst_client_fut_stk_net` | 0.45% | 45.5% * |
+| 41 | `pvol_client_opt_call_net_z21` | 0.43% | 36.4% * |
+| 42 | `intra_orb_width_ma5` | 0.43% | 18.2% |
+| 43 | `pvol_dii_fut_idx_net` | 0.42% | 36.4% * |
+| 44 | `pvol_client_total_net_z21` | 0.42% | 45.5% * |
+| 45 | `nfo_fut_oi_z21` | 0.42% | 36.4% * |
+| 46 | `pvol_pro_fut_idx_net` | 0.42% | 36.4% * |
+| 47 | `intra_orb_break_down` | 0.41% | 36.4% * |
+| 48 | `inst_client_total_net` | 0.40% | 45.5% * |
+| 49 | `pvol_pro_fut_idx_net_z21` | 0.40% | 36.4% * |
+| 50 | `intra_rvol_1min` | 0.39% | 45.5% * |
+
+Features 51-73 had VSN weights below 0.39% but passed the stability threshold.
+The remaining 203 features were pruned (weight < 0.3% or stability < 25%).
+
+**Stability champion**: `pvol_dii_opt_put_net_z21` (rank 6) at 81.8% stability —
+consistently important across nearly all folds. More reliable than higher-weight
+features with lower stability.
 
 ### Key Observations
 
@@ -157,6 +206,26 @@ more valuable than a higher raw weight with low stability.
 Optuna's `MedianPruner` killed underperforming configurations after fold 1,
 saving substantial compute. The progression from 0.66 to 1.88 over 10 trials
 shows meaningful optimization surface — HP choice matters for this model.
+
+### fANOVA Hyperparameter Importance
+
+**Added post-run**: `FanovaImportanceEvaluator` now runs automatically after
+Optuna completes (added to `hp_tuner.py`). fANOVA decomposes the variance in
+the objective (OOS Sharpe) across hyperparameters using functional ANOVA.
+
+This tells us which HPs are worth tuning further (high importance) vs which
+have negligible effect (can be fixed). Important distinction:
+
+- **fANOVA = HP importance** (which hyperparameters affect Sharpe most)
+- **VSN weights = feature importance** (which input features the model attends to)
+
+These are orthogonal — fANOVA operates on the HP search space, VSN operates
+on the feature space. Both are needed for a complete understanding.
+
+**Note**: fANOVA was NOT available for the first run (2026-02-10) because it
+was added after Phase 4 completed. Results will be available from the next run.
+With only 10 completed trials, fANOVA estimates will be noisy — 40+ trials
+would give more reliable importance estimates.
 
 ---
 

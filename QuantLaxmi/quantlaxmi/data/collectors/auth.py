@@ -24,9 +24,11 @@ import requests
 from dotenv import load_dotenv
 from kiteconnect import KiteConnect
 
+from quantlaxmi.data._paths import ZERODHA_SESSION_CACHE
+
 logger = logging.getLogger(__name__)
 
-TOKEN_CACHE = Path("data/state/zerodha_session.json")
+TOKEN_CACHE = ZERODHA_SESSION_CACHE
 
 
 def _load_env() -> dict[str, str]:

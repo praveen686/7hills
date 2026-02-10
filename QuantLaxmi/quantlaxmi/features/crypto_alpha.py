@@ -198,15 +198,11 @@ class ReturnDistribution(Feature):
         out["skew"] = ret.rolling(self.window).skew()
         out["kurtosis"] = ret.rolling(self.window).kurt()
 
-        # Tail risk: fraction of returns beyond 2 std
+        # Tail risk: fraction of returns beyond 2 std (vectorized, causal)
         std = ret.rolling(self.window).std()
         threshold = 2 * std
-        out["tail_ratio"] = (
-            ret.abs().rolling(self.window).apply(
-                lambda x: (x > threshold.iloc[-1]).mean() if len(x) == self.window else np.nan,
-                raw=False,
-            )
-        )
+        exceeds = (ret.abs() > threshold).astype(float)
+        out["tail_ratio"] = exceeds.rolling(self.window, min_periods=self.window).mean()
 
         return out
 

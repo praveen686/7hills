@@ -22,6 +22,8 @@ from pathlib import Path
 import pandas as pd
 from kiteconnect import KiteConnect
 
+from quantlaxmi.data._paths import CHAIN_SNAPSHOTS
+
 logger = logging.getLogger(__name__)
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -53,7 +55,7 @@ SPOT_SYMBOLS = {
 # Number of strikes around ATM to capture (each side)
 STRIKES_EACH_SIDE = 30
 
-SNAPSHOT_DIR = Path("data/india/chain_snapshots")
+SNAPSHOT_DIR = CHAIN_SNAPSHOTS
 
 
 @dataclass

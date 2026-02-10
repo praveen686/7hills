@@ -17,7 +17,19 @@ Patterns implemented:
 # P1: Core integration (existing)
 from .backbone import XTrendBackbone, MegaFeatureAdapter
 from .rl_trading_agent import RLTradingAgent, RLConfig
-from .integrated_env import IntegratedTradingEnv
+from .integrated_env import (
+    IntegratedTradingEnv,
+    AssetCostModel,
+    IndiaCostModel,
+    CryptoCostModel,
+    build_cost_models,
+    is_india_trading_day,
+    compute_overnight_gap,
+    INDIA_SYMBOLS as INTEGRATED_INDIA_SYMBOLS,
+    CRYPTO_SYMBOLS as INTEGRATED_CRYPTO_SYMBOLS,
+    ALL_SYMBOLS as INTEGRATED_ALL_SYMBOLS,
+    CRYPTO_FEE_RATE as INTEGRATED_CRYPTO_FEE_RATE,
+)
 from .pipeline import IntegratedPipeline, run_integrated_backtest
 
 # P2: Thompson sizing
@@ -67,6 +79,12 @@ __all__ = [
     "RLTradingAgent",
     "RLConfig",
     "IntegratedTradingEnv",
+    "AssetCostModel",
+    "IndiaCostModel",
+    "CryptoCostModel",
+    "build_cost_models",
+    "is_india_trading_day",
+    "compute_overnight_gap",
     "IntegratedPipeline",
     "run_integrated_backtest",
     # P2

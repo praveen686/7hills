@@ -16,7 +16,9 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-DEFAULT_BASE_DIR = Path("data/nse/daily")
+from quantlaxmi.data._paths import NSE_DAILY_DIR
+
+DEFAULT_BASE_DIR = NSE_DAILY_DIR
 
 
 def _parse_date(s: str) -> date:

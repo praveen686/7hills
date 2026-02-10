@@ -14,9 +14,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from quantlaxmi.data._paths import NEWS_STATE_FILE
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_FILE = Path("data/state/india_news.json")
+DEFAULT_STATE_FILE = NEWS_STATE_FILE
 
 
 # ---------------------------------------------------------------------------

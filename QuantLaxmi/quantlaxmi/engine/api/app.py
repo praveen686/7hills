@@ -31,6 +31,7 @@ from quantlaxmi.engine.services.trade_analytics import TradeAnalyticsService
 from quantlaxmi.engine.services.missed_opportunity import MissedOpportunityService
 from quantlaxmi.engine.services.ars_surface import ARSSurfaceService
 
+from quantlaxmi.data._paths import BACKTEST_RESULTS_DIR, EVENTS_DIR
 from quantlaxmi.data.store import MarketDataStore
 from quantlaxmi.strategies.registry import StrategyRegistry
 
@@ -82,13 +83,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.strategy_reader = StrategyReader()
 
     # 5. Backtest tracker (persisted to data/results/backtest_results/)
-    bt_persist_dir = Path("data/results/backtest_results")
+    bt_persist_dir = BACKTEST_RESULTS_DIR
     app.state.backtest_tracker = BacktestTracker(persist_dir=bt_persist_dir)
     logger.info("BacktestTracker ready: persist_dir=%s, loaded=%d jobs",
                 bt_persist_dir, len(app.state.backtest_tracker._jobs))
 
     # 6. WAL query service (Why Panel reads directly from event logs)
-    wal_dir = Path("data/events")
+    wal_dir = EVENTS_DIR
     app.state.wal_query = WalQueryService(base_dir=wal_dir)
     logger.info("WalQueryService ready: base_dir=%s", wal_dir)
 

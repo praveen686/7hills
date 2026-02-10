@@ -19,7 +19,9 @@ import logging
 import sys
 from pathlib import Path
 
-DEFAULT_BASE_DIR = Path("data/zerodha/5level")
+from quantlaxmi.data._paths import KITE_DEPTH_DIR
+
+DEFAULT_BASE_DIR = KITE_DEPTH_DIR
 
 
 def cmd_collect(args: argparse.Namespace) -> None:

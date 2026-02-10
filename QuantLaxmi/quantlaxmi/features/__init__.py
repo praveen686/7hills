@@ -19,6 +19,13 @@ from quantlaxmi.features.crypto_alpha import (
     MultiTimeframeMomentum,
     RangePosition,
 )
+from quantlaxmi.features.crypto_expanded import (
+    FundingRateRegime,
+    OpenInterestDynamics,
+    LongShortPositioning,
+    AltcoinBreadth,
+    LiquidationProxy,
+)
 
 __all__ = [
     "Feature",
@@ -41,4 +48,9 @@ __all__ = [
     "ReturnDistribution",
     "MultiTimeframeMomentum",
     "RangePosition",
+    "FundingRateRegime",
+    "OpenInterestDynamics",
+    "LongShortPositioning",
+    "AltcoinBreadth",
+    "LiquidationProxy",
 ]

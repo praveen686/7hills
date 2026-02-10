@@ -21,6 +21,7 @@ Feature groups
 22. Delta-Eq OI       (nse_combined_oi_deleq)    ~6 features
 23. Pre-Open OFI      (nse_preopen)              ~8 features
 24. OI Spurts         (nse_oi_spurts)            ~6 features
+25. Crypto Expanded   (Binance FAPI)             ~30 features
 
 Design principles
 -----------------
@@ -244,6 +245,7 @@ class MegaFeatureBuilder:
             ("deltaeq_oi", self._build_deltaeq_oi_features, (start_date, end_date)),
             ("preopen_ofi", self._build_preopen_ofi_features, (start_date, end_date)),
             ("oi_spurts", self._build_oi_spurts_features, (start_date, end_date)),
+            ("crypto_expanded", self._build_crypto_expanded_features, (start_date, end_date)),
         ]
 
         for name, fn, args in builders:
@@ -2677,3 +2679,37 @@ class MegaFeatureBuilder:
             return pd.DataFrame()
 
         return pd.DataFrame(records).set_index("date").sort_index()
+
+    # ==================================================================
+    # GROUP 25: Crypto Expanded (Binance FAPI)  (~30 features)
+    # ==================================================================
+
+    def _build_crypto_expanded_features(
+        self, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """~30 expanded crypto features: funding rates, OI, L/S positioning,
+        altcoin breadth, liquidation proxy.
+
+        Features: fr_mean_8h, fr_std_8h, fr_skew, fr_max_abs, fr_z_score,
+        fr_momentum_3d, fr_extreme_count, oi_btc_usd_m, oi_eth_usd_m,
+        oi_total_z21, oi_momentum_5d, oi_expanding, oi_concentration,
+        ls_ratio_global, ls_ratio_z_5d, ls_top_ratio, ls_divergence,
+        ls_taker_buy_pct, ls_taker_z_5d, ls_taker_flip,
+        ab_eth_btc_ratio, ab_eth_btc_z20, ab_sol_momentum, ab_altcoin_spread,
+        ab_correlation_btc_eth, ab_breadth_2of3,
+        liq_extreme_move_z, liq_volume_spike, liq_cascade_ratio,
+        liq_bounce_strength — all causal.
+        """
+        try:
+            from quantlaxmi.features.crypto_expanded import build_crypto_expanded_features
+
+            binance_dir = self._binance_dir if self._binance_dir.exists() else None
+            return build_crypto_expanded_features(
+                start_date=start_date,
+                end_date=end_date,
+                binance_dir=binance_dir,
+                connector=None,  # Live API connector not used in batch mode
+            )
+        except Exception:
+            logger.exception("Crypto expanded features failed")
+            return pd.DataFrame()

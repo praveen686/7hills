@@ -23,6 +23,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from quantlaxmi.data._paths import SESSIONS_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ class SessionManifest:
 
     def __init__(
         self,
-        base_dir: Path | str = Path("data/sessions"),
+        base_dir: Path | str = SESSIONS_DIR,
         run_id: str = "",
     ):
         self._base_dir = Path(base_dir)

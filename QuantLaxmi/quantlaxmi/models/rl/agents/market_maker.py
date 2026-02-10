@@ -23,10 +23,13 @@ Book reference: Ch 10.3 (Market-Making), Avellaneda & Stoikov (2008).
 """
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 try:
     import torch
@@ -365,7 +368,8 @@ class MarketMakingAgent:
 
                 try:
                     result = env.step(act)
-                except Exception:
+                except Exception as e:
+                    logger.warning("Market maker env step failed: %s", e)
                     break
 
                 states.append(state_arr)

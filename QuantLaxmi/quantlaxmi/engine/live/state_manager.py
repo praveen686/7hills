@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from quantlaxmi.data._paths import STRATEGY_STATE
 from quantlaxmi.engine.state import PortfolioState, DEFAULT_STATE_FILE
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # Directory containing per-strategy JSON state files
-_STRATEGY_STATE_DIR = Path("data/strategy_state")
+_STRATEGY_STATE_DIR = STRATEGY_STATE
 
 # How often to reload state from disk (seconds)
 _RELOAD_INTERVAL_SEC = 10.0

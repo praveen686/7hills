@@ -255,8 +255,8 @@ class ResilientWs:
         if self._ws is not None:
             try:
                 await self._ws.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("WebSocket close failed: %s", e)
             self._ws = None
 
     def __aiter__(self) -> AsyncIterator[bytes | str]:

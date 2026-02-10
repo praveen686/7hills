@@ -492,6 +492,251 @@ class BinanceConnector:
         )
         return result
 
+    # ----- Futures API (FAPI) -----
+
+    FAPI_BASE = "https://fapi.binance.com"
+
+    def fetch_funding_rate_history(
+        self,
+        symbol: str,
+        start_time: datetime | str | None = None,
+        end_time: datetime | str | None = None,
+        limit: int = 1000,
+    ) -> pd.DataFrame:
+        """Fetch historical funding rates from Binance Futures.
+
+        Parameters
+        ----------
+        symbol : str
+            Perpetual pair, e.g. ``"BTCUSDT"``.
+        start_time : datetime or str, optional
+            Start of range.
+        end_time : datetime or str, optional
+            End of range.
+        limit : int
+            Max records (Binance caps at 1000).
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns: symbol, fundingRate, fundingTime, markPrice.
+            Index: ``fundingTime`` (UTC DatetimeIndex).
+        """
+        import requests
+
+        params: dict = {"symbol": symbol, "limit": limit}
+        if start_time is not None:
+            ts = pd.Timestamp(start_time)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("UTC")
+            params["startTime"] = int(ts.timestamp() * 1000)
+        if end_time is not None:
+            ts = pd.Timestamp(end_time)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("UTC")
+            params["endTime"] = int(ts.timestamp() * 1000)
+
+        resp = requests.get(
+            f"{self.FAPI_BASE}/fapi/v1/fundingRate",
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data:
+            return pd.DataFrame()
+
+        records = []
+        for d in data:
+            records.append({
+                "symbol": d.get("symbol", symbol),
+                "fundingRate": float(d["fundingRate"]),
+                "fundingTime": _ms_to_utc(int(d["fundingTime"])),
+                "markPrice": float(d.get("markPrice", 0)),
+            })
+
+        df = pd.DataFrame(records)
+        df = df.set_index("fundingTime").sort_index()
+        logger.info("Fetched %d funding rate records for %s", len(df), symbol)
+        return df
+
+    def fetch_open_interest(self, symbol: str) -> dict:
+        """Fetch current open interest for a futures symbol.
+
+        Parameters
+        ----------
+        symbol : str
+            Perpetual pair, e.g. ``"BTCUSDT"``.
+
+        Returns
+        -------
+        dict
+            Keys: ``symbol``, ``openInterest`` (float), ``time`` (pd.Timestamp).
+        """
+        import requests
+
+        resp = requests.get(
+            f"{self.FAPI_BASE}/fapi/v1/openInterest",
+            params={"symbol": symbol},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        return {
+            "symbol": data.get("symbol", symbol),
+            "openInterest": float(data["openInterest"]),
+            "time": _ms_to_utc(int(data["time"])),
+        }
+
+    def fetch_long_short_ratio(
+        self,
+        symbol: str,
+        period: str = "1d",
+        limit: int = 30,
+    ) -> pd.DataFrame:
+        """Fetch global long/short account ratio.
+
+        Parameters
+        ----------
+        symbol : str
+            Perpetual pair, e.g. ``"BTCUSDT"``.
+        period : str
+            Period: ``"5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"``.
+        limit : int
+            Number of records (max 500).
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns: longShortRatio, longAccount, shortAccount.
+            Index: ``timestamp`` (UTC DatetimeIndex).
+        """
+        import requests
+
+        resp = requests.get(
+            f"{self.FAPI_BASE}/futures/data/globalLongShortAccountRatio",
+            params={"symbol": symbol, "period": period, "limit": limit},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data:
+            return pd.DataFrame()
+
+        records = []
+        for d in data:
+            records.append({
+                "timestamp": _ms_to_utc(int(d["timestamp"])),
+                "longShortRatio": float(d["longShortRatio"]),
+                "longAccount": float(d["longAccount"]),
+                "shortAccount": float(d["shortAccount"]),
+            })
+
+        df = pd.DataFrame(records).set_index("timestamp").sort_index()
+        logger.info("Fetched %d L/S ratio records for %s", len(df), symbol)
+        return df
+
+    def fetch_top_long_short_ratio(
+        self,
+        symbol: str,
+        period: str = "1d",
+        limit: int = 30,
+    ) -> pd.DataFrame:
+        """Fetch top-trader long/short position ratio.
+
+        Parameters
+        ----------
+        symbol : str
+            Perpetual pair, e.g. ``"BTCUSDT"``.
+        period : str
+            Period: ``"5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"``.
+        limit : int
+            Number of records (max 500).
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns: longShortRatio, longAccount, shortAccount.
+            Index: ``timestamp`` (UTC DatetimeIndex).
+        """
+        import requests
+
+        resp = requests.get(
+            f"{self.FAPI_BASE}/futures/data/topLongShortPositionRatio",
+            params={"symbol": symbol, "period": period, "limit": limit},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data:
+            return pd.DataFrame()
+
+        records = []
+        for d in data:
+            records.append({
+                "timestamp": _ms_to_utc(int(d["timestamp"])),
+                "longShortRatio": float(d["longShortRatio"]),
+                "longAccount": float(d["longAccount"]),
+                "shortAccount": float(d["shortAccount"]),
+            })
+
+        df = pd.DataFrame(records).set_index("timestamp").sort_index()
+        logger.info("Fetched %d top L/S ratio records for %s", len(df), symbol)
+        return df
+
+    def fetch_taker_long_short_ratio(
+        self,
+        symbol: str,
+        period: str = "1d",
+        limit: int = 30,
+    ) -> pd.DataFrame:
+        """Fetch taker buy/sell volume ratio.
+
+        Parameters
+        ----------
+        symbol : str
+            Perpetual pair, e.g. ``"BTCUSDT"``.
+        period : str
+            Period: ``"5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"``.
+        limit : int
+            Number of records (max 500).
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns: buySellRatio, buyVol, sellVol.
+            Index: ``timestamp`` (UTC DatetimeIndex).
+        """
+        import requests
+
+        resp = requests.get(
+            f"{self.FAPI_BASE}/futures/data/takerlongshortRatio",
+            params={"symbol": symbol, "period": period, "limit": limit},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data:
+            return pd.DataFrame()
+
+        records = []
+        for d in data:
+            records.append({
+                "timestamp": _ms_to_utc(int(d["timestamp"])),
+                "buySellRatio": float(d["buySellRatio"]),
+                "buyVol": float(d["buyVol"]),
+                "sellVol": float(d["sellVol"]),
+            })
+
+        df = pd.DataFrame(records).set_index("timestamp").sort_index()
+        logger.info("Fetched %d taker L/S ratio records for %s", len(df), symbol)
+        return df
+
     # ----- Utility -----
 
     def get_server_time(self) -> pd.Timestamp:

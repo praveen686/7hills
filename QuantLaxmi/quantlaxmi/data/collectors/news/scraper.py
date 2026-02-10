@@ -40,6 +40,48 @@ INDIA_RSS_FEEDS: dict[str, str] = {
     "moneycontrol": "https://www.moneycontrol.com/rss/MCtopnews.xml",
 }
 
+CRYPTO_RSS_FEEDS: dict[str, str] = {
+    "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "cointelegraph": "https://cointelegraph.com/rss",
+    "theblock": "https://www.theblock.co/rss.xml",
+    "decrypt": "https://decrypt.co/feed",
+    "bitcoinmagazine": "https://bitcoinmagazine.com/.rss/full/",
+}
+
+US_RSS_FEEDS: dict[str, str] = {
+    "cnbc_markets": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069",
+    "cnbc_economy": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
+    "wsj_markets": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+    "wsj_world": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+    "marketwatch": "https://feeds.marketwatch.com/marketwatch/topstories/",
+    "bloomberg_markets": "https://feeds.bloomberg.com/markets/news.rss",
+    "yahoo_finance": "https://finance.yahoo.com/news/rssindex",
+    "seeking_alpha": "https://seekingalpha.com/market_currents.xml",
+}
+
+EUROPE_RSS_FEEDS: dict[str, str] = {
+    "ft_markets": "https://www.ft.com/markets?format=rss",
+    "ft_world": "https://www.ft.com/world?format=rss",
+    "ecb_press": "https://www.ecb.europa.eu/rss/press.html",
+    "bbc_business": "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "guardian_business": "https://www.theguardian.com/uk/business/rss",
+}
+
+INTL_RSS_FEEDS: dict[str, str] = {
+    "bbc_world": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "aljazeera_economy": "https://www.aljazeera.com/xml/rss/all.xml",
+    "scmp_economy": "https://www.scmp.com/rss/5/feed",
+    "cnbc_world": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362",
+}
+
+ALL_RSS_FEEDS: dict[str, str] = {
+    **INDIA_RSS_FEEDS,
+    **CRYPTO_RSS_FEEDS,
+    **US_RSS_FEEDS,
+    **EUROPE_RSS_FEEDS,
+    **INTL_RSS_FEEDS,
+}
+
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -118,18 +160,39 @@ _REQUEST_HEADERS = {
 def scan_india_news(
     max_age_minutes: int = 60,
     feeds: dict[str, str] | None = None,
+    include_crypto: bool = False,
+    include_us: bool = False,
+    include_europe: bool = False,
+    include_intl: bool = False,
+    include_all: bool = False,
 ) -> list[IndiaNewsItem]:
-    """Fetch recent headlines from India business RSS feeds.
+    """Fetch recent headlines from financial RSS feeds.
 
     Args:
         max_age_minutes: Discard headlines older than this (default 60).
         feeds: Override feed dict (for testing).
+        include_crypto: If True, also fetch from crypto RSS feeds.
+        include_us: If True, also fetch from US financial feeds.
+        include_europe: If True, also fetch from European financial feeds.
+        include_intl: If True, also fetch from international feeds.
+        include_all: If True, fetch from ALL feeds (overrides individual flags).
 
     Returns:
         Deduplicated list of IndiaNewsItem sorted by recency.
     """
     if feeds is None:
-        feeds = INDIA_RSS_FEEDS
+        if include_all:
+            feeds = ALL_RSS_FEEDS
+        else:
+            feeds = dict(INDIA_RSS_FEEDS)
+            if include_crypto:
+                feeds.update(CRYPTO_RSS_FEEDS)
+            if include_us:
+                feeds.update(US_RSS_FEEDS)
+            if include_europe:
+                feeds.update(EUROPE_RSS_FEEDS)
+            if include_intl:
+                feeds.update(INTL_RSS_FEEDS)
 
     now = datetime.now(timezone.utc)
     cutoff_ts = now.timestamp() - max_age_minutes * 60

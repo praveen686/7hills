@@ -17,16 +17,35 @@ logger = logging.getLogger(__name__)
 
 # Well-known strategy modules — imported lazily during discover()
 _KNOWN_MODULES = [
-    "strategies.s1_vrp.strategy",
-    "strategies.s4_iv_mr.strategy",
-    "strategies.s5_hawkes.strategy",
-    "strategies.s7_regime.strategy",
-    "strategies.s8_expiry_theta.strategy",
-    "strategies.s10_gamma_scalp.strategy",
-    "strategies.s9_momentum.strategy",
-    "strategies.s11_pairs.strategy",
-    "strategies.s25_divergence_flow.strategy",
-    "strategies.s26_crypto_flow.strategy",
+    # Original strategies
+    "quantlaxmi.strategies.s1_vrp.strategy",
+    "quantlaxmi.strategies.s2_ramanujan.strategy",
+    "quantlaxmi.strategies.s3_institutional.strategy",
+    "quantlaxmi.strategies.s4_iv_mr.strategy",
+    "quantlaxmi.strategies.s5_hawkes.strategy",
+    "quantlaxmi.strategies.s6_multi_factor.strategy",
+    "quantlaxmi.strategies.s7_regime.strategy",
+    "quantlaxmi.strategies.s8_expiry_theta.strategy",
+    "quantlaxmi.strategies.s9_momentum.strategy",
+    "quantlaxmi.strategies.s10_gamma_scalp.strategy",
+    "quantlaxmi.strategies.s11_pairs.strategy",
+    # Alpha-forge strategies (S12-S24)
+    "quantlaxmi.strategies.s12_vedic_ffpe.strategy",
+    "quantlaxmi.strategies.s13_hmm_regime.strategy",
+    "quantlaxmi.strategies.s14_ofi_intraday.strategy",
+    "quantlaxmi.strategies.s15_skew_mr.strategy",
+    "quantlaxmi.strategies.s16_vrp_enhanced.strategy",
+    "quantlaxmi.strategies.s17_intraday_breakout.strategy",
+    "quantlaxmi.strategies.s18_straddle_mr.strategy",
+    "quantlaxmi.strategies.s19_crypto_leadlag.strategy",
+    "quantlaxmi.strategies.s20_tick_micro.strategy",
+    "quantlaxmi.strategies.s21_fii_flow.strategy",
+    "quantlaxmi.strategies.s22_gex_dealer.strategy",
+    "quantlaxmi.strategies.s23_network_momentum.strategy",
+    "quantlaxmi.strategies.s24_regime_vrp_combo.strategy",
+    # Advanced strategies
+    "quantlaxmi.strategies.s25_divergence_flow.strategy",
+    "quantlaxmi.strategies.s26_crypto_flow.strategy",
 ]
 
 

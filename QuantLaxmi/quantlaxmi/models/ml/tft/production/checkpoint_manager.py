@@ -42,6 +42,12 @@ try:
 except ImportError:
     _HAS_TORCH = False
 
+try:
+    import wandb
+    _HAS_WANDB = True
+except ImportError:
+    _HAS_WANDB = False
+
 
 # ============================================================================
 # Metadata
@@ -241,6 +247,11 @@ class CheckpointManager:
             "Checkpoint saved: %s (v%d, %d features, Sharpe=%.3f)",
             ckpt_dir, metadata.version, metadata.n_features, metadata.sharpe_oos,
         )
+
+        # Upload to Weights & Biases
+        if _HAS_WANDB:
+            self._upload_to_wandb(ckpt_dir, metadata)
+
         return ckpt_dir
 
     # ------------------------------------------------------------------
@@ -404,6 +415,67 @@ class CheckpointManager:
         if not existing:
             return 1
         return max(c["version"] for c in existing) + 1
+
+    def _upload_to_wandb(
+        self,
+        ckpt_dir: Path,
+        metadata: CheckpointMetadata,
+    ) -> None:
+        """Upload checkpoint as a versioned W&B artifact.
+
+        Creates artifact: quantlaxmi-{model_type}:v{version}
+        with model.pt, metadata.json, and any other files in ckpt_dir.
+        """
+        try:
+            project = "quantlaxmi-tft"
+            artifact_name = f"quantlaxmi-{metadata.model_type}"
+
+            run = wandb.init(
+                project=project,
+                job_type="checkpoint",
+                name=f"checkpoint-v{metadata.version}",
+                config={
+                    "model_type": metadata.model_type,
+                    "version": metadata.version,
+                    "n_features": metadata.n_features,
+                    "n_assets": metadata.n_assets,
+                    "sharpe_oos": metadata.sharpe_oos,
+                    "total_return_oos": metadata.total_return_oos,
+                    "max_drawdown_oos": metadata.max_drawdown_oos,
+                    **metadata.optuna_best_params,
+                },
+            )
+
+            artifact = wandb.Artifact(
+                name=artifact_name,
+                type="model",
+                description=(
+                    f"TFT {metadata.model_type} v{metadata.version} — "
+                    f"{metadata.n_features} features, "
+                    f"OOS Sharpe {metadata.sharpe_oos:.3f}"
+                ),
+                metadata={
+                    "feature_names": metadata.feature_names,
+                    "asset_names": metadata.asset_names,
+                    "training_info": metadata.training_info,
+                    "feature_selection": metadata.feature_selection,
+                },
+            )
+
+            # Add all files in checkpoint directory
+            for f in ckpt_dir.iterdir():
+                if f.is_file():
+                    artifact.add_file(str(f))
+
+            run.log_artifact(artifact)
+            run.finish()
+
+            logger.info(
+                "Uploaded checkpoint to W&B: %s/%s:%s",
+                project, artifact_name, f"v{metadata.version}",
+            )
+        except Exception as e:
+            logger.warning("W&B upload failed (checkpoint saved locally): %s", e)
 
     @staticmethod
     def _get_git_commit() -> str:

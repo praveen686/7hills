@@ -17,6 +17,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from quantlaxmi.data._paths import CRYPTO_TICK_DATA
+
 logger = logging.getLogger(__name__)
 
 from quantlaxmi.strategies.s26_crypto_flow.signals import SignalConfig
@@ -194,7 +196,7 @@ async def run_with_ticks(args, config, state, state_path):
     from quantlaxmi.data.collectors.crypto_tick.storage import TickStore, TickStoreConfig
 
     # Set up tick infrastructure
-    tick_store = TickStore(TickStoreConfig(base_dir=Path("data/ticks")))
+    tick_store = TickStore(TickStoreConfig(base_dir=CRYPTO_TICK_DATA))
     tracker = LiveRegimeTracker(
         vpin_bucket_size=args.vpin_bucket_size,
         vpin_n_buckets=args.vpin_buckets,

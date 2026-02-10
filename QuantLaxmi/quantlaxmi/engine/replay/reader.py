@@ -24,6 +24,7 @@ from pathlib import Path
 from quantlaxmi.core.events.envelope import EventEnvelope
 from quantlaxmi.core.events.hashing import verify_chain
 from quantlaxmi.core.events.serde import deserialize_envelope, serialize_envelope
+from quantlaxmi.data._paths import EVENTS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class WalReader:
 
     def __init__(
         self,
-        base_dir: Path | str = Path("data/events"),
+        base_dir: Path | str = EVENTS_DIR,
         strict_seq: bool = False,
         verify_hashes: bool = False,
     ):

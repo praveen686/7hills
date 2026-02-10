@@ -21,9 +21,11 @@ from pathlib import Path
 
 from quantlaxmi.data.collectors.news.scraper import IndiaNewsItem
 
+from quantlaxmi.data._paths import HEADLINE_ARCHIVE_DIR
+
 logger = logging.getLogger(__name__)
 
-ARCHIVE_DIR = Path("data/india/headlines")
+ARCHIVE_DIR = HEADLINE_ARCHIVE_DIR
 
 
 def _normalize(title: str) -> str:
