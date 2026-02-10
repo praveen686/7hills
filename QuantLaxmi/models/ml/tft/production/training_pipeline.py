@@ -420,14 +420,26 @@ class TrainingPipeline:
                 if _HAS_TQDM and hasattr(epoch_iter, 'set_postfix'):
                     epoch_iter.set_postfix(loss=f"{loss.item():.4f}")
 
-            # Extract VSN weights
-            selector.add_fold_weights(model, feature_names)
+                # Abort fold early if loss diverged to NaN
+                if not math.isfinite(loss.item()):
+                    logger.warning("Fold %d diverged (NaN loss) at epoch %d — skipping VSN extraction", fold_idx, epoch)
+                    break
+            else:
+                # Only extract VSN weights if training completed without NaN
+                selector.add_fold_weights(model, feature_names)
+                # Jump past the skip block below
+                del model
+                torch.cuda.empty_cache()
+                start += x_cfg.step_size
+                fold_idx += 1
+                continue
 
+            # NaN fold: skip VSN extraction, clean up
             del model
             torch.cuda.empty_cache()
-
             start += x_cfg.step_size
             fold_idx += 1
+            continue
 
         state["selector"] = selector
 
@@ -458,9 +470,16 @@ class TrainingPipeline:
         # Apply pruning
         recommended = report.recommended_features
         if not recommended:
-            logger.warning("No stable features found, keeping all pre-filtered")
-            result.n_features_final = len(state["feature_names"])
-            return
+            # Fallback: use top-K by mean VSN weight (sorted desc)
+            ranked = sorted(
+                report.mean_vsn_weights.items(), key=lambda x: -x[1],
+            )
+            max_k = selector.config.final_max_features
+            recommended = [name for name, _ in ranked[:max_k]]
+            logger.warning(
+                "No stable features found — falling back to top-%d by mean VSN weight",
+                len(recommended),
+            )
 
         # Re-filter the feature array
         current_names = state["feature_names"]
@@ -483,12 +502,23 @@ class TrainingPipeline:
 
     def _phase4_tuning(self, state: dict) -> None:
         """Run Optuna HP tuning on reduced features."""
+        import gc
+
         cfg = state["config"]
         result = state["result"]
 
         if cfg.skip_tuning:
             logger.info("Skipping HP tuning (using default config)")
             return
+
+        # Clear GPU memory from Phase 2 exploration models
+        if _HAS_TORCH:
+            torch.cuda.empty_cache()
+            gc.collect()
+            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                alloc = torch.cuda.memory_allocated() / 1e9
+                logger.info("GPU memory before HP tuning: %.2f GB allocated", alloc)
 
         from .hp_tuner import HPTuner, TunerConfig
 
@@ -688,6 +718,11 @@ class TrainingPipeline:
                     epoch_loss += loss.item()
                     n_batches += 1
 
+                # Abort if loss diverged
+                if not math.isfinite(epoch_loss):
+                    logger.warning("Prod fold %d diverged at epoch %d", fold_idx, epoch)
+                    break
+
                 # Validation
                 if n_val > 0:
                     model.eval()
@@ -784,46 +819,53 @@ class TrainingPipeline:
             dd = running_max - cum
             result.max_drawdown_oos = float(np.max(dd)) if len(dd) > 0 else 0.0
 
-        # Save checkpoint
+        # Save checkpoint (wrapped to never lose 8+ hours of training)
         if last_model_state is not None:
-            mgr = CheckpointManager(cfg.checkpoint_base_dir)
+            try:
+                mgr = CheckpointManager(cfg.checkpoint_base_dir)
 
-            metadata = CheckpointMetadata(
-                model_type=cfg.model_type,
-                feature_names=feature_names,
-                n_features=n_features,
-                n_assets=n_assets,
-                asset_names=cfg.symbols,
-                config=asdict(x_cfg) if hasattr(x_cfg, '__dataclass_fields__') else {},
-                normalization={
-                    "means": last_norm_means.tolist() if last_norm_means is not None else [],
-                    "stds": last_norm_stds.tolist() if last_norm_stds is not None else [],
-                },
-                training_info={
-                    "fold_metrics": fold_metrics,
-                    "total_folds": fold_idx,
-                    "pretrain_epochs": cfg.production_pretrain_epochs,
-                    "finetune_epochs": cfg.production_finetune_epochs,
-                    "date_range": [cfg.start_date, cfg.end_date],
-                },
-                feature_selection={
-                    "n_initial": result.n_features_initial,
-                    "n_prefiltered": result.n_features_prefiltered,
-                    "n_final": result.n_features_final,
-                },
-                optuna_best_params=state.get("best_params", {}),
-                sharpe_oos=result.sharpe_oos,
-                total_return_oos=result.total_return_oos,
-                max_drawdown_oos=result.max_drawdown_oos,
-            )
+                metadata = CheckpointMetadata(
+                    model_type=cfg.model_type,
+                    feature_names=feature_names,
+                    n_features=n_features,
+                    n_assets=n_assets,
+                    asset_names=cfg.symbols,
+                    config=asdict(x_cfg) if hasattr(x_cfg, '__dataclass_fields__') else {},
+                    normalization={
+                        "means": last_norm_means.tolist() if last_norm_means is not None else [],
+                        "stds": last_norm_stds.tolist() if last_norm_stds is not None else [],
+                    },
+                    training_info={
+                        "fold_metrics": fold_metrics,
+                        "total_folds": fold_idx,
+                        "pretrain_epochs": cfg.production_pretrain_epochs,
+                        "finetune_epochs": cfg.production_finetune_epochs,
+                        "date_range": [cfg.start_date, cfg.end_date],
+                    },
+                    feature_selection={
+                        "n_initial": result.n_features_initial,
+                        "n_prefiltered": result.n_features_prefiltered,
+                        "n_final": result.n_features_final,
+                    },
+                    optuna_best_params=state.get("best_params", {}),
+                    sharpe_oos=result.sharpe_oos,
+                    total_return_oos=result.total_return_oos,
+                    max_drawdown_oos=result.max_drawdown_oos,
+                )
 
-            selector = state.get("selector")
-            optuna_study = state.get("optuna_study")
+                selector = state.get("selector")
+                optuna_study = state.get("optuna_study")
 
-            ckpt_dir = mgr.save(
-                last_model_state, metadata, selector, optuna_study,
-            )
-            result.checkpoint_path = ckpt_dir
+                ckpt_dir = mgr.save(
+                    last_model_state, metadata, selector, optuna_study,
+                )
+                result.checkpoint_path = ckpt_dir
+            except Exception as e:
+                logger.error(
+                    "Checkpoint save failed: %s — training results are still "
+                    "available in the returned TrainingResult object", e,
+                )
+                result.checkpoint_path = None
 
     # ------------------------------------------------------------------
     # Helpers

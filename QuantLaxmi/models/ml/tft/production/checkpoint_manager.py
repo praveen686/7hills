@@ -55,8 +55,8 @@ class CheckpointMetadata:
     This is serialized to metadata.json inside the checkpoint directory.
     """
 
-    # Versioning
-    version: int = 1
+    # Versioning (0 = auto-increment in CheckpointManager.save())
+    version: int = 0
     model_type: str = "x_trend"
     created_at: str = ""
     git_commit: str = ""

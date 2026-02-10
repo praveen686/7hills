@@ -56,8 +56,8 @@ class FeatureSelectionConfig:
     correlation_threshold: float = 0.95
 
     # Tier 2: VSN-native thresholds
-    vsn_weight_threshold: float = 0.005
-    stability_min_folds: float = 0.5
+    vsn_weight_threshold: float = 0.003
+    stability_min_folds: float = 0.25
     final_max_features: int = 80
 
     # Optional MI validation

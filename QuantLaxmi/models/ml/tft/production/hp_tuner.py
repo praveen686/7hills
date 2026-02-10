@@ -166,9 +166,20 @@ class HPTuner:
         start_time = time.time()
 
         def objective(trial: optuna.Trial) -> float:
-            return self._objective(
-                trial, features, targets, feature_names, n_assets,
-            )
+            # Clear GPU cache before each trial
+            if _HAS_TORCH and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            try:
+                return self._objective(
+                    trial, features, targets, feature_names, n_assets,
+                )
+            except torch.cuda.OutOfMemoryError:
+                logger.warning(
+                    "Trial %d OOM with params: %s — skipping",
+                    trial.number, trial.params,
+                )
+                torch.cuda.empty_cache()
+                return float("-inf")
 
         # Optuna callbacks
         callbacks = []
@@ -184,6 +195,7 @@ class HPTuner:
                 timeout=cfg.timeout_seconds,
                 callbacks=callbacks,
                 show_progress_bar=True,
+                catch=(torch.cuda.OutOfMemoryError,) if _HAS_TORCH else (),
             )
         except KeyboardInterrupt:
             logger.info("HP tuning interrupted by user")
@@ -201,8 +213,15 @@ class HPTuner:
                     "duration": t.duration.total_seconds() if t.duration else 0,
                 })
 
-        best_params = study.best_params if study.best_trial else {}
-        best_sharpe = study.best_value if study.best_trial else float("-inf")
+        try:
+            best_trial = study.best_trial
+            best_params = best_trial.params if best_trial else {}
+            best_sharpe = best_trial.value if best_trial else float("-inf")
+        except ValueError:
+            # No completed trials at all
+            logger.warning("No completed Optuna trials — all failed or pruned")
+            best_params = {}
+            best_sharpe = float("-inf")
 
         logger.info(
             "HP tuning complete: %d trials in %.0fs, best Sharpe=%.3f",
@@ -309,14 +328,18 @@ class HPTuner:
         return float(np.mean(fold_sharpes))
 
     def _sample_params(self, trial: "optuna.Trial") -> dict[str, Any]:
-        """Sample hyperparameters from the search space."""
+        """Sample hyperparameters from the search space.
+
+        Note: n_context and d_hidden upper bounds are constrained for T4 GPU
+        (16GB VRAM). With 80-276 features, n_context=32 + d_hidden=128 causes OOM.
+        """
         return {
-            "d_hidden": trial.suggest_categorical("d_hidden", [32, 48, 64, 96, 128]),
+            "d_hidden": trial.suggest_categorical("d_hidden", [32, 48, 64, 96]),
             "n_heads": trial.suggest_categorical("n_heads", [2, 4, 8]),
             "lstm_layers": trial.suggest_categorical("lstm_layers", [1, 2, 3]),
             "dropout": trial.suggest_float("dropout", 0.05, 0.3),
             "seq_len": trial.suggest_categorical("seq_len", [21, 42, 63]),
-            "n_context": trial.suggest_categorical("n_context", [8, 16, 32]),
+            "n_context": trial.suggest_categorical("n_context", [8, 16]),
             "lr": trial.suggest_float("lr", 3e-4, 3e-3, log=True),
             "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64]),
             "mle_weight": trial.suggest_float("mle_weight", 0.01, 0.2),

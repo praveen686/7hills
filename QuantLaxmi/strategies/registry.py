@@ -25,6 +25,7 @@ _KNOWN_MODULES = [
     "strategies.s10_gamma_scalp.strategy",
     "strategies.s9_momentum.strategy",
     "strategies.s11_pairs.strategy",
+    "strategies.s25_divergence_flow.strategy",
 ]
 
 
