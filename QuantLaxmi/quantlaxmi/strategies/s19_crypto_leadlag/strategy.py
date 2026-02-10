@@ -526,8 +526,9 @@ def _simulate_intraday(
     import duckdb as _ddb
 
     date_str = trade_date.isoformat()
+    from quantlaxmi.data._paths import DATA_ROOT
     parquet_path = (
-        Path("/home/ubuntu/Desktop/7hills/QuantLaxmi/data/market/nfo_1min")
+        DATA_ROOT / "market" / "nfo_1min"
         / f"date={date_str}" / "data.parquet"
     )
 
@@ -1080,3 +1081,31 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S19CryptoLeadLagStrategy(BaseStrategy):
+    """Crypto lead-lag strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s19_crypto_leadlag"
+
+    def warmup_days(self) -> int:
+        return 30
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S19CryptoLeadLagStrategy:
+    """Factory for registry auto-discovery."""
+    return S19CryptoLeadLagStrategy()

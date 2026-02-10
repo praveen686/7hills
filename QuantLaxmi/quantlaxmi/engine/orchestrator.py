@@ -40,6 +40,7 @@ from quantlaxmi.strategies.registry import StrategyRegistry
 from quantlaxmi.engine.live.event_log import EventLogWriter
 from quantlaxmi.engine.live.journals import ExecutionJournal, SignalJournal
 from quantlaxmi.engine.live.session_manifest import SessionManifest
+from quantlaxmi.engine.oms import OrderManager
 from quantlaxmi.engine.state import PortfolioState, Position, DEFAULT_STATE_FILE
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ class Orchestrator:
         self.state = PortfolioState.load(state_file)
         self._state_file = state_file
         self._reconciler = reconciler
+        self._oms = OrderManager()
 
         # Event infrastructure (Phase 2)
         self._run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
@@ -432,7 +434,10 @@ class Orchestrator:
         adjusted_weight: float,
         d: date,
     ) -> dict | None:
-        """Execute a single approved target position."""
+        """Execute a single approved target position via OMS.
+
+        Flow: submit_order → get fill price → fill_order → create/close Position.
+        """
         d_str = d.isoformat()
 
         if target.direction == "flat":
@@ -440,6 +445,17 @@ class Orchestrator:
             pos = self.state.get_position(target.strategy_id, target.symbol)
             if pos is None:
                 return None  # nothing to close
+
+            # Submit close order through OMS
+            order_id = self._oms.submit_order(
+                strategy_id=target.strategy_id,
+                symbol=target.symbol,
+                direction="flat",
+                weight=0.0,
+                instrument_type=target.instrument_type,
+                price=pos.entry_price,  # reference price
+                metadata=target.metadata,
+            )
 
             # Emit order event
             self._emit_order(target.strategy_id, target.symbol, "submit", "sell")
@@ -449,11 +465,18 @@ class Orchestrator:
             if exit_price <= 0:
                 exit_price = pos.entry_price  # fallback if no market data
 
+            # Fill the order through OMS
+            filled = self._oms.fill_order(
+                order_id=order_id,
+                fill_price=exit_price,
+            )
+
+            # Execute the close using filled order data
             trade = self.state.close_position(
                 strategy_id=target.strategy_id,
                 symbol=target.symbol,
                 exit_date=d_str,
-                exit_price=exit_price,
+                exit_price=filled["fill_price"],
                 exit_reason=target.metadata.get("exit_reason", "signal_flat"),
             )
             if trade:
@@ -461,12 +484,12 @@ class Orchestrator:
 
                 # Emit fill event for close
                 fill_payload = FillPayload(
-                    order_id=str(uuid.uuid4())[:8],
+                    order_id=filled["order_id"],
                     fill_id=str(uuid.uuid4())[:8],
                     side="sell",
                     quantity=1,
-                    price=exit_price,
-                    fees=0.0,
+                    price=filled["fill_price"],
+                    fees=filled.get("commission", 0.0),
                     is_partial=False,
                 )
                 self._exec_journal.log_fill(
@@ -496,17 +519,35 @@ class Orchestrator:
         # Get spot price for entry
         spot = self._get_spot(target.symbol, d)
 
-        # Emit order event
-        self._emit_order(target.strategy_id, target.symbol, "submit", "buy")
-
-        pos = Position(
+        # Submit open order through OMS
+        order_id = self._oms.submit_order(
             strategy_id=target.strategy_id,
             symbol=target.symbol,
             direction=target.direction,
             weight=adjusted_weight,
             instrument_type=target.instrument_type,
+            price=spot,
+            metadata=target.metadata,
+        )
+
+        # Emit order event
+        self._emit_order(target.strategy_id, target.symbol, "submit", "buy")
+
+        # Fill the order through OMS
+        filled = self._oms.fill_order(
+            order_id=order_id,
+            fill_price=spot,
+        )
+
+        # Create Position using filled order data
+        pos = Position(
+            strategy_id=target.strategy_id,
+            symbol=target.symbol,
+            direction=filled["direction"],
+            weight=filled["weight"],
+            instrument_type=filled["instrument_type"],
             entry_date=d_str,
-            entry_price=spot,
+            entry_price=filled["fill_price"],
             strike=target.strike,
             expiry=target.expiry,
             metadata=target.metadata,
@@ -516,12 +557,12 @@ class Orchestrator:
 
         # Emit fill event for open
         fill_payload = FillPayload(
-            order_id=str(uuid.uuid4())[:8],
+            order_id=filled["order_id"],
             fill_id=str(uuid.uuid4())[:8],
             side="buy",
             quantity=1,
-            price=spot,
-            fees=0.0,
+            price=filled["fill_price"],
+            fees=filled.get("commission", 0.0),
             is_partial=False,
         )
         self._exec_journal.log_fill(
@@ -534,9 +575,9 @@ class Orchestrator:
             "action": "open",
             "strategy": target.strategy_id,
             "symbol": target.symbol,
-            "direction": target.direction,
-            "weight": adjusted_weight,
-            "entry_price": spot,
+            "direction": filled["direction"],
+            "weight": filled["weight"],
+            "entry_price": filled["fill_price"],
         }
 
     def _get_spot(self, symbol: str, d: date) -> float:

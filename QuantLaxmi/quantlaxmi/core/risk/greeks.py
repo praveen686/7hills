@@ -50,7 +50,9 @@ def compute_portfolio_greeks(
     """
     try:
         import torch
-        from quantlaxmi.core.pricing.iv_engine import bs_delta, bs_gamma, _DEVICE, _DTYPE
+        from quantlaxmi.core.pricing.iv_engine import (
+            bs_delta, bs_gamma, bs_vega, bs_theta, _DEVICE, _DTYPE,
+        )
         gpu_available = True
     except ImportError:
         gpu_available = False
@@ -78,9 +80,51 @@ def compute_portfolio_greeks(
 
         # Option positions — need Greeks computation
         if not gpu_available:
-            # Approximate delta for options
-            d = direction * qty * 0.5  # rough delta estimate
+            # Approximate Greeks for options using scalar Black-Scholes
+            spot = spot_prices.get(symbol, 0.0)
+            if spot <= 0:
+                continue
+            strike = pos.get("strike", spot)
+            iv = pos.get("iv", 0.20)
+            dte = pos.get("dte", 7)
+            T = max(dte / 365.0, 1e-6)
+            is_call = itype == "CE"
+            r = 0.065
+
+            import math
+            from scipy.stats import norm as _norm
+
+            sigma_safe = max(iv, 1e-6)
+            sqrt_T = math.sqrt(T)
+            d1 = (math.log(spot / strike) + (r + 0.5 * sigma_safe ** 2) * T) / (sigma_safe * sqrt_T)
+            d2 = d1 - sigma_safe * sqrt_T
+
+            # Delta
+            if is_call:
+                delta_val = _norm.cdf(d1)
+            else:
+                delta_val = _norm.cdf(d1) - 1.0
+            d = delta_val * direction * qty
+
+            # Gamma
+            phi_d1 = math.exp(-0.5 * d1 ** 2) / math.sqrt(2.0 * math.pi)
+            g = (phi_d1 / (spot * sigma_safe * sqrt_T)) * direction * qty
+
+            # Vega: S * sqrt(T) * phi(d1)
+            v = (spot * sqrt_T * phi_d1) * direction * qty
+
+            # Theta: per calendar day
+            term1 = -spot * phi_d1 * sigma_safe / (2.0 * sqrt_T)
+            if is_call:
+                term2 = -r * strike * math.exp(-r * T) * _norm.cdf(d2)
+            else:
+                term2 = r * strike * math.exp(-r * T) * _norm.cdf(-d2)
+            th = ((term1 + term2) / 365.0) * direction * qty
+
             net_delta += d
+            net_gamma += g
+            net_vega += v
+            net_theta += th
             gross_delta += abs(d)
             delta_by_symbol[symbol] = delta_by_symbol.get(symbol, 0.0) + d
             continue
@@ -104,9 +148,13 @@ def compute_portfolio_greeks(
 
         d = float(bs_delta(S, K, T_t, r, sigma, is_call_t).cpu().item()) * direction * qty
         g = float(bs_gamma(S, K, T_t, r, sigma).cpu().item()) * direction * qty
+        v = float(bs_vega(S, K, T_t, r, sigma).cpu().item()) * direction * qty
+        th = float(bs_theta(S, K, T_t, r, sigma, is_call_t).cpu().item()) * direction * qty
 
         net_delta += d
         net_gamma += g
+        net_vega += v
+        net_theta += th
         gross_delta += abs(d)
         delta_by_symbol[symbol] = delta_by_symbol.get(symbol, 0.0) + d
 

@@ -23,7 +23,13 @@ from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
-import torch
+
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    HAS_TORCH = False
 
 from quantlaxmi.strategies.s9_momentum.data import is_trading_day
 from quantlaxmi.data.store import MarketDataStore
@@ -31,8 +37,12 @@ from quantlaxmi.data.store import MarketDataStore
 NIFTY_TOKEN = 256265
 BANKNIFTY_TOKEN = 260105
 
-_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-_DTYPE = torch.float32
+if HAS_TORCH:
+    _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _DTYPE = torch.float32
+else:
+    _DEVICE = None
+    _DTYPE = None
 
 
 # ---------------------------------------------------------------------------

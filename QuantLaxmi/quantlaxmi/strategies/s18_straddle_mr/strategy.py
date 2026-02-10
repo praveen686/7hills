@@ -948,3 +948,31 @@ if __name__ == "__main__":
         print(f"Daily results saved to {daily_path}")
 
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S18StraddleMRStrategy(BaseStrategy):
+    """Straddle mean reversion strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s18_straddle_mr"
+
+    def warmup_days(self) -> int:
+        return 30
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S18StraddleMRStrategy:
+    """Factory for registry auto-discovery."""
+    return S18StraddleMRStrategy()

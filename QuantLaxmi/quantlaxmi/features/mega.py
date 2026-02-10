@@ -162,6 +162,12 @@ class MegaFeatureBuilder:
     18. Divergence Flow (from nse_participant_oi DFF): Helmholtz decomposition signals
     """
 
+    # Maximum lookback buffer across all feature groups (in calendar days).
+    # Covers 252 trading days (for 52-week high/low in group 1) plus
+    # weekends and holidays.  Every _build_* method receives this as its
+    # effective start_date so rolling windows are fully populated.
+    MAX_LOOKBACK_DAYS = 450
+
     def __init__(
         self,
         market_dir: str | Path | None = None,
@@ -291,39 +297,48 @@ class MegaFeatureBuilder:
         # Derive the underlying FnO ticker from the index name
         ticker = self._symbol_to_ticker(symbol)
 
+        # Global lookback buffer: query extra history so every rolling
+        # window (up to 252 trading days) is fully populated from day 1
+        # of the requested range.  Individual _build_* methods no longer
+        # need to compute their own lookback.
+        lookback_start = (
+            pd.Timestamp(start_date) - pd.Timedelta(days=self.MAX_LOOKBACK_DAYS)
+        ).strftime("%Y-%m-%d")
+
         # Build each feature group independently.
         # Each returns a DataFrame indexed by date (datetime).
+        # All groups receive lookback_start so rolling features are warm.
         groups: list[pd.DataFrame] = []
         group_names: list[str] = []
 
         builders = [
-            ("price_tech", self._build_price_features, (symbol, start_date, end_date)),
-            ("options", self._build_options_features, (ticker, start_date, end_date)),
-            ("institutional", self._build_institutional_features, (start_date, end_date)),
-            ("breadth", self._build_breadth_features, (ticker, start_date, end_date)),
-            ("vix", self._build_vix_features, (start_date, end_date)),
-            ("micro", self._build_microstructure_features, (ticker, start_date, end_date)),
-            ("intraday", self._build_intraday_features, (ticker, start_date, end_date)),
-            ("crypto", self._build_crypto_features, (start_date, end_date)),
-            ("futures", self._build_futures_features, (ticker, start_date, end_date)),
-            ("fii", self._build_fii_features, (ticker, start_date, end_date)),
-            ("nfo1m", self._build_nfo_1min_features, (ticker, start_date, end_date)),
-            ("nsevol", self._build_nse_volatility_features, (ticker, start_date, end_date)),
-            ("partvol", self._build_participant_vol_features, (start_date, end_date)),
-            ("mktact", self._build_market_activity_features, (start_date, end_date)),
-            ("mwpl", self._build_mwpl_stress_features, (ticker, start_date, end_date)),
-            ("settle", self._build_settlement_features, (ticker, start_date, end_date)),
-            ("ext_options", self._build_extended_options_features, (ticker, start_date, end_date)),
-            ("divergence_flow", self._build_divergence_flow_features, (start_date, end_date)),
-            ("crypto_alpha", self._build_crypto_alpha_features, (start_date, end_date)),
-            ("news_sentiment", self._build_news_sentiment_features, (start_date, end_date)),
-            ("contract_delta", self._build_contract_delta_features, (ticker, start_date, end_date)),
-            ("deltaeq_oi", self._build_deltaeq_oi_features, (start_date, end_date)),
-            ("preopen_ofi", self._build_preopen_ofi_features, (start_date, end_date)),
-            ("oi_spurts", self._build_oi_spurts_features, (start_date, end_date)),
-            ("crypto_expanded", self._build_crypto_expanded_features, (start_date, end_date)),
-            ("cross_asset", self._build_cross_asset_features, (symbol, start_date, end_date)),
-            ("macro", self._build_macro_features, (start_date, end_date)),
+            ("price_tech", self._build_price_features, (symbol, lookback_start, end_date)),
+            ("options", self._build_options_features, (ticker, lookback_start, end_date)),
+            ("institutional", self._build_institutional_features, (lookback_start, end_date)),
+            ("breadth", self._build_breadth_features, (ticker, lookback_start, end_date)),
+            ("vix", self._build_vix_features, (lookback_start, end_date)),
+            ("micro", self._build_microstructure_features, (ticker, lookback_start, end_date)),
+            ("intraday", self._build_intraday_features, (ticker, lookback_start, end_date)),
+            ("crypto", self._build_crypto_features, (lookback_start, end_date)),
+            ("futures", self._build_futures_features, (ticker, lookback_start, end_date)),
+            ("fii", self._build_fii_features, (ticker, lookback_start, end_date)),
+            ("nfo1m", self._build_nfo_1min_features, (ticker, lookback_start, end_date)),
+            ("nsevol", self._build_nse_volatility_features, (ticker, lookback_start, end_date)),
+            ("partvol", self._build_participant_vol_features, (lookback_start, end_date)),
+            ("mktact", self._build_market_activity_features, (lookback_start, end_date)),
+            ("mwpl", self._build_mwpl_stress_features, (ticker, lookback_start, end_date)),
+            ("settle", self._build_settlement_features, (ticker, lookback_start, end_date)),
+            ("ext_options", self._build_extended_options_features, (ticker, lookback_start, end_date)),
+            ("divergence_flow", self._build_divergence_flow_features, (lookback_start, end_date)),
+            ("crypto_alpha", self._build_crypto_alpha_features, (lookback_start, end_date)),
+            ("news_sentiment", self._build_news_sentiment_features, (lookback_start, end_date)),
+            ("contract_delta", self._build_contract_delta_features, (ticker, lookback_start, end_date)),
+            ("deltaeq_oi", self._build_deltaeq_oi_features, (lookback_start, end_date)),
+            ("preopen_ofi", self._build_preopen_ofi_features, (lookback_start, end_date)),
+            ("oi_spurts", self._build_oi_spurts_features, (lookback_start, end_date)),
+            ("crypto_expanded", self._build_crypto_expanded_features, (lookback_start, end_date)),
+            ("cross_asset", self._build_cross_asset_features, (symbol, lookback_start, end_date)),
+            ("macro", self._build_macro_features, (lookback_start, end_date)),
         ]
 
         for name, fn, args in builders:
@@ -445,12 +460,13 @@ class MegaFeatureBuilder:
 
         Uses Kite 1-min spot data (488 days) as primary OHLCV source.
         Augments with P/E, P/B, Div Yield from nse_index_close where available.
+
+        Note: start_date already includes the global lookback buffer from build().
         """
         import pyarrow.parquet as pq
 
-        lookback_start = (
-            pd.Timestamp(start_date) - pd.Timedelta(days=400)
-        ).strftime("%Y-%m-%d")
+        # start_date already includes MAX_LOOKBACK_DAYS buffer from build()
+        lookback_start = start_date
 
         # --- Primary: Kite spot 1-min → daily OHLCV ---
         ticker = self._symbol_to_ticker(symbol)
@@ -663,10 +679,9 @@ class MegaFeatureBuilder:
         gap[1:] = (df["open"].values[1:] - close[:-1]) / close[:-1]
         feats["px_gap"] = gap
 
-        # Assemble result
+        # Assemble result — no per-method trimming; build() trims to
+        # the user-requested [start_date, end_date] after joining all groups.
         out = pd.DataFrame(feats, index=df.index)
-        # Trim to requested date range
-        out = out.loc[start_date:end_date]
         return out
 
     # ==================================================================
@@ -1104,11 +1119,10 @@ class MegaFeatureBuilder:
     def _build_vix_features(
         self, start_date: str, end_date: str
     ) -> pd.DataFrame:
-        """India VIX features from nse_index_close."""
-        lookback_start = (
-            pd.Timestamp(start_date) - pd.Timedelta(days=120)
-        ).strftime("%Y-%m-%d")
+        """India VIX features from nse_index_close.
 
+        Note: start_date already includes the global lookback buffer from build().
+        """
         try:
             df = self.store.sql(
                 'SELECT date, '
@@ -1120,7 +1134,7 @@ class MegaFeatureBuilder:
                 'WHERE "Index Name" = \'India VIX\' '
                 'AND date BETWEEN ? AND ? '
                 'ORDER BY date',
-                [lookback_start, end_date],
+                [start_date, end_date],
             )
         except Exception:
             logger.warning("VIX query failed")
@@ -1167,7 +1181,6 @@ class MegaFeatureBuilder:
         feats["vix_mr_signal"] = (vix - vix_sma21) / safe_sma
 
         out = pd.DataFrame(feats, index=df.index)
-        out = out.loc[start_date:end_date]
         return out
 
     # ==================================================================
@@ -1579,7 +1592,6 @@ class MegaFeatureBuilder:
         for f in feats_frames[1:]:
             result = result.join(f, how="outer")
 
-        result = result.loc[start_date:end_date]
         return result
 
     # ==================================================================
@@ -2834,12 +2846,13 @@ class MegaFeatureBuilder:
         - ca_lead_lag_1d:          yesterday's return of the "other" major index
 
         All features are causal (only use data available at or before each date).
+
+        Note: start_date already includes the global lookback buffer from build().
         """
         import pyarrow.parquet as pq
 
-        lookback_start = (
-            pd.Timestamp(start_date) - pd.Timedelta(days=100)
-        ).strftime("%Y-%m-%d")
+        # start_date already includes MAX_LOOKBACK_DAYS buffer from build()
+        lookback_start = start_date
 
         # ---------------------------------------------------------
         # 1. Load close prices for all 4 indices from DuckDB or Kite
@@ -2950,10 +2963,9 @@ class MegaFeatureBuilder:
             feats["ca_lead_lag_1d"] = pd.Series(np.nan, index=returns.index)
 
         # ---------------------------------------------------------
-        # 8. Assemble and trim
+        # 8. Assemble — no per-method trimming; build() trims globally
         # ---------------------------------------------------------
         result = pd.DataFrame(feats, index=returns.index)
-        result = result.loc[start_date:end_date]
         return result
 
     # ==================================================================
@@ -2979,11 +2991,8 @@ class MegaFeatureBuilder:
 
             feats: dict[str, pd.Series] = {}
 
-            # We need a date range to build the feature index
-            # Use a generous pre-buffer for rolling computations
-            buffer_start = str(
-                pd.Timestamp(start_date) - pd.Timedelta(days=60)
-            )
+            # start_date already includes MAX_LOOKBACK_DAYS buffer from build()
+            buffer_start = start_date
 
             # ---- RBI Repo Rate (step function) ----
             rbi_path = macro_dir / "rbi_rates.csv"
@@ -3070,9 +3079,6 @@ class MegaFeatureBuilder:
             result = pd.DataFrame(feats)
             result.index.name = "date"
             result = result.sort_index()
-
-            # Filter to requested date range
-            result = result.loc[start_date:end_date]
 
             logger.info("Macro features: %d columns, %d rows", len(result.columns), len(result))
             return result

@@ -73,12 +73,20 @@ class S4IVMeanRevertStrategy(BaseStrategy):
         from quantlaxmi.core.pricing.sanos import fit_sanos, prepare_nifty_chain
         from quantlaxmi.strategies.s9_momentum.data import get_fno
 
-        # Calibrate SANOS for today
+        # CAUSAL: use T-1 data to generate signal for date d.
+        # FnO bhavcopy is end-of-day data — using d itself would be look-ahead.
+        from datetime import timedelta
+        prev_d = d - timedelta(days=1)
+        # Skip weekends
+        while prev_d.weekday() >= 5:
+            prev_d = prev_d - timedelta(days=1)
+
         try:
-            fno = get_fno(store, d)
+            fno = get_fno(store, prev_d)
             if fno.empty:
                 return None
-        except Exception:
+        except Exception as e:
+            logger.debug("S4 FnO data fetch failed for %s on %s: %s", symbol, prev_d, e)
             return None
 
         chain_data = prepare_nifty_chain(fno, symbol=symbol, max_expiries=2)

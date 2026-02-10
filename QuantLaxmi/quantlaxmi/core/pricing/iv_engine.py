@@ -16,11 +16,21 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-import torch
+
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    HAS_TORCH = False
 
 # Use GPU if available, else CPU (still vectorized via PyTorch)
-_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-_DTYPE = torch.float32  # FP32 for Newton-Raphson stability; T4 FP32 = 8.1 TFLOPS
+if HAS_TORCH:
+    _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _DTYPE = torch.float32  # FP32 for Newton-Raphson stability; T4 FP32 = 8.1 TFLOPS
+else:
+    _DEVICE = None
+    _DTYPE = None
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +127,37 @@ def bs_gamma(
     sqrt_T = torch.sqrt(T_safe)
     d1 = (torch.log(S / K) + (r + 0.5 * sigma_safe ** 2) * T_safe) / (sigma_safe * sqrt_T)
     return _norm_pdf(d1) / (S * sigma_safe * sqrt_T)
+
+
+def bs_theta(
+    S: torch.Tensor,
+    K: torch.Tensor,
+    T: torch.Tensor,
+    r: torch.Tensor,
+    sigma: torch.Tensor,
+    is_call: torch.Tensor,
+) -> torch.Tensor:
+    """Black-Scholes theta (∂price/∂t) per calendar day.
+
+    Returns negative values for long options (time decay erodes value).
+    """
+    T_safe = torch.clamp(T, min=1e-6)
+    sigma_safe = torch.clamp(sigma, min=1e-6)
+    sqrt_T = torch.sqrt(T_safe)
+    d1 = (torch.log(S / K) + (r + 0.5 * sigma_safe ** 2) * T_safe) / (sigma_safe * sqrt_T)
+    d2 = d1 - sigma_safe * sqrt_T
+
+    # First term: time decay of option premium
+    term1 = -S * _norm_pdf(d1) * sigma_safe / (2.0 * sqrt_T)
+
+    # Second term: interest rate component (different for calls/puts)
+    discount = torch.exp(-r * T_safe)
+    call_term2 = -r * K * discount * _norm_cdf(d2)
+    put_term2 = r * K * discount * _norm_cdf(-d2)
+    term2 = torch.where(is_call, call_term2, put_term2)
+
+    # Return per calendar day (annualized theta / 365)
+    return (term1 + term2) / 365.0
 
 
 # ---------------------------------------------------------------------------

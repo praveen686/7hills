@@ -5,12 +5,15 @@ Orchestrates:
   2. Signal generation for all 4 channels
   3. Trade execution against portfolio state
   4. Funding settlement crediting for carry positions
+
+Also provides ``S26CryptoFlowStrategy`` — a StrategyProtocol-compliant
+wrapper so that S26 can be auto-discovered by the strategy registry.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from quantlaxmi.strategies.s26_crypto_flow.scanner import (
     FundingMatrixBuilder,
@@ -302,3 +305,88 @@ def check_ttl_exits(
             ))
 
     return exits
+
+
+# ---------------------------------------------------------------------------
+# StrategyProtocol-compliant wrapper
+# ---------------------------------------------------------------------------
+
+class S26CryptoFlowStrategy:
+    """StrategyProtocol wrapper for the CLRS crypto funding carry strategy.
+
+    This adapter lets S26 participate in the unified strategy registry and
+    orchestrator alongside India FnO strategies.  Because CLRS is a crypto
+    strategy that scans Binance funding rates (not NSE data via
+    MarketDataStore), the ``scan()`` method issues live REST calls and
+    does not use the ``store`` parameter.  An empty signal list is returned
+    if the Binance API is unreachable.
+    """
+
+    def __init__(self, config: SignalConfig | None = None):
+        self._config = config or SignalConfig()
+
+    @property
+    def strategy_id(self) -> str:
+        return "s26_crypto_flow"
+
+    def warmup_days(self) -> int:
+        # Crypto strategy uses live data, no historical warmup needed
+        return 0
+
+    def scan(self, d: date, store=None) -> list:
+        """Scan Binance funding rates and return StrategyProtocol Signals.
+
+        Parameters
+        ----------
+        d : date
+            The scan date (used for logging; actual data is live).
+        store : MarketDataStore, optional
+            Not used — CLRS scans Binance REST APIs directly.
+
+        Returns
+        -------
+        list[Signal]
+            Zero or more Signal objects conforming to StrategyProtocol.
+        """
+        from quantlaxmi.strategies.protocol import Signal
+
+        try:
+            snapshots = scan_all_symbols(min_volume_usd=self._config.min_volume_usd)
+        except Exception as e:
+            logger.warning("S26 Binance scan failed: %s", e)
+            return []
+
+        if not snapshots:
+            return []
+
+        signals = []
+        for snap in snapshots:
+            if snap.ann_funding_pct > self._config.carry_min_ann_funding:
+                # Positive funding = short perp to earn carry
+                strength = min(1.0, snap.ann_funding_pct / 50.0)
+                signals.append(Signal(
+                    strategy_id=self.strategy_id,
+                    symbol=snap.symbol,
+                    direction="short",
+                    conviction=strength,
+                    instrument_type="FUT",
+                    ttl_bars=24,  # ~8h funding intervals
+                    metadata={
+                        "ann_funding_pct": round(snap.ann_funding_pct, 2),
+                        "funding_rate": snap.funding_rate,
+                        "volume_24h_usd": snap.volume_24h_usd,
+                        "mark_price": snap.mark_price,
+                    },
+                ))
+
+        if signals:
+            logger.info(
+                "[s26_crypto_flow] %s: %d carry signal(s)",
+                d.isoformat(), len(signals),
+            )
+        return signals
+
+
+def create_strategy() -> S26CryptoFlowStrategy:
+    """Factory for registry auto-discovery."""
+    return S26CryptoFlowStrategy()

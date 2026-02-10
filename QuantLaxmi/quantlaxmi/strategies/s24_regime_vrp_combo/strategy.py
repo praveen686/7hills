@@ -1201,3 +1201,31 @@ if __name__ == "__main__":
 
         print(f"\n  Trades saved to:  {trades_file}")
         print(f"  Returns saved to: {rets_file}")
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S24RegimeVRPComboStrategy(BaseStrategy):
+    """Regime-VRP combo strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s24_regime_vrp_combo"
+
+    def warmup_days(self) -> int:
+        return 60
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S24RegimeVRPComboStrategy:
+    """Factory for registry auto-discovery."""
+    return S24RegimeVRPComboStrategy()

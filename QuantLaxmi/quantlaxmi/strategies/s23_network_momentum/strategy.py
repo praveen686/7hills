@@ -1007,3 +1007,31 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S23NetworkMomentumStrategy(BaseStrategy):
+    """Network momentum strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s23_network_momentum"
+
+    def warmup_days(self) -> int:
+        return 60
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S23NetworkMomentumStrategy:
+    """Factory for registry auto-discovery."""
+    return S23NetworkMomentumStrategy()

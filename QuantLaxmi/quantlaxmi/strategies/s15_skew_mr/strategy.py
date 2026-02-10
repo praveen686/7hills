@@ -992,3 +992,31 @@ if __name__ == "__main__":
 
     result = run_backtest(symbol=symbol, start_date=start, end_date=end)
     print(format_results(result))
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S15SkewMRStrategy(BaseStrategy):
+    """Skew mean reversion strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s15_skew_mr"
+
+    def warmup_days(self) -> int:
+        return 60
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S15SkewMRStrategy:
+    """Factory for registry auto-discovery."""
+    return S15SkewMRStrategy()

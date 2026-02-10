@@ -1067,3 +1067,31 @@ if __name__ == "__main__":
     # Run backtest for NIFTY, full available date range
     result = run_backtest(symbol=symbol, start_date=start, end_date=end)
     print(format_results(result))
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S16VRPEnhancedStrategy(BaseStrategy):
+    """Enhanced VRP strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s16_vrp_enhanced"
+
+    def warmup_days(self) -> int:
+        return 30
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S16VRPEnhancedStrategy:
+    """Factory for registry auto-discovery."""
+    return S16VRPEnhancedStrategy()

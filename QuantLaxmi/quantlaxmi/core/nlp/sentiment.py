@@ -14,7 +14,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-import torch
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    HAS_TORCH = False
 
 logger = logging.getLogger(__name__)
 

@@ -642,3 +642,31 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S21FIIFlowStrategy(BaseStrategy):
+    """FII flow strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s21_fii_flow"
+
+    def warmup_days(self) -> int:
+        return 60
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S21FIIFlowStrategy:
+    """Factory for registry auto-discovery."""
+    return S21FIIFlowStrategy()

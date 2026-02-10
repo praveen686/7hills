@@ -94,6 +94,9 @@ class XTrendConfig:
     loss_mode: str = "sharpe"  # "sharpe", "joint_mle", "joint_quantile"
     mle_weight: float = 0.1  # α in joint loss
 
+    # Purge gap
+    purge_gap: int = 5  # days between train_end and test_start to avoid look-ahead
+
     # Position sizing
     max_position: float = 0.25
     vol_target: float = 0.15  # 15% annual vol target
@@ -861,17 +864,19 @@ if HAS_TORCH:
             max(pair[1] for pair in [(8, 24), (16, 48), (32, 96)]) + MACD_NORM_WINDOW + MACD_STD_WINDOW,
         )
         min_history = feature_warmup + seq_len + 10
-        while start + train_size + test_size <= n_days:
+        purge_gap = cfg.purge_gap
+        while start + train_size + purge_gap + test_size <= n_days:
             train_end = start + train_size
-            test_end = min(train_end + test_size, n_days)
+            test_start = train_end + purge_gap
+            test_end = min(test_start + test_size, n_days)
 
             if train_end < min_history:
                 start += step
                 continue
 
             logger.info(
-                "Fold %d: train=[%d:%d], test=[%d:%d]",
-                fold_idx, start, train_end, train_end, test_end,
+                "Fold %d: train=[%d:%d], purge=%d, test=[%d:%d]",
+                fold_idx, start, train_end, purge_gap, test_start, test_end,
             )
 
             # --- Normalize features using train stats ---
@@ -947,6 +952,10 @@ if HAS_TORCH:
                 model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
             )
 
+            # AMP setup
+            use_amp = _DEVICE is not None and _DEVICE.type == "cuda"
+            scaler = torch.amp.GradScaler("cuda") if use_amp else None
+
             # Split into train/val (last 20%)
             n_total = len(X_target_arr)
             n_val = max(1, int(n_total * 0.2))
@@ -982,22 +991,35 @@ if HAS_TORCH:
                     )
                     y_batch = torch.tensor(Y_arr[batch_idx], device=_DEVICE)
 
-                    if cfg.loss_mode == "sharpe":
-                        positions = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                        loss = sharpe_loss(positions.squeeze(-1), y_batch)
-                    elif cfg.loss_mode == "joint_mle":
-                        mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                        loss = joint_loss(
-                            mu, log_sigma, y_batch.unsqueeze(-1), cfg.mle_weight
-                        )
-                    else:
-                        positions = model(tgt_seq, ctx_set, tgt_id, ctx_id)
-                        loss = sharpe_loss(positions.squeeze(-1), y_batch)
-
                     optimizer.zero_grad()
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
+
+                    if use_amp:
+                        with torch.amp.autocast("cuda"):
+                            if cfg.loss_mode == "joint_mle":
+                                mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                                loss = joint_loss(
+                                    mu, log_sigma, y_batch.unsqueeze(-1), cfg.mle_weight
+                                )
+                            else:
+                                positions = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                                loss = sharpe_loss(positions.squeeze(-1), y_batch)
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        if cfg.loss_mode == "joint_mle":
+                            mu, log_sigma = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = joint_loss(
+                                mu, log_sigma, y_batch.unsqueeze(-1), cfg.mle_weight
+                            )
+                        else:
+                            positions = model(tgt_seq, ctx_set, tgt_id, ctx_id)
+                            loss = sharpe_loss(positions.squeeze(-1), y_batch)
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
 
                     epoch_loss += loss.item()
                     n_batches += 1
@@ -1056,7 +1078,7 @@ if HAS_TORCH:
             model.eval()
             with torch.no_grad():
                 for asset_idx in range(n_assets):
-                    for t in range(train_end, test_end):
+                    for t in range(test_start, test_end):
                         if t < seq_len:
                             continue
                         target_window = norm_features[t - seq_len : t, asset_idx, :]

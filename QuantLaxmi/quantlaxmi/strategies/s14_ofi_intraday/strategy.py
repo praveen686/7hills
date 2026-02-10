@@ -779,3 +779,31 @@ if __name__ == "__main__":
     out_path = results_dir / f"ofi_intraday_NIFTY_{ts_str}.parquet"
     result_df.to_parquet(out_path, index=False)
     print(f"Bar-level results saved to {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S14OFIIntradayStrategy(BaseStrategy):
+    """Order flow imbalance intraday strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s14_ofi_intraday"
+
+    def warmup_days(self) -> int:
+        return 0
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S14OFIIntradayStrategy:
+    """Factory for registry auto-discovery."""
+    return S14OFIIntradayStrategy()

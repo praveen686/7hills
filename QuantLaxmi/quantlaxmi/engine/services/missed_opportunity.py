@@ -289,8 +289,8 @@ class MissedOpportunityService:
             )
             if not df.empty:
                 return float(df["close"].iloc[0])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Index close lookup failed for %s on %s: %s", symbol, day, e)
 
         # Fallback: try nfo_1min FUT last close
         try:
@@ -302,8 +302,8 @@ class MissedOpportunityService:
             )
             if not df.empty:
                 return float(df["close"].iloc[0])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("FUT close lookup failed for %s on %s: %s", symbol, day, e)
 
         return None
 
@@ -328,8 +328,8 @@ class MissedOpportunityService:
                     [float(x) for x in df["high"]],
                     [float(x) for x in df["low"]],
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("HL range lookup failed for %s (%s to %s): %s", symbol, start, end, e)
         return [], []
 
 

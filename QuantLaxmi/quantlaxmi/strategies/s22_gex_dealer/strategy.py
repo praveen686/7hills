@@ -1081,3 +1081,31 @@ if __name__ == "__main__":
     # Save results
     out_path = save_results(result)
     print(f"\nResults saved to: {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S22GEXDealerStrategy(BaseStrategy):
+    """GEX dealer hedging strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s22_gex_dealer"
+
+    def warmup_days(self) -> int:
+        return 30
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S22GEXDealerStrategy:
+    """Factory for registry auto-discovery."""
+    return S22GEXDealerStrategy()

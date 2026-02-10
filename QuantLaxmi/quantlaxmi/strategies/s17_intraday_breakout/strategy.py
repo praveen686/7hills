@@ -1133,3 +1133,31 @@ if __name__ == "__main__":
     if not trade_df.empty:
         trade_df.to_csv(trade_path, index=False)
         print(f"Trade results saved to {trade_path}")
+
+
+# ---------------------------------------------------------------------------
+# BaseStrategy wrapper for registry integration
+# ---------------------------------------------------------------------------
+
+from quantlaxmi.strategies.base import BaseStrategy
+from quantlaxmi.strategies.protocol import Signal
+
+
+class S17IntradayBreakoutStrategy(BaseStrategy):
+    """Intraday breakout strategy — BaseStrategy wrapper for registry."""
+
+    @property
+    def strategy_id(self) -> str:
+        return "s17_intraday_breakout"
+
+    def warmup_days(self) -> int:
+        return 0
+
+    def _scan_impl(self, d, store) -> list[Signal]:
+        """Research-only strategy — no live signals yet."""
+        return []
+
+
+def create_strategy() -> S17IntradayBreakoutStrategy:
+    """Factory for registry auto-discovery."""
+    return S17IntradayBreakoutStrategy()

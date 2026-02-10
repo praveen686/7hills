@@ -201,6 +201,7 @@ def run_vrp_backtest(
     entry_vrp: float = 0.03,     # Enter when VRP > 3% (IV 3pts above RV)
     exit_vrp: float = 0.0,       # Exit when VRP < 0 (RV catches up to IV)
     stop_loss_pct: float = 0.02, # Stop loss at 2% of capital per trade
+    cost_model=None,
 ) -> VRPBacktestResult:
     """Run VRP harvesting backtest.
 
@@ -230,8 +231,14 @@ def run_vrp_backtest(
     trades: list[dict] = []
     daily_pnl: list[float] = []
     hold_days = 5  # hold for ~1 week (5 trading days)
-    cost_bps = 30  # round-trip cost in bps (STT + brokerage + charges)
-    cost_frac = cost_bps / 10000
+    # Use CostModel if provided, otherwise default 30 bps round-trip
+    # (STT + brokerage + charges for India options)
+    if cost_model is not None:
+        cost_frac = cost_model.roundtrip_frac
+    else:
+        from quantlaxmi.core.backtest.costs import CostModel
+        cost_model = CostModel(commission_bps=10, slippage_bps=5)
+        cost_frac = cost_model.roundtrip_frac
 
     # Track open trade state
     open_trade: dict | None = None

@@ -69,7 +69,8 @@ def _fetch_open_interest() -> dict[str, float]:
         resp.raise_for_status()
         # This endpoint is per-symbol; use ticker for all at once
         return {}
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to fetch open interest: %s", e)
         return {}
 
 
@@ -85,7 +86,8 @@ def _fetch_oi_batch() -> dict[str, float]:
             if "openInterest" in t:
                 result[sym] = float(t["openInterest"]) * float(t.get("lastPrice", 0))
         return result
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to fetch OI batch: %s", e)
         return {}
 
 

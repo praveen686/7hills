@@ -298,7 +298,8 @@ def generate_residual_signals(
 
     try:
         _, _, residuals = funding_pca(funding_matrix)
-    except Exception:
+    except Exception as e:
+        logger.debug("Funding PCA failed in residual signal generation: %s", e)
         return signals
 
     # Z-score the residuals

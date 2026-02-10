@@ -296,18 +296,34 @@ class HPTuner:
             test_start = train_end + cfg.purge_gap
             test_end = min(test_start + cfg.test_window, n_days)
 
-            # Normalize using train stats
+            # Normalize using train stats — per-asset to avoid cross-asset
+            # scale contamination (matches training_pipeline.py Phase 2/5)
             train_feats = features[start:train_end]
-            flat = train_feats.reshape(-1, x_cfg.n_features)
-            valid = ~np.any(np.isnan(flat), axis=1)
-            if valid.sum() < 30:
+            n_assets_fold = train_feats.shape[1]
+            n_features_fold = train_feats.shape[2]
+            feat_mean = np.zeros((n_assets_fold, n_features_fold))
+            feat_std = np.ones((n_assets_fold, n_features_fold))
+            total_valid = 0
+            for a in range(n_assets_fold):
+                af = train_feats[:, a, :]
+                valid_a = ~np.any(np.isnan(af), axis=1)
+                total_valid += valid_a.sum()
+                if valid_a.sum() >= 10:
+                    feat_mean[a] = np.nanmean(af[valid_a], axis=0)
+                    s = np.nanstd(af[valid_a], axis=0, ddof=1)
+                    feat_std[a] = np.where(s > 1e-10, s, 1.0)
+            if total_valid < 30:
                 start += cfg.step_size
                 continue
 
-            feat_mean = np.nanmean(flat[valid], axis=0)
-            feat_std = np.nanstd(flat[valid], axis=0, ddof=1)
-            feat_std = np.where(feat_std > 1e-10, feat_std, 1.0)
-            norm_features = (features - feat_mean) / feat_std
+            # Only normalize the relevant slice (train+test window + seq lookback)
+            norm_lo = max(0, start - x_cfg.seq_len)
+            norm_hi = test_end
+            norm_features = np.full_like(features, np.nan)
+            for a in range(n_assets_fold):
+                norm_features[norm_lo:norm_hi, a, :] = (
+                    features[norm_lo:norm_hi, a, :] - feat_mean[a]
+                ) / feat_std[a]
 
             # Build training episodes
             episodes = self._build_episodes(

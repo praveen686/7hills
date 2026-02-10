@@ -38,11 +38,25 @@ logger = logging.getLogger(__name__)
 class MarketDataStore:
     """DuckDB-backed query layer over hive-partitioned parquet files."""
 
+    # Whitelist of allowed table/view names to prevent SQL injection
+    # via table name parameters.
+    ALLOWED_TABLES = frozenset({
+        "nfo_1min", "bfo_1min", "ticks", "instruments",
+        # nse_* views are auto-registered in _register_views
+    })
+
     def __init__(self, market_dir: str | Path | None = None):
         self.market_dir = Path(market_dir) if market_dir else MARKET_DIR
         self._con = duckdb.connect()
         self._lock = threading.Lock()
+        self._registered_views: set[str] = set()
         self._register_views()
+
+    def _validate_table(self, table: str) -> str:
+        """Validate table name against whitelist. Raises ValueError if unknown."""
+        if table in self.ALLOWED_TABLES or table in self._registered_views:
+            return table
+        raise ValueError(f"Unknown table: {table!r}")
 
     def _register_views(self) -> None:
         """Create DuckDB views pointing to parquet directories."""
@@ -61,6 +75,7 @@ class MarketDataStore:
                     f"SELECT * FROM read_parquet('{glob_path}', "
                     f"hive_partitioning=true, hive_types_autocast=false)"
                 )
+                self._registered_views.add(name)
                 logger.debug("Registered view: %s", name)
             else:
                 logger.debug("Skipped view %s (no data)", name)
@@ -81,6 +96,7 @@ class MarketDataStore:
                         f"hive_partitioning=true, hive_types_autocast=false, "
                         f"union_by_name=true)"
                     )
+                    self._registered_views.add(name)
                     logger.debug("Registered view: %s", name)
 
     def close(self) -> None:
@@ -152,16 +168,17 @@ class MarketDataStore:
 
         # Determine which table (NFO vs BFO) based on underlying
         bfo_names = {"SENSEX", "BANKEX", "SENSEX50"}
-        table = "bfo_1min" if name.upper() in bfo_names else "nfo_1min"
+        table = self._validate_table("bfo_1min" if name.upper() in bfo_names else "nfo_1min")
 
         with self._lock:
             if expiry is None:
                 # Find nearest expiry
                 expiry_q = self._con.execute(
                     f"SELECT DISTINCT expiry FROM {table} "
-                    f"WHERE date={d_str!r} AND name={name!r} "
-                    f"AND instrument_type IN ('CE', 'PE') "
-                    f"ORDER BY expiry LIMIT 1"
+                    "WHERE date=$1 AND name=$2 "
+                    "AND instrument_type IN ('CE', 'PE') "
+                    "ORDER BY expiry LIMIT 1",
+                    [d_str, name],
                 ).fetchone()
                 if not expiry_q:
                     return pd.DataFrame()
@@ -170,9 +187,10 @@ class MarketDataStore:
             return self._con.execute(
                 f"SELECT date, strike, instrument_type, open, high, low, close, volume, oi, symbol "
                 f"FROM {table} "
-                f"WHERE date={d_str!r} AND name={name!r} AND expiry={expiry!r} "
-                f"AND instrument_type IN ('CE', 'PE') "
-                f"ORDER BY date, strike, instrument_type"
+                "WHERE date=$1 AND name=$2 AND expiry=$3 "
+                "AND instrument_type IN ('CE', 'PE') "
+                "ORDER BY date, strike, instrument_type",
+                [d_str, name, expiry],
             ).fetchdf()
 
     def get_symbol_bars(
@@ -192,13 +210,15 @@ class MarketDataStore:
         table : str
             Source table ("nfo_1min" or "bfo_1min").
         """
+        table = self._validate_table(table)
         d_str = d.isoformat()
         with self._lock:
             return self._con.execute(
                 f"SELECT date, open, high, low, close, volume, oi "
                 f"FROM {table} "
-                f"WHERE date={d_str!r} AND symbol={symbol!r} "
-                f"ORDER BY date"
+                "WHERE date=$1 AND symbol=$2 "
+                "ORDER BY date",
+                [d_str, symbol],
             ).fetchdf()
 
     def get_ticks(
@@ -218,10 +238,11 @@ class MarketDataStore:
         d_str = d.isoformat()
         with self._lock:
             return self._con.execute(
-                f"SELECT timestamp, ltp, volume, oi "
-                f"FROM ticks "
-                f"WHERE date={d_str!r} AND instrument_token={instrument_token} "
-                f"ORDER BY timestamp"
+                "SELECT timestamp, ltp, volume, oi "
+                "FROM ticks "
+                "WHERE date=$1 AND instrument_token=$2 "
+                "ORDER BY timestamp",
+                [d_str, instrument_token],
             ).fetchdf()
 
     def get_instruments(self, d: date) -> pd.DataFrame:
@@ -229,7 +250,8 @@ class MarketDataStore:
         d_str = d.isoformat()
         with self._lock:
             return self._con.execute(
-                f"SELECT * FROM instruments WHERE date={d_str!r}"
+                "SELECT * FROM instruments WHERE date=$1",
+                [d_str],
             ).fetchdf()
 
     def resolve_token(
@@ -241,18 +263,21 @@ class MarketDataStore:
         d_str = d.isoformat()
         with self._lock:
             row = self._con.execute(
-                f"SELECT instrument_token FROM instruments "
-                f"WHERE date={d_str!r} AND tradingsymbol={tradingsymbol!r} "
-                f"LIMIT 1"
+                "SELECT instrument_token FROM instruments "
+                "WHERE date=$1 AND tradingsymbol=$2 "
+                "LIMIT 1",
+                [d_str, tradingsymbol],
             ).fetchone()
             return row[0] if row else None
 
     def get_underlyings(self, d: date, table: str = "nfo_1min") -> list[str]:
         """List unique underlying names available on a date."""
+        table = self._validate_table(table)
         d_str = d.isoformat()
         with self._lock:
             rows = self._con.execute(
-                f"SELECT DISTINCT name FROM {table} WHERE date={d_str!r} ORDER BY name"
+                f"SELECT DISTINCT name FROM {table} WHERE date=$1 ORDER BY name",
+                [d_str],
             ).fetchall()
             return [r[0] for r in rows]
 

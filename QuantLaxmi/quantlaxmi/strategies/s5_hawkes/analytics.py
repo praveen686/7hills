@@ -19,13 +19,23 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-import torch
+
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    HAS_TORCH = False
 
 logger = logging.getLogger(__name__)
 
 # Re-use GPU-accelerated BS functions from iv_engine
-_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-_DTYPE = torch.float32
+if HAS_TORCH:
+    _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _DTYPE = torch.float32
+else:
+    _DEVICE = None
+    _DTYPE = None
 
 
 # ---------------------------------------------------------------------------
