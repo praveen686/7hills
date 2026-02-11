@@ -14,7 +14,9 @@ from pathlib import Path
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
+from quantlaxmi.data._paths import LOGS_DIR
+
+LOG_DIR = LOGS_DIR
 LOG_FILE = LOG_DIR / "qlx_runner.md"
 
 

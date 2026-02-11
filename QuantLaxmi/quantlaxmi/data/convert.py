@@ -41,10 +41,10 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-from quantlaxmi.data._paths import DATA_ROOT, MARKET_DIR
+from quantlaxmi.data._paths import DATA_ROOT, MARKET_DIR, TELEGRAM_DOWNLOAD_DIR, TELEGRAM_UNPACKED_DIR
 
-DOWNLOAD_DIR = DATA_ROOT / "telegram_source_files" / "india_tick_data"
-UNPACKED_DIR = DATA_ROOT / "telegram_source_files" / "india_tick_unpacked"
+DOWNLOAD_DIR = TELEGRAM_DOWNLOAD_DIR
+UNPACKED_DIR = TELEGRAM_UNPACKED_DIR
 
 # ---------------------------------------------------------------------------
 # Date extraction from filenames

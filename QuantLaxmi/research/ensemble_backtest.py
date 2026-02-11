@@ -50,7 +50,8 @@ _INDEX_NAME = "Nifty 50"
 COST_PER_SIDE_NIFTY = 3.0 / 22000.0
 
 # Results output directory
-RESULTS_DIR = Path(__file__).resolve().parents[1] / "research_artefacts" / "results"
+from quantlaxmi.data._paths import RESEARCH_RESULTS_DIR
+RESULTS_DIR = RESEARCH_RESULTS_DIR
 
 
 # ---------------------------------------------------------------------------

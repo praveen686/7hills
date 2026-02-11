@@ -36,6 +36,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sp_stats
 
+from quantlaxmi.data._paths import _PROJECT_ROOT
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -1047,7 +1049,7 @@ def main() -> None:
 
     if not result_df.empty:
         # Save results
-        out_dir = Path(__file__).resolve().parent.parent / "results"
+        out_dir = _PROJECT_ROOT / "quantlaxmi" / "strategies" / "results"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / f"hmm_regime_{symbol}_{end.isoformat()}.csv"
         result_df.to_csv(out_file, index=False)

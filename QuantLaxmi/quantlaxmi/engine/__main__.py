@@ -19,6 +19,8 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+from quantlaxmi.data._paths import PORTFOLIO_STATE, EVENTS_DIR, REPLAY_ARTIFACTS_DIR
+
 logger = logging.getLogger("engine")
 
 
@@ -232,7 +234,7 @@ def main() -> None:
         help="Enable debug logging",
     )
     parser.add_argument(
-        "--state-file", default="data/state/portfolio.json",
+        "--state-file", default=str(PORTFOLIO_STATE),
         help="Path to state JSON file",
     )
 
@@ -256,11 +258,11 @@ def main() -> None:
         help="Number of replay runs for parity check (default: 1)",
     )
     p_replay.add_argument(
-        "--events-dir", default="data/events",
+        "--events-dir", default=str(EVENTS_DIR),
         help="Directory containing reference event logs",
     )
     p_replay.add_argument(
-        "--output-dir", default="data/replay_artifacts",
+        "--output-dir", default=str(REPLAY_ARTIFACTS_DIR),
         help="Directory for replay output artifacts",
     )
     p_replay.add_argument(

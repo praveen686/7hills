@@ -84,6 +84,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from quantlaxmi.data._paths import _PROJECT_ROOT
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -629,7 +631,7 @@ def backtest(
 
     # Save results
     if save_results:
-        results_dir = Path(__file__).resolve().parent.parent / "results"
+        results_dir = _PROJECT_ROOT / "quantlaxmi" / "strategies" / "results"
         results_dir.mkdir(exist_ok=True)
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 

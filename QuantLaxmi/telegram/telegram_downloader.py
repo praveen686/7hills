@@ -9,14 +9,17 @@ from pathlib import Path
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
 
+# Resolve project root (telegram/ is one level below QuantLaxmi/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Load credentials from .env
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(_PROJECT_ROOT / ".env")
 
 API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
 TELEGRAM_PHONE = os.getenv("TELEGRAM_PHONE") or os.getenv("ph_number_telegram")
 CHANNEL_NAME = "nfo_data"
-DOWNLOAD_DIR = Path("/home/ubuntu/Desktop/7hills/QuantLaxmi/data/telegram_source_files/india_tick_data")
+DOWNLOAD_DIR = _PROJECT_ROOT / "data" / "telegram_source_files" / "india_tick_data"
 
 # Configuration constants
 DOWNLOAD_TIMEOUT = 600  # 10 minutes per file

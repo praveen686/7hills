@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/research", tags=["research"])
 
-RESULTS_DIR = Path(__file__).resolve().parents[5] / "research_artefacts" / "results"
+from quantlaxmi.data._paths import RESEARCH_RESULTS_DIR
+
+RESULTS_DIR = RESEARCH_RESULTS_DIR
 
 
 # ------------------------------------------------------------------

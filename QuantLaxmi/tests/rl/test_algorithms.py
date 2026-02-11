@@ -1,6 +1,7 @@
 """Tests for models.rl.algorithms — MC, TD, Q-Learning, Policy Gradient, Bandits."""
 import sys
-sys.path.insert(0, '/home/ubuntu/Desktop/7hills/QuantLaxmi')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pytest
 import numpy as np

@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
-RESULTS_DIR = Path(__file__).resolve().parents[3] / "data" / "results" / "strategy_results"
+from quantlaxmi.data._paths import STRATEGY_RESULTS_DIR
+
+RESULTS_DIR = STRATEGY_RESULTS_DIR
 
 
 # ------------------------------------------------------------------

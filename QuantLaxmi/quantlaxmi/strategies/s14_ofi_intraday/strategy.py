@@ -45,6 +45,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
+from quantlaxmi.data._paths import _PROJECT_ROOT
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -772,7 +774,7 @@ if __name__ == "__main__":
     )
 
     # Save results
-    results_dir = Path(__file__).resolve().parent.parent / "results"
+    results_dir = _PROJECT_ROOT / "quantlaxmi" / "strategies" / "results"
     results_dir.mkdir(exist_ok=True)
 
     ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")

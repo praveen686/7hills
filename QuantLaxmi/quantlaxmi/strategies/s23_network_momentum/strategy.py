@@ -47,6 +47,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sp_stats
 
+from quantlaxmi.data._paths import _PROJECT_ROOT
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -919,7 +921,7 @@ def main() -> None:
         # ----------------------------------------------------------
         # 2. Save results
         # ----------------------------------------------------------
-        out_dir = Path(__file__).resolve().parent.parent / "results"
+        out_dir = _PROJECT_ROOT / "quantlaxmi" / "strategies" / "results"
         out_dir.mkdir(parents=True, exist_ok=True)
 
         out_file = out_dir / f"network_momentum_{TARGET_INDEX}_{date(2026, 2, 6).isoformat()}.csv"

@@ -44,9 +44,24 @@ CRYPTO_TICK_DATA = _PROJECT_ROOT / "data" / "ticks"
 EVENTS_DIR = _PROJECT_ROOT / "data" / "events"
 SESSIONS_DIR = _PROJECT_ROOT / "data" / "sessions"
 BACKTEST_RESULTS_DIR = _PROJECT_ROOT / "data" / "results" / "backtest_results"
+REPLAY_ARTIFACTS_DIR = _PROJECT_ROOT / "data" / "replay_artifacts"
 
 # Zerodha / India collector paths
 ZERODHA_SESSION_CACHE = _PROJECT_ROOT / "data" / "state" / "zerodha_session.json"
 KITE_DEPTH_DIR = _PROJECT_ROOT / "data" / "zerodha" / "5level"
 HEADLINE_ARCHIVE_DIR = _PROJECT_ROOT / "data" / "india" / "headlines"
 NEWS_STATE_FILE = _PROJECT_ROOT / "data" / "state" / "india_news.json"
+
+# Telegram source data
+TELEGRAM_DOWNLOAD_DIR = DATA_ROOT / "telegram_source_files" / "india_tick_data"
+TELEGRAM_UNPACKED_DIR = DATA_ROOT / "telegram_source_files" / "india_tick_unpacked"
+TELEGRAM_EXTRA_DIR = _PROJECT_ROOT / "data" / "telegram_extra"
+TELEGRAM_SESSION_PATH = _PROJECT_ROOT / "telegram" / "brahmastra_session"
+ENV_FILE = _PROJECT_ROOT / ".env"
+
+# Logging
+LOGS_DIR = _PROJECT_ROOT / "logs"
+
+# Research outputs
+RESEARCH_RESULTS_DIR = _PROJECT_ROOT / "research_artefacts" / "results"
+STRATEGY_RESULTS_DIR = _PROJECT_ROOT / "data" / "results" / "strategy_results"

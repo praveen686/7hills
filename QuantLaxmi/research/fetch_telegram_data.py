@@ -23,9 +23,10 @@ from dotenv import load_dotenv
 from telethon import TelegramClient
 
 # ── Config ──────────────────────────────────────────────────────────────────
-ENV_PATH = Path("/home/ubuntu/Desktop/7hills/QuantLaxmi/.env")
-SESSION_PATH = Path("/home/ubuntu/Desktop/7hills/QuantLaxmi/telegram/brahmastra_session")
-DOWNLOAD_DIR = Path("/home/ubuntu/Desktop/7hills/QuantLaxmi/data/telegram_extra")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_PATH = _PROJECT_ROOT / ".env"
+SESSION_PATH = _PROJECT_ROOT / "telegram" / "brahmastra_session"
+DOWNLOAD_DIR = _PROJECT_ROOT / "data" / "telegram_extra"
 DOWNLOAD_TIMEOUT = 600  # seconds per file
 MAX_FILE_SIZE_MB = 500
 SCAN_LIMIT = int(os.getenv("TELEGRAM_SCAN_LIMIT", "200"))  # messages per channel

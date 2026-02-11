@@ -10,7 +10,8 @@ Tests the trading MDP environments:
   - LOBSimulator: limit order book
 """
 import sys
-sys.path.insert(0, "/home/ubuntu/Desktop/7hills/QuantLaxmi")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import pytest

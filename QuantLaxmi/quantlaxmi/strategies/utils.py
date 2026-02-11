@@ -7,7 +7,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-RESULTS_DIR = Path(__file__).resolve().parents[3] / "research_artefacts" / "results"
+from quantlaxmi.data._paths import RESEARCH_RESULTS_DIR
+
+RESULTS_DIR = RESEARCH_RESULTS_DIR
 
 
 @contextmanager

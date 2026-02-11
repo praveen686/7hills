@@ -23,8 +23,8 @@ from quantlaxmi.engine.services.data_quality import DQGateResult, DQCheckResult
 # Constants
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path("/home/ubuntu/Desktop/7hills")
-PYTHON_SRC_ROOT = PROJECT_ROOT / "QuantLaxmi"
+PYTHON_SRC_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = PYTHON_SRC_ROOT.parent
 
 
 # ---------------------------------------------------------------------------

@@ -537,7 +537,7 @@ class TestTrainingPipeline:
         from quantlaxmi.models.ml.tft.production.training_pipeline import TrainingPipelineConfig
         cfg = TrainingPipelineConfig()
         assert cfg.start_date == "2024-01-01"
-        assert len(cfg.symbols) == 4
+        assert len(cfg.symbols) == 6  # 4 India indices + BTCUSDT + ETHUSDT
         assert cfg.skip_feature_selection is False
         assert cfg.skip_tuning is False
 

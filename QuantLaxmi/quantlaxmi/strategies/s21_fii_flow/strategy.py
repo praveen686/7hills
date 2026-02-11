@@ -37,6 +37,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from quantlaxmi.data._paths import _PROJECT_ROOT
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -620,7 +622,7 @@ def main() -> None:
 
     if not result_df.empty:
         # Save results
-        out_dir = Path(__file__).resolve().parent.parent / "results"
+        out_dir = _PROJECT_ROOT / "quantlaxmi" / "strategies" / "results"
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / "fii_flow_nifty.csv"
         result_df.to_csv(out_file, index=False)

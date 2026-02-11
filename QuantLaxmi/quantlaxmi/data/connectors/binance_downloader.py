@@ -37,6 +37,7 @@ from quantlaxmi.data.connectors.binance_connector import (
     INTERVAL_MINUTES,
     MAX_KLINES_PER_REQUEST,
 )
+from quantlaxmi.data._paths import BINANCE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# Default storage root (relative to this file)
-DEFAULT_DATA_ROOT = Path(__file__).resolve().parent / "binance"
+# Default storage root — centralized via _paths.py (common/data/binance)
+DEFAULT_DATA_ROOT = BINANCE_DIR
 
 # Default intervals to download
 DEFAULT_INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"]

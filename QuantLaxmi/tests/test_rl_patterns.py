@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import sys
 import math
+from pathlib import Path
 
-sys.path.insert(0, "/home/ubuntu/Desktop/7hills/QuantLaxmi")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pytest

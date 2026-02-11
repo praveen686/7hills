@@ -433,11 +433,15 @@ class MegaFeatureBuilder:
     # Internal: symbol mapping
     # ------------------------------------------------------------------
 
+    # Crypto symbols that use Binance daily OHLCV instead of Kite
+    _CRYPTO_TICKERS = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+
     @staticmethod
     def _symbol_to_ticker(symbol: str) -> str:
         """Map index display name to FnO ticker symbol.
 
         'NIFTY 50' -> 'NIFTY', 'Nifty Bank' -> 'BANKNIFTY', etc.
+        Crypto symbols pass through unchanged.
         """
         s = symbol.upper().strip()
         mapping = {
@@ -446,6 +450,9 @@ class MegaFeatureBuilder:
             "NIFTY BANK": "BANKNIFTY",
             "NIFTY FINANCIAL SERVICES": "FINNIFTY",
             "NIFTY MIDCAP SELECT": "MIDCPNIFTY",
+            "BTCUSDT": "BTCUSDT",
+            "ETHUSDT": "ETHUSDT",
+            "SOLUSDT": "SOLUSDT",
         }
         return mapping.get(s, s.replace(" ", ""))
 
@@ -470,6 +477,11 @@ class MegaFeatureBuilder:
 
         # --- Primary: Kite spot 1-min → daily OHLCV ---
         ticker = self._symbol_to_ticker(symbol)
+
+        # Crypto: read Binance daily OHLCV instead of Kite
+        if ticker in self._CRYPTO_TICKERS:
+            return self._build_crypto_price_features(ticker, lookback_start, end_date)
+
         kite_spot_map = {
             "NIFTY": "NIFTY_SPOT", "BANKNIFTY": "BANKNIFTY_SPOT",
             "FINNIFTY": "FINNIFTY_SPOT", "MIDCPNIFTY": "MIDCPNIFTY_SPOT",
@@ -681,6 +693,183 @@ class MegaFeatureBuilder:
 
         # Assemble result — no per-method trimming; build() trims to
         # the user-requested [start_date, end_date] after joining all groups.
+        out = pd.DataFrame(feats, index=df.index)
+        return out
+
+    # ------------------------------------------------------------------
+    # Crypto price features (Binance daily OHLCV → same technicals as India)
+    # ------------------------------------------------------------------
+
+    def _build_crypto_price_features(
+        self, ticker: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """Build price_tech features from Binance daily OHLCV for crypto assets.
+
+        Same technical indicators as _build_price_features but reads from
+        common/data/binance/{ticker}/1d/ instead of Kite spot.
+        PE/PB/DivYield are set to NaN (not applicable for crypto).
+        """
+        import pyarrow.parquet as pq
+
+        coin_dir = self._binance_dir / ticker / "1d"
+        if not coin_dir.exists():
+            logger.warning("Binance daily data not found for %s at %s", ticker, coin_dir)
+            return pd.DataFrame()
+
+        records: list[dict] = []
+        for d_dir in sorted(coin_dir.iterdir()):
+            if not d_dir.is_dir() or not d_dir.name.startswith("date="):
+                continue
+            d_str = d_dir.name[5:]
+            if d_str < start_date or d_str > end_date:
+                continue
+            pfiles = list(d_dir.glob("*.parquet"))
+            if not pfiles:
+                continue
+            try:
+                bars = pq.read_table(pfiles[0]).to_pandas()
+                if bars.empty:
+                    continue
+                for c in ["open", "high", "low", "close", "volume"]:
+                    bars[c] = pd.to_numeric(bars[c], errors="coerce")
+                records.append({
+                    "date": d_str,
+                    "open": float(bars["open"].iloc[0]),
+                    "high": float(bars["high"].max()),
+                    "low": float(bars["low"].min()),
+                    "close": float(bars["close"].iloc[-1]),
+                    "volume": float(bars["volume"].sum()),
+                })
+            except Exception as e:
+                logger.debug("Binance bar read failed for %s/%s: %s", ticker, d_str, e)
+                continue
+
+        if not records:
+            logger.warning("No Binance daily data for %s in [%s, %s]", ticker, start_date, end_date)
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date").sort_index()
+        df = df[~df.index.duplicated(keep="last")]
+        # Add empty valuation columns (not applicable for crypto)
+        for col in ["turnover", "pe", "pb", "div_yield"]:
+            df[col] = np.nan
+
+        logger.info(
+            "Binance daily OHLCV (%s): %d days (%s to %s)",
+            ticker, len(df), df.index[0].date(), df.index[-1].date(),
+        )
+
+        # Compute same technical features as India indices
+        close = df["close"].values.astype(np.float64)
+        high = df["high"].values.astype(np.float64)
+        low = df["low"].values.astype(np.float64)
+        volume = df["volume"].values.astype(np.float64)
+        n = len(close)
+
+        feats: dict[str, np.ndarray] = {}
+        log_c = np.log(close)
+
+        # -- Returns --
+        for lag in [1, 2, 3, 5, 10, 21, 63]:
+            ret = np.full(n, np.nan)
+            if n > lag:
+                ret[lag:] = log_c[lag:] - log_c[:-lag]
+            feats[f"px_ret_{lag}d"] = ret
+
+        # -- Realized volatility --
+        daily_ret = np.full(n, np.nan)
+        daily_ret[1:] = np.diff(log_c)
+        for w in [5, 10, 21, 63]:
+            feats[f"px_rvol_{w}d"] = _rolling_std(daily_ret, w)
+
+        # -- RSI --
+        for p in [7, 14, 21]:
+            feats[f"px_rsi_{p}"] = (_rsi(close, p) - 50.0) / 50.0
+
+        # -- MACD --
+        macd_l, macd_s, macd_h = _macd(close)
+        cstd = _rolling_std(close, 21)
+        safe_cstd = np.where(cstd > 0, cstd, 1.0)
+        feats["px_macd_line"] = macd_l / safe_cstd
+        feats["px_macd_signal"] = macd_s / safe_cstd
+        feats["px_macd_hist"] = macd_h / safe_cstd
+
+        # -- Bollinger Band %B --
+        feats["px_bb_pctb_20"] = _bb_pctb(close, 20, 2.0)
+
+        # -- Moving average crossovers --
+        for fast, slow in [(5, 20), (10, 50), (20, 100)]:
+            sf = _sma(close, fast)
+            ss = _sma(close, slow)
+            safe_ss = np.where(ss > 0, ss, 1.0)
+            feats[f"px_ma_cross_{fast}_{slow}"] = (sf - ss) / safe_ss
+
+        # -- Rate of change --
+        for w in [5, 10, 21]:
+            roc = np.full(n, np.nan)
+            if n > w:
+                roc[w:] = (close[w:] - close[:-w]) / close[:-w]
+            feats[f"px_roc_{w}d"] = roc
+
+        # -- Momentum oscillator --
+        for w in [10, 21]:
+            sw = _sma(close, w)
+            stw = _rolling_std(close, w)
+            safe_stw = np.where(stw > 0, stw, 1.0)
+            feats[f"px_mom_osc_{w}d"] = (close - sw) / safe_stw
+
+        # -- Vol ratio --
+        rv5 = feats["px_rvol_5d"]
+        rv21 = feats["px_rvol_21d"]
+        safe_rv21 = np.where((rv21 > 0) & ~np.isnan(rv21), rv21, 1.0)
+        feats["px_vol_ratio_5_21"] = np.where(~np.isnan(rv5), rv5 / safe_rv21, np.nan)
+
+        # -- 52-week high/low distance --
+        if n >= 252:
+            rh = pd.Series(close).rolling(252, min_periods=252).max().values
+            rl = pd.Series(close).rolling(252, min_periods=252).min().values
+            rng = rh - rl
+            safe_rng = np.where(rng > 0, rng, 1.0)
+            feats["px_dist_52w_high"] = (close - rh) / safe_rng
+            feats["px_dist_52w_low"] = (close - rl) / safe_rng
+        else:
+            feats["px_dist_52w_high"] = np.full(n, np.nan)
+            feats["px_dist_52w_low"] = np.full(n, np.nan)
+
+        # -- True Range / ATR normalized --
+        tr = np.maximum(
+            high - low,
+            np.maximum(
+                np.abs(high - np.roll(close, 1)),
+                np.abs(low - np.roll(close, 1)),
+            ),
+        )
+        tr[0] = high[0] - low[0]
+        atr_14 = _ema(tr, 14)
+        safe_close = np.where(close > 0, close, 1.0)
+        feats["px_atr_norm_14"] = atr_14 / safe_close
+
+        # -- Volume features --
+        vol_ma_20 = _sma(volume, 20)
+        safe_vol = np.where(vol_ma_20 > 0, vol_ma_20, 1.0)
+        feats["px_vol_ratio_20d"] = volume / safe_vol
+        feats["px_vol_zscore_20d"] = _rolling_zscore(volume, 20)
+
+        # -- PE/PB/DivYield: NaN for crypto --
+        feats["px_pe_zscore_63d"] = np.full(n, np.nan)
+        feats["px_pb_zscore_63d"] = np.full(n, np.nan)
+        feats["px_div_yield_zscore_63d"] = np.full(n, np.nan)
+
+        # -- Intraday range --
+        feats["px_range_norm"] = _safe_div(high - low, close)
+
+        # -- Gap --
+        gap = np.full(n, np.nan)
+        gap[1:] = (df["open"].values[1:] - close[:-1]) / close[:-1]
+        feats["px_gap"] = gap
+
         out = pd.DataFrame(feats, index=df.index)
         return out
 
@@ -2332,11 +2521,11 @@ class MegaFeatureBuilder:
     def _build_crypto_alpha_features(
         self, start_date: str, end_date: str
     ) -> pd.DataFrame:
-        """7 crypto-specific alpha features from BTC/ETH kline data.
+        """7 crypto-specific alpha features from BTC 1h kline data.
 
-        Features: ca_vol_regime, ca_vol_zscore, ca_mr_z_24, ca_mr_z_72,
-        ca_mr_z_168, ca_vwap_dev, ca_vol_profile, ca_ret_skew, ca_ret_kurt,
-        ca_mtf_momentum, ca_range_pos — all causal.
+        Reads hourly bars from common/data/binance/BTCUSDT/1h/, computes
+        intraday crypto features (vol regime, z-scores, VWAP dev, etc.),
+        then resamples to daily (last value per day) for MegaFeatureBuilder.
         """
         try:
             from quantlaxmi.features.crypto_alpha import (
@@ -2348,49 +2537,99 @@ class MegaFeatureBuilder:
                 MultiTimeframeMomentum,
                 RangePosition,
             )
+            from quantlaxmi.core.base.types import OHLCV
+            import pyarrow.parquet as pq
 
-            # Load BTC/ETH kline data from store
-            btc = self.store.load("binance_kline", start_date=start_date, end_date=end_date)
-            if btc is None or btc.empty:
+            # Load 1h klines (need extra lookback for 168-hour features)
+            coin_dir = self._binance_dir / "BTCUSDT" / "1h"
+            if not coin_dir.exists():
+                logger.warning("Binance BTC hourly data not found at %s", coin_dir)
                 return pd.DataFrame()
 
-            # Ensure required columns exist
-            needed = {"close", "high", "low", "volume"}
-            if not needed.issubset(set(btc.columns)):
+            # Need 8 days of lookback before start_date for 168-hour window
+            lookback_date = (
+                pd.Timestamp(start_date) - pd.Timedelta(days=10)
+            ).strftime("%Y-%m-%d")
+
+            all_bars: list[pd.DataFrame] = []
+            for d_dir in sorted(coin_dir.iterdir()):
+                if not d_dir.is_dir() or not d_dir.name.startswith("date="):
+                    continue
+                d_str = d_dir.name[5:]
+                if d_str < lookback_date or d_str > end_date:
+                    continue
+                pfiles = list(d_dir.glob("*.parquet"))
+                if not pfiles:
+                    continue
+                try:
+                    bars = pq.read_table(pfiles[0]).to_pandas()
+                    if bars.empty:
+                        continue
+                    all_bars.append(bars)
+                except Exception:
+                    continue
+
+            if not all_bars:
                 return pd.DataFrame()
+
+            hourly = pd.concat(all_bars, ignore_index=True)
+
+            # Normalise column names to OHLCV title-case
+            col_map = {
+                "open": "Open", "high": "High", "low": "Low",
+                "close": "Close", "volume": "Volume",
+            }
+            hourly.rename(columns=col_map, inplace=True)
+            for c in ["Open", "High", "Low", "Close", "Volume"]:
+                hourly[c] = pd.to_numeric(hourly[c], errors="coerce")
+
+            # Build DatetimeIndex from timestamp column
+            if "timestamp" in hourly.columns:
+                hourly.index = pd.to_datetime(hourly["timestamp"])
+            elif "date" in hourly.columns:
+                hourly.index = pd.to_datetime(hourly["date"])
+            else:
+                hourly.index = pd.RangeIndex(len(hourly))
+
+            hourly = hourly.sort_index()
+            hourly = hourly[~hourly.index.duplicated(keep="last")]
+
+            if not isinstance(hourly.index, pd.DatetimeIndex):
+                return pd.DataFrame()
+
+            ohlcv = OHLCV(hourly[["Open", "High", "Low", "Close", "Volume"]])
 
             features = []
-            prefix = "ca_"
+            for cls in [VolatilityRegime, MeanReversionZ, VWAPDeviation,
+                        VolumeProfile, ReturnDistribution,
+                        MultiTimeframeMomentum, RangePosition]:
+                try:
+                    feat = cls()
+                    out = feat.transform(ohlcv)
+                    if out is not None and not out.empty:
+                        out.columns = ["ca_" + c for c in out.columns]
+                        features.append(out)
+                except Exception:
+                    continue
 
-            vol_regime = VolatilityRegime(name=f"{prefix}vol_regime")
-            features.append(vol_regime.transform(btc))
-
-            mr_z = MeanReversionZ(name=f"{prefix}mr_z")
-            features.append(mr_z.transform(btc))
-
-            vwap = VWAPDeviation(name=f"{prefix}vwap_dev")
-            features.append(vwap.transform(btc))
-
-            vol_prof = VolumeProfile(name=f"{prefix}vol_profile")
-            features.append(vol_prof.transform(btc))
-
-            ret_dist = ReturnDistribution(name=f"{prefix}ret_dist")
-            features.append(ret_dist.transform(btc))
-
-            mtf = MultiTimeframeMomentum(name=f"{prefix}mtf_momentum")
-            features.append(mtf.transform(btc))
-
-            rng = RangePosition(name=f"{prefix}range_pos")
-            features.append(rng.transform(btc))
-
-            # Concatenate all feature DataFrames
             valid = [f for f in features if f is not None and not f.empty]
             if not valid:
                 return pd.DataFrame()
 
-            result = pd.concat(valid, axis=1)
-            logger.info("Crypto alpha features: %d columns", len(result.columns))
-            return result
+            hourly_feats = pd.concat(valid, axis=1)
+
+            # Resample to daily: take last hourly value per calendar day
+            # This is causal — we use end-of-day snapshot of hourly features
+            daily = hourly_feats.resample("D").last().dropna(how="all")
+
+            # Filter to requested date range
+            daily = daily.loc[start_date:end_date]
+
+            logger.info(
+                "Crypto alpha features: %d columns, %d daily rows (from %d hourly)",
+                len(daily.columns), len(daily), len(hourly_feats),
+            )
+            return daily
 
         except Exception:
             logger.exception("Crypto alpha features failed")
@@ -2431,14 +2670,14 @@ class MegaFeatureBuilder:
         try:
             raw = self.store.sql(
                 """
-                SELECT date,
+                SELECT "Date" AS date,
                        "Symbol" as symbol,
                        CAST("Delta Factor" AS DOUBLE) as delta_factor,
                        "Option Type" as option_type,
                        CAST("Strike Price" AS DOUBLE) as strike_price
                 FROM nse_contract_delta
-                WHERE date BETWEEN ? AND ?
-                ORDER BY date
+                WHERE "Date" BETWEEN ? AND ?
+                ORDER BY "Date"
                 """,
                 [start_date, end_date],
             )
@@ -2529,13 +2768,13 @@ class MegaFeatureBuilder:
         try:
             raw = self.store.sql(
                 """
-                SELECT date,
+                SELECT "Date" AS date,
                        "Symbol" as symbol,
                        CAST("Open Interest" AS DOUBLE) as oi,
                        CAST("Delta Equivalent Open Interest Contract wise" AS DOUBLE) as deltaeq_cw
                 FROM nse_combined_oi_deleq
-                WHERE date BETWEEN ? AND ?
-                ORDER BY date
+                WHERE "Date" BETWEEN ? AND ?
+                ORDER BY "Date"
                 """,
                 [start_date, end_date],
             )

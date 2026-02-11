@@ -118,7 +118,7 @@ class TrainingPipelineConfig:
 
     # Symbols
     symbols: list[str] = field(
-        default_factory=lambda: ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
+        default_factory=lambda: ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "BTCUSDT", "ETHUSDT"]
     )
 
     # Phase toggles
@@ -400,6 +400,33 @@ class TrainingPipeline:
         cfg = state["config"]
         result = state["result"]
 
+        # Check for Phase 1 checkpoint on disk
+        checkpoint_dir = Path(cfg.checkpoint_base_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        phase1_path = checkpoint_dir / "phase1_features.pt"
+
+        if phase1_path.exists():
+            try:
+                saved = torch.load(phase1_path, weights_only=False)
+                state["features"] = saved["features"]
+                state["features_raw"] = saved["features_raw"]
+                state["feature_names"] = saved["feature_names"]
+                state["feature_names_raw"] = saved["feature_names_raw"]
+                state["dates"] = saved["dates"]
+                state["targets"] = saved["targets"]
+                if "selector" in saved and saved["selector"] is not None:
+                    state["selector"] = saved["selector"]
+                result.n_features_initial = len(saved["feature_names_raw"])
+                result.n_features_prefiltered = len(saved["feature_names"])
+                logger.info(
+                    "Loaded Phase 1 checkpoint from %s (%d→%d features, %d days)",
+                    phase1_path, result.n_features_initial,
+                    result.n_features_prefiltered, len(saved["dates"]),
+                )
+                return
+            except Exception as e:
+                logger.warning("Could not load Phase 1 checkpoint (%s) — rebuilding", e)
+
         # Build multi-asset features
         adapter = MegaFeatureAdapter(cfg.symbols)
         features, feature_names, dates = adapter.build_multi_asset(
@@ -425,6 +452,16 @@ class TrainingPipeline:
             state["features"] = features
             result.n_features_prefiltered = len(feature_names)
             logger.info("Skipping feature selection (using all %d features)", len(feature_names))
+            # Save checkpoint
+            try:
+                torch.save({
+                    "features": features, "features_raw": features,
+                    "feature_names": feature_names, "feature_names_raw": feature_names,
+                    "dates": dates, "targets": targets, "selector": None,
+                }, phase1_path)
+                logger.info("Saved Phase 1 checkpoint to %s", phase1_path)
+            except Exception as e:
+                logger.warning("Failed to save Phase 1 checkpoint: %s", e)
             return
 
         # Pre-filter: coverage + correlation on flattened data
@@ -448,6 +485,17 @@ class TrainingPipeline:
         state["feature_names"] = kept_names
         state["selector"] = selector
 
+        # Save Phase 1 checkpoint to disk
+        try:
+            torch.save({
+                "features": features_filtered, "features_raw": features,
+                "feature_names": kept_names, "feature_names_raw": feature_names,
+                "dates": dates, "targets": targets, "selector": selector,
+            }, phase1_path)
+            logger.info("Saved Phase 1 checkpoint to %s", phase1_path)
+        except Exception as e:
+            logger.warning("Failed to save Phase 1 checkpoint: %s", e)
+
     # ------------------------------------------------------------------
     # Phase 2: Exploration pass
     # ------------------------------------------------------------------
@@ -469,12 +517,23 @@ class TrainingPipeline:
         n_days, n_assets, n_features = features.shape
         rng = np.random.default_rng(42)
 
-        # Get or create selector
+        # Get or create selector (with disk recovery)
+        from .feature_selection import FeatureSelector, FeatureSelectionConfig
+        checkpoint_dir = Path(cfg.checkpoint_base_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        selector_path = checkpoint_dir / "phase2_selector.pkl"
+
         selector = state.get("selector")
+        if selector is None and selector_path.exists():
+            try:
+                selector = FeatureSelector.load(selector_path)
+                logger.info("Resumed Phase 2 selector from disk (%d folds already done)", selector.n_folds)
+            except Exception as e:
+                logger.warning("Could not load Phase 2 selector (%s) — starting fresh", e)
+                selector = None
         if selector is None:
-            from .feature_selection import FeatureSelector, FeatureSelectionConfig
             selector = FeatureSelector(FeatureSelectionConfig())
-            state["selector"] = selector
+        state["selector"] = selector
 
         x_cfg = XTrendConfig(
             d_hidden=cfg.d_hidden,
@@ -495,14 +554,21 @@ class TrainingPipeline:
             patience=cfg.patience,
         )
 
-        # Walk-forward folds
+        # Walk-forward folds (skip already-completed folds on resume)
         fold_idx = 0
         start = 0
+        n_resumed = selector.n_folds
 
         while start + x_cfg.train_window + cfg.purge_gap + x_cfg.test_window <= n_days:
             train_end = start + x_cfg.train_window
             test_start = train_end + cfg.purge_gap
             test_end = min(test_start + x_cfg.test_window, n_days)
+
+            if fold_idx < n_resumed:
+                logger.info("Exploration fold %d: skipping (already in saved selector)", fold_idx)
+                start += x_cfg.step_size
+                fold_idx += 1
+                continue
 
             logger.info(
                 "Exploration fold %d: train=[%d:%d], purge=%d, test=[%d:%d]",
@@ -663,6 +729,11 @@ class TrainingPipeline:
             else:
                 # Only extract VSN weights if training completed without NaN
                 selector.add_fold_weights(model, feature_names)
+                # Persist selector to disk after each fold (crash recovery)
+                try:
+                    selector.save(selector_path)
+                except Exception as e:
+                    logger.warning("Failed to save Phase 2 selector: %s", e)
                 # Jump past the skip block below
                 del model
                 torch.cuda.empty_cache()

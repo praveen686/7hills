@@ -522,12 +522,13 @@ def main() -> None:
 
     # Logging
     level = logging.DEBUG if args.verbose else logging.INFO
-    Path("logs").mkdir(exist_ok=True)
+    from quantlaxmi.data._paths import LOGS_DIR
+    LOGS_DIR.mkdir(exist_ok=True)
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
-            logging.FileHandler("logs/india_news.log"),
+            logging.FileHandler(str(LOGS_DIR / "india_news.log")),
             logging.StreamHandler() if args.verbose else logging.NullHandler(),
         ],
     )

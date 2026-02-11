@@ -112,7 +112,7 @@ MAX_TRADES_PER_DAY = 3
 DAILY_STOP_PCT = 0.005       # -0.5% of notional -> shut down
 
 # Default data root
-from quantlaxmi.data._paths import DATA_ROOT as _DEFAULT_DATA_ROOT, MARKET_DIR
+from quantlaxmi.data._paths import DATA_ROOT as _DEFAULT_DATA_ROOT, MARKET_DIR, _PROJECT_ROOT
 _DEFAULT_NFO_DIR = MARKET_DIR / "nfo_1min"
 
 
@@ -1119,7 +1119,7 @@ if __name__ == "__main__":
     stats = print_statistics(daily_df, trade_df, symbol, cost_rt)
 
     # Save results
-    results_dir = Path(__file__).resolve().parent.parent / "results"
+    results_dir = _PROJECT_ROOT / "quantlaxmi" / "strategies" / "results"
     results_dir.mkdir(exist_ok=True)
 
     ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")

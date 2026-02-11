@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/signals", tags=["signals"])
 
+from quantlaxmi.data._paths import EVENTS_DIR
+
 # WAL event logs are stored by date in data/events/
-_EVENTS_DIR = Path(__file__).resolve().parents[3] / "data" / "events"
+_EVENTS_DIR = EVENTS_DIR
 
 
 # ------------------------------------------------------------------

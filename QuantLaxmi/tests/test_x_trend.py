@@ -4,7 +4,8 @@ Covers: feature builder shapes/formulae, model forward pass, losses,
 context construction, and a walk-forward smoke test on synthetic data.
 """
 import sys
-sys.path.insert(0, '/home/ubuntu/Desktop/7hills/QuantLaxmi')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import math
 import numpy as np

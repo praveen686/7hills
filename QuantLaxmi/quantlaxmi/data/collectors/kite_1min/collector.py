@@ -35,10 +35,7 @@ import pyarrow.parquet as pq
 
 logger = logging.getLogger(__name__)
 
-# Ensure project root on path for imports
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+from quantlaxmi.data._paths import KITE_1MIN_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +134,7 @@ class Kite1MinCollector:
         include_spot: bool = True,
     ):
         if base_dir is None:
-            base_dir = Path(__file__).resolve().parent / "kite_1min"
+            base_dir = KITE_1MIN_DIR
         self.base_dir = Path(base_dir)
         self.symbols = [s.upper() for s in (symbols or list(_INDEX_TOKENS.keys()))]
         self.days = min(days, MAX_HISTORY_DAYS)

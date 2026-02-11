@@ -10,7 +10,8 @@ Tests the analytical and RL-based financial models:
   - AssetAllocPG: policy gradient asset allocation
 """
 import sys
-sys.path.insert(0, "/home/ubuntu/Desktop/7hills/QuantLaxmi")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import math
 import numpy as np
