@@ -96,3 +96,12 @@ sanos_temporal_*/
 research/*.pdf
 memorysummary.txt
 *.pdf
+
+# === Research & Telegram large dirs ===
+QuantLaxmi_Research/tft_venv/
+QuantLaxmi_Research/tft_outputs/
+QuantLaxmi_Research/google-research/tft/outputs/
+QuantLaxmi_Research/kite_daily_data/
+QuantLaxmi_Research/*.csv
+QuantLaxmi_Telegram/files/
+QuantLaxmi/data/

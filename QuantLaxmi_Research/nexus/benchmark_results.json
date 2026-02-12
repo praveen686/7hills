@@ -1,0 +1,43 @@
+{
+  "benchmark": "Oxford-Man Realized Volatility",
+  "classic_tft": {
+    "p50": 0.0447,
+    "p90": 0.0213
+  },
+  "nexus": {
+    "p50": 0.49273672699928284,
+    "p90": 0.23434875905513763,
+    "rmse": 0.6886733770370483,
+    "sharpe": -0.2854722326727278,
+    "win_rate": 0.5042052144659378,
+    "n_trades": 7134,
+    "max_drawdown": 157.6886444091797,
+    "total_pnl": -79.27376556396484
+  },
+  "winner": {
+    "p50": "Classic TFT",
+    "p90": "Classic TFT"
+  },
+  "config": {
+    "encoder_steps": 30,
+    "decoder_steps": 5,
+    "n_features": 26,
+    "jepa_epochs": 8,
+    "finetune_epochs": 5,
+    "batch_size": 256,
+    "symbols": [
+      ".SPX",
+      ".FTSE",
+      ".GDAXI",
+      ".N225",
+      ".NSEI",
+      ".HSI",
+      ".DJI",
+      ".IXIC",
+      ".FCHI",
+      ".STOXX50E"
+    ],
+    "device": "cuda"
+  },
+  "runtime_seconds": 4770.836817026138
+}
