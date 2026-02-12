@@ -44,6 +44,9 @@ members = [
 
     # PyO3 bridge (Python hot-path acceleration)
     "crates/quantlaxmi-pybridge",
+
+    # Terminal crate (Tauri IPC wrappers)
+    "crates/quantlaxmi-terminal",
 ]
 resolver = "2"
 

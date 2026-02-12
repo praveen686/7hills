@@ -156,6 +156,11 @@ def _walk_forward_backtest(
         X_test = X.iloc[i:i + test_window]
         y_test = y.iloc[i:i + test_window]
 
+        # Replace inf/-inf with NaN, then forward-fill + zero-fill residuals
+        X_train = X_train.replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
+        y_train = y_train.replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
+        X_test = X_test.replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
+
         try:
             model = XGBRegressor(
                 n_estimators=100,

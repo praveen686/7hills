@@ -175,6 +175,11 @@ class S6MultiFactorStrategy(BaseStrategy):
         except ImportError:
             from sklearn.ensemble import GradientBoostingRegressor as XGBRegressor
 
+        # Replace inf/-inf with NaN, then forward-fill + zero-fill residuals
+        X_clean = X_train.replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
+        y_clean = y_train.copy()
+        y_clean = y_clean.replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
+
         model = XGBRegressor(
             n_estimators=100,
             max_depth=3,
@@ -184,7 +189,7 @@ class S6MultiFactorStrategy(BaseStrategy):
             random_state=42,
             verbosity=0,
         )
-        model.fit(X_train, y_train)
+        model.fit(X_clean, y_clean)
         return model
 
     def _scan_impl(self, d: date, store: MarketDataStore) -> list[Signal]:
@@ -250,8 +255,8 @@ class S6MultiFactorStrategy(BaseStrategy):
         if self._model is None:
             return []
 
-        # Predict on the most recent feature row
-        latest_features = X.iloc[[-1]]
+        # Predict on the most recent feature row (clean inf values)
+        latest_features = X.iloc[[-1]].replace([np.inf, -np.inf], np.nan).ffill(axis=1).fillna(0.0)
         try:
             prediction = float(self._model.predict(latest_features)[0])
         except Exception as e:

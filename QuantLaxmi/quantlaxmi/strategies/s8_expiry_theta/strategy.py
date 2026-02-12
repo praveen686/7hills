@@ -206,28 +206,40 @@ def _get_option_price(
     symbol: str,
     strike: float,
     opt_type: str,  # "CE" or "PE"
+    expiry: date | None = None,
 ) -> float | None:
-    """Get the close/settlement price for a specific option from nse_fo_bhavcopy."""
+    """Get the close price for a specific option from nse_fo_bhavcopy.
+
+    Parameters
+    ----------
+    d : date
+        Trading date to query.
+    expiry : date | None
+        Option expiry date. If None, defaults to ``d`` (same-day expiry).
+
+    Notes
+    -----
+    ``SttlmPric`` in NSE FO bhavcopy is the *underlying* settlement price,
+    NOT the option's settlement price.  We always use ``ClsPric`` (the
+    option's closing price) instead.
+    """
     d_str = d.isoformat()
+    expiry_str = (expiry or d).isoformat()
     try:
         df = store.sql(
-            'SELECT "ClsPric", "SttlmPric", "TtlTradgVol" '
+            'SELECT "ClsPric", "TtlTradgVol" '
             "FROM nse_fo_bhavcopy "
             'WHERE date = ? AND "TckrSymb" = ? AND "StrkPric" = ? '
             'AND "OptnTp" = ? AND "XpryDt" = ? '
             "LIMIT 1",
-            [d_str, symbol, strike, opt_type, d_str],
+            [d_str, symbol, strike, opt_type, expiry_str],
         )
         if df.empty:
             return None
         close = float(df["ClsPric"].iloc[0])
-        settle = float(df["SttlmPric"].iloc[0])
-        vol = int(df["TtlTradgVol"].iloc[0])
-        # Prefer settlement price (official); use close if settle is 0
-        price = settle if settle > 0 else close
-        if price <= 0:
+        if close <= 0:
             return None
-        return price
+        return close
     except Exception:
         return None
 
@@ -240,12 +252,22 @@ def _get_iron_condor_credit(
     long_call: float,
     short_put: float,
     long_put: float,
+    expiry: date | None = None,
 ) -> float | None:
-    """Get net credit in points from actual option prices."""
-    sc = _get_option_price(store, d, symbol, short_call, "CE")
-    lc = _get_option_price(store, d, symbol, long_call, "CE")
-    sp = _get_option_price(store, d, symbol, short_put, "PE")
-    lp = _get_option_price(store, d, symbol, long_put, "PE")
+    """Get net credit in points from actual option prices.
+
+    Parameters
+    ----------
+    d : date
+        Trading date to look up prices.
+    expiry : date | None
+        Option expiry date.  Defaults to ``d`` if not given.
+    """
+    exp = expiry or d
+    sc = _get_option_price(store, d, symbol, short_call, "CE", expiry=exp)
+    lc = _get_option_price(store, d, symbol, long_call, "CE", expiry=exp)
+    sp = _get_option_price(store, d, symbol, short_put, "PE", expiry=exp)
+    lp = _get_option_price(store, d, symbol, long_put, "PE", expiry=exp)
 
     if any(x is None for x in [sc, lc, sp, lp]):
         return None
@@ -395,7 +417,8 @@ def backtest_expiry_theta(
             prev_d -= timedelta(days=1)
 
         entry_credit = _get_iron_condor_credit(
-            store, prev_d, symbol, short_call, long_call, short_put, long_put
+            store, prev_d, symbol, short_call, long_call, short_put, long_put,
+            expiry=d,
         )
         if entry_credit is None or entry_credit <= 0:
             # Fallback: try same-day open prices from 1-min bars

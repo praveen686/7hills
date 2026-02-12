@@ -1,0 +1,17 @@
+[package]
+name = "quantlaxmi-terminal"
+version = "0.1.0"
+edition = "2021"
+description = "Tauri IPC wrappers for QuantLaxmi trading terminal"
+
+[dependencies]
+quantlaxmi-models = { path = "../quantlaxmi-models" }
+quantlaxmi-data = { path = "../quantlaxmi-data" }
+quantlaxmi-risk = { path = "../quantlaxmi-risk" }
+quantlaxmi-executor = { path = "../quantlaxmi-executor" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }

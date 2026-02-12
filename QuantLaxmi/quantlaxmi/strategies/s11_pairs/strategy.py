@@ -27,12 +27,12 @@ from quantlaxmi.strategies.protocol import Signal
 logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_PAIRS = 3
-Z_ENTRY = 2.0
+Z_ENTRY = 1.5
 Z_EXIT = 0.5
-ADF_P_THRESHOLD = 0.05
+ADF_P_THRESHOLD = 0.10
 HALF_LIFE_MIN = 3
-HALF_LIFE_MAX = 20
-HURST_MAX = 0.45
+HALF_LIFE_MAX = 30
+HURST_MAX = 0.55
 
 
 @dataclass
@@ -178,7 +178,7 @@ class S11PairsStrategy(BaseStrategy):
     def _find_pairs(self, d: date, store: MarketDataStore) -> list[PairCandidate]:
         """Find cointegrated stock pairs from FnO universe."""
         d_str = d.isoformat()
-        lookback_start = (d - timedelta(days=self._lookback * 2)).isoformat()
+        lookback_start = (d - timedelta(days=self._lookback * 3)).isoformat()
 
         # Get all stock futures with enough history
         try:
@@ -206,7 +206,7 @@ class S11PairsStrategy(BaseStrategy):
         candidates: list[PairCandidate] = []
 
         # Test pairs (limit to avoid O(n²) explosion)
-        max_symbols = min(30, len(symbols))
+        max_symbols = min(50, len(symbols))
         test_symbols = symbols[:max_symbols]
 
         for i in range(len(test_symbols)):
@@ -318,17 +318,28 @@ class S11PairsStrategy(BaseStrategy):
 
     @staticmethod
     def _hurst_exponent(ts: np.ndarray) -> float:
-        """Estimate Hurst exponent via R/S analysis."""
+        """Estimate Hurst exponent via R/S analysis on increments.
+
+        The classic R/S method operates on the *changes* of the series,
+        not the levels.  For each sub-window of size ``lag``, we compute
+        R/S on the increments (diff).  The slope of log(R/S) vs log(lag)
+        gives H.  H < 0.5 → mean-reverting, H = 0.5 → random walk,
+        H > 0.5 → trending.
+        """
         n = len(ts)
         if n < 20:
             return 0.5
 
-        max_k = min(n // 2, 50)
+        # Work on increments (first differences)
+        increments = np.diff(ts)
+        n_inc = len(increments)
+
+        max_k = min(n_inc // 2, 50)
         lags = range(10, max_k)
         rs_values = []
 
         for lag in lags:
-            chunks = [ts[i:i + lag] for i in range(0, n - lag + 1, lag)]
+            chunks = [increments[i:i + lag] for i in range(0, n_inc - lag + 1, lag)]
             rs_list = []
             for chunk in chunks:
                 if len(chunk) < 2:
@@ -377,7 +388,7 @@ class S11PairsStrategy(BaseStrategy):
     def _get_spread(self, d: date, store: MarketDataStore, pair: PairCandidate) -> np.ndarray:
         """Compute spread = price_A - beta * price_B over lookback window."""
         d_str = d.isoformat()
-        lookback_start = (d - timedelta(days=self._lookback * 2)).isoformat()
+        lookback_start = (d - timedelta(days=self._lookback * 3)).isoformat()
         try:
             prices_df = store.sql(
                 "SELECT date, \"TckrSymb\" as symbol, \"ClsPric\" as close "

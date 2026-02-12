@@ -1,8 +1,10 @@
 """WebSocket handlers for real-time streaming.
 
 /ws/portfolio      — portfolio snapshot every 2 seconds
-/ws/ticks/{token}  — live tick data for an instrument token
+/ws/ticks          — market tick summary (indices + crypto LTPs)
+/ws/ticks/{token}  — live tick data for a specific instrument token
 /ws/signals        — strategy signal broadcasts
+/ws/risk           — risk metrics stream
 """
 
 from __future__ import annotations
@@ -139,6 +141,85 @@ async def ws_portfolio(websocket: WebSocket) -> None:
         pass
     except Exception as exc:
         logger.debug("WS portfolio error: %s", exc)
+    finally:
+        await manager.disconnect(channel, websocket)
+
+
+# ------------------------------------------------------------------
+# /ws/ticks — generic market tick summary (indices + crypto)
+# ------------------------------------------------------------------
+
+# Map of index names for DuckDB queries
+_INDEX_NAMES = {
+    "NIFTY": "Nifty 50",
+    "BANKNIFTY": "Nifty Bank",
+    "FINNIFTY": "Nifty Financial Services",
+    "MIDCPNIFTY": "NIFTY MidSmall Financial Services",
+}
+
+
+@router.websocket("/ws/ticks")
+async def ws_ticks_generic(websocket: WebSocket) -> None:
+    """Stream market summary ticks for all tracked instruments.
+
+    Pushes latest close prices for NIFTY, BANKNIFTY, etc. every 2s.
+    Used by the terminal TickerBar and ChartPanel components.
+    """
+    channel = "ticks"
+    await manager.connect(channel, websocket)
+
+    try:
+        while True:
+            ticks = []
+            try:
+                svc = websocket.app.state.market_data_service
+                store = svc.store
+                for sym, index_name in _INDEX_NAMES.items():
+                    try:
+                        df = store.sql(
+                            'SELECT "Closing Index Value", "Open Index Value", '
+                            '"High Index Value", "Low Index Value", "Index Date" '
+                            'FROM nse_index_close '
+                            'WHERE LOWER("Index Name") = LOWER(?) '
+                            'ORDER BY "Index Date" DESC LIMIT 2',
+                            [index_name],
+                        )
+                        if not df.empty:
+                            row = df.iloc[0]
+                            close = float(row.iloc[0])
+                            open_ = float(row.iloc[1])
+                            high = float(row.iloc[2])
+                            low = float(row.iloc[3])
+                            prev_close = float(df.iloc[1, 0]) if len(df) > 1 else close
+                            change = close - prev_close
+                            change_pct = (change / prev_close * 100) if prev_close else 0
+                            ticks.append({
+                                "symbol": sym,
+                                "ltp": close,
+                                "open": open_,
+                                "high": high,
+                                "low": low,
+                                "close": close,
+                                "change": round(change, 2),
+                                "change_pct": round(change_pct, 2),
+                                "volume": 0,
+                            })
+                    except Exception as exc:
+                        logger.debug("Tick fetch failed for %s: %s", sym, exc)
+            except Exception as exc:
+                logger.debug("WS ticks generic error: %s", exc)
+
+            payload = {
+                "type": "tick_update",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "ticks": ticks,
+            }
+            await websocket.send_json(payload)
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.debug("WS ticks generic error: %s", exc)
     finally:
         await manager.disconnect(channel, websocket)
 
@@ -309,5 +390,45 @@ async def ws_signals(websocket: WebSocket) -> None:
         pass
     except Exception as exc:
         logger.debug("WS signals error: %s", exc)
+    finally:
+        await manager.disconnect(channel, websocket)
+
+
+# ------------------------------------------------------------------
+# /ws/risk — stream risk metrics
+# ------------------------------------------------------------------
+
+@router.websocket("/ws/risk")
+async def ws_risk(websocket: WebSocket) -> None:
+    """Stream risk metrics (drawdown, VaR, exposure, VPIN) every 2s.
+
+    Used by the terminal RiskDashboard and StatusBar VPIN gauge.
+    """
+    channel = "risk"
+    await manager.connect(channel, websocket)
+
+    try:
+        while True:
+            state = websocket.app.state.engine
+
+            payload = {
+                "type": "vpin_update",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "drawdown_pct": round(state.portfolio_dd * 100, 4),
+                "total_exposure": round(state.total_exposure, 6),
+                "circuit_breaker_active": state.circuit_breaker_active,
+                "last_vix": round(state.last_vix, 2),
+                "last_regime": state.last_regime,
+                "n_positions": len(state.positions),
+                "equity": round(state.equity, 6),
+                "vpin": 0.0,  # Placeholder until live VPIN feed connected
+            }
+
+            await websocket.send_json(payload)
+            await asyncio.sleep(2)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.debug("WS risk error: %s", exc)
     finally:
         await manager.disconnect(channel, websocket)

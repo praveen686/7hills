@@ -37,6 +37,7 @@ try:
     import torch.nn as nn
     _HAS_TORCH = True
     _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch.set_float32_matmul_precision("medium")
 except ImportError:
     _HAS_TORCH = False
     _DEVICE = None
@@ -200,7 +201,7 @@ class HPTuner:
             study.optimize(
                 objective,
                 n_trials=cfg.n_trials,
-                timeout=cfg.timeout_seconds,
+                timeout=cfg.timeout_seconds if cfg.timeout_seconds > 0 else None,
                 callbacks=callbacks,
                 show_progress_bar=True,
                 catch=(torch.cuda.OutOfMemoryError,) if _HAS_TORCH else (),
@@ -363,15 +364,18 @@ class HPTuner:
         VRAM, so the full search space (including d_hidden=128, n_context=32) fits
         on the T4 16GB GPU.
         """
+        # batch_size fixed at 128: saturates T4 GPU (9.9 GB VRAM, 63% compute)
+        # while keeping 4 updates/epoch (~520 episodes) — minimum viable stochastic.
+        # LR range scaled 2x from baseline [3e-4, 3e-3] to compensate for 4x batch.
         return {
-            "d_hidden": trial.suggest_categorical("d_hidden", [32, 48, 64, 96, 128]),
-            "n_heads": trial.suggest_categorical("n_heads", [2, 4, 8]),
+            "d_hidden": trial.suggest_categorical("d_hidden", [64, 96, 128, 192]),
+            "n_heads": trial.suggest_categorical("n_heads", [4, 8]),
             "lstm_layers": trial.suggest_categorical("lstm_layers", [1, 2, 3]),
             "dropout": trial.suggest_float("dropout", 0.05, 0.3),
             "seq_len": trial.suggest_categorical("seq_len", [21, 42, 63]),
-            "n_context": trial.suggest_categorical("n_context", [8, 16, 32]),
-            "lr": trial.suggest_float("lr", 3e-4, 3e-3, log=True),
-            "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64]),
+            "n_context": 8,
+            "lr": trial.suggest_float("lr", 6e-4, 6e-3, log=True),
+            "batch_size": 128,
             "mle_weight": trial.suggest_float("mle_weight", 0.01, 0.2),
             "loss_mode": trial.suggest_categorical("loss_mode", ["sharpe", "joint_mle"]),
             "max_position": trial.suggest_float("max_position", 0.15, 0.3),
@@ -485,6 +489,13 @@ class HPTuner:
         n_val = max(1, int(n_total * 0.2))
         n_train = n_total - n_val
 
+        # Pre-tensorize all data once (avoid per-batch torch.tensor() overhead)
+        T_tgt = torch.as_tensor(X_tgt, dtype=torch.float32)
+        T_ctx = torch.as_tensor(X_ctx, dtype=torch.float32)
+        T_tid = torch.as_tensor(X_tid, dtype=torch.int64)
+        T_cid = torch.as_tensor(X_cid, dtype=torch.int64)
+        T_Y = torch.as_tensor(Y, dtype=torch.float32)
+
         # AMP setup (only on CUDA when enabled in config)
         use_amp = self.config.use_amp and _HAS_TORCH and _DEVICE is not None and _DEVICE.type == "cuda"
         scaler = torch.amp.GradScaler("cuda", enabled=use_amp) if use_amp else None
@@ -501,13 +512,13 @@ class HPTuner:
             for batch_start in range(0, n_train, cfg.batch_size):
                 batch_idx = perm[batch_start: batch_start + cfg.batch_size]
 
-                tgt_seq = torch.tensor(X_tgt[batch_idx], device=_DEVICE)
-                ctx_set = torch.tensor(X_ctx[batch_idx], device=_DEVICE)
-                tgt_id = torch.tensor(X_tid[batch_idx], device=_DEVICE)
-                ctx_id = torch.tensor(X_cid[batch_idx], device=_DEVICE)
-                y_batch = torch.tensor(Y[batch_idx], device=_DEVICE)
+                tgt_seq = T_tgt[batch_idx].to(_DEVICE, non_blocking=True)
+                ctx_set = T_ctx[batch_idx].to(_DEVICE, non_blocking=True)
+                tgt_id = T_tid[batch_idx].to(_DEVICE, non_blocking=True)
+                ctx_id = T_cid[batch_idx].to(_DEVICE, non_blocking=True)
+                y_batch = T_Y[batch_idx].to(_DEVICE, non_blocking=True)
 
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
 
                 if use_amp:
                     with torch.amp.autocast("cuda", enabled=True):
@@ -537,12 +548,11 @@ class HPTuner:
             if n_val > 0:
                 model.eval()
                 with torch.no_grad():
-                    val_idx = np.arange(n_train, n_total)
-                    v_tgt = torch.tensor(X_tgt[val_idx], device=_DEVICE)
-                    v_ctx = torch.tensor(X_ctx[val_idx], device=_DEVICE)
-                    v_tid = torch.tensor(X_tid[val_idx], device=_DEVICE)
-                    v_cid = torch.tensor(X_cid[val_idx], device=_DEVICE)
-                    v_y = torch.tensor(Y[val_idx], device=_DEVICE)
+                    v_tgt = T_tgt[n_train:n_total].to(_DEVICE, non_blocking=True)
+                    v_ctx = T_ctx[n_train:n_total].to(_DEVICE, non_blocking=True)
+                    v_tid = T_tid[n_train:n_total].to(_DEVICE, non_blocking=True)
+                    v_cid = T_cid[n_train:n_total].to(_DEVICE, non_blocking=True)
+                    v_y = T_Y[n_train:n_total].to(_DEVICE, non_blocking=True)
 
                     v_pos = model.predict_position(v_tgt, v_ctx, v_tid, v_cid).squeeze(-1)
                     strat_ret = v_pos * v_y
@@ -554,10 +564,12 @@ class HPTuner:
                     best_val_sharpe = val_sharpe
                     best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-        # Restore best
+        # Restore best and free training artifacts
         if best_state is not None:
             model.load_state_dict(best_state)
+            del best_state
             model.to(_DEVICE)
+        del optimizer, T_tgt, T_ctx, T_tid, T_cid, T_Y
 
         # OOS evaluation
         oos_sharpe = self._evaluate_oos(
@@ -580,50 +592,63 @@ class HPTuner:
         n_assets: int,
         rng: np.random.Generator,
     ) -> float:
-        """Evaluate OOS Sharpe on test fold."""
+        """Evaluate OOS Sharpe on test fold (batched for GPU efficiency)."""
         from quantlaxmi.models.ml.tft.x_trend import build_context_set
 
         model.eval()
-        all_returns = []
+        seq_len = cfg.seq_len
+        ctx_len = cfg.ctx_len if hasattr(cfg, 'ctx_len') else cfg.seq_len
 
-        with torch.no_grad():
-            for t in range(test_start, test_end):
-                seq_len = cfg.seq_len
-                if t < seq_len:
+        # Collect all OOS episodes first, then batch-evaluate
+        oos_tgt, oos_ctx, oos_tid, oos_cid, oos_y = [], [], [], [], []
+
+        for t in range(test_start, test_end):
+            if t < seq_len:
+                continue
+            for asset_idx in range(n_assets):
+                tw = norm_features[t - seq_len: t, asset_idx, :]
+                if np.any(np.isnan(tw)):
+                    continue
+                tgt = targets[t, asset_idx]
+                if np.isnan(tgt):
                     continue
 
-                for asset_idx in range(n_assets):
-                    tw = norm_features[t - seq_len: t, asset_idx, :]
-                    if np.any(np.isnan(tw)):
-                        continue
-                    tgt = targets[t, asset_idx]
-                    if np.isnan(tgt):
-                        continue
+                ctx_seqs, ctx_ids = build_context_set(
+                    norm_features, target_start=t - seq_len,
+                    n_context=cfg.n_context, ctx_len=ctx_len, rng=rng,
+                )
+                oos_tgt.append(tw)
+                oos_ctx.append(ctx_seqs)
+                oos_tid.append(asset_idx)
+                oos_cid.append(ctx_ids)
+                oos_y.append(tgt)
 
-                    ctx_seqs, ctx_ids = build_context_set(
-                        norm_features,
-                        target_start=t - seq_len,
-                        n_context=cfg.n_context,
-                        ctx_len=cfg.ctx_len if hasattr(cfg, 'ctx_len') else cfg.seq_len,
-                        rng=rng,
-                    )
-
-                    tgt_t = torch.tensor(tw[np.newaxis], dtype=torch.float32, device=_DEVICE)
-                    ctx_t = torch.tensor(ctx_seqs[np.newaxis], dtype=torch.float32, device=_DEVICE)
-                    tid_t = torch.tensor([asset_idx], dtype=torch.long, device=_DEVICE)
-                    cid_t = torch.tensor(ctx_ids[np.newaxis], dtype=torch.long, device=_DEVICE)
-
-                    pos = model.predict_position(tgt_t, ctx_t, tid_t, cid_t).item()
-                    pos = max(-cfg.max_position, min(cfg.max_position, pos))
-                    strat_return = pos * tgt
-                    all_returns.append(strat_return)
-
-        if len(all_returns) < 5:
+        if len(oos_y) < 5:
             return float("-inf")
 
-        returns_arr = np.array(all_returns)
-        mean_r = returns_arr.mean()
-        std_r = returns_arr.std(ddof=1)
+        # Batch inference on GPU
+        B_tgt = torch.as_tensor(np.array(oos_tgt, dtype=np.float32), device=_DEVICE)
+        B_ctx = torch.as_tensor(np.array(oos_ctx, dtype=np.float32), device=_DEVICE)
+        B_tid = torch.as_tensor(np.array(oos_tid, dtype=np.int64), device=_DEVICE)
+        B_cid = torch.as_tensor(np.array(oos_cid, dtype=np.int64), device=_DEVICE)
+        B_y = np.array(oos_y, dtype=np.float32)
+
+        with torch.no_grad():
+            # Process in chunks to avoid OOM on large test sets
+            chunk_size = 512
+            all_pos = []
+            for i in range(0, len(B_y), chunk_size):
+                pos_chunk = model.predict_position(
+                    B_tgt[i:i+chunk_size], B_ctx[i:i+chunk_size],
+                    B_tid[i:i+chunk_size], B_cid[i:i+chunk_size],
+                ).squeeze(-1).cpu().numpy()
+                all_pos.append(pos_chunk)
+            positions = np.concatenate(all_pos)
+
+        positions = np.clip(positions, -cfg.max_position, cfg.max_position)
+        strat_returns = positions * B_y
+        mean_r = strat_returns.mean()
+        std_r = strat_returns.std(ddof=1)
         if std_r < 1e-8:
             return 0.0
         return float((mean_r / std_r) * math.sqrt(252))

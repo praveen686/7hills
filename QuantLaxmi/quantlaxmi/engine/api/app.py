@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from quantlaxmi.engine.state import PortfolioState, DEFAULT_STATE_FILE
 from quantlaxmi.engine.services.strategy_reader import StrategyReader
 from quantlaxmi.engine.services.market_data import MarketDataService
-from quantlaxmi.engine.api.routes import portfolio, strategies, backtest, risk, market, research, signals, why_panel, replay, diagnostics
+from quantlaxmi.engine.api.routes import portfolio, strategies, backtest, risk, market, research, signals, why_panel, replay, diagnostics, trading
 from quantlaxmi.engine.api.routes.backtest import BacktestTracker
 from quantlaxmi.engine.api import ws as ws_module
 from quantlaxmi.engine.services.wal_query import WalQueryService
@@ -175,6 +175,7 @@ def create_app(
     application.include_router(why_panel.router)
     application.include_router(replay.router)
     application.include_router(diagnostics.router)
+    application.include_router(trading.router)
     application.include_router(ws_module.router)
 
     # Health check

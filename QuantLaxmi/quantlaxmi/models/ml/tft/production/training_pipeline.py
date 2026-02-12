@@ -23,6 +23,7 @@ CLI
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import math
 import time
@@ -47,6 +48,8 @@ try:
     import torch.utils.data as _torch_data
     _HAS_TORCH = True
     _DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Enable TF32 on T4/Ampere+ for ~3x faster matmuls with negligible precision loss
+    torch.set_float32_matmul_precision("medium")
 except ImportError:
     _HAS_TORCH = False
     _DEVICE = None
@@ -78,22 +81,23 @@ class _TFTDataset:
         X_cid: np.ndarray,
         Y: np.ndarray,
     ) -> None:
-        self.X_tgt = X_tgt
-        self.X_ctx = X_ctx
-        self.X_tid = X_tid
-        self.X_cid = X_cid
-        self.Y = Y
+        # Pre-convert to tensors once (avoids per-item torch.tensor() in __getitem__)
+        self.X_tgt = torch.as_tensor(X_tgt, dtype=torch.float32)
+        self.X_ctx = torch.as_tensor(X_ctx, dtype=torch.float32)
+        self.X_tid = torch.as_tensor(X_tid, dtype=torch.int64)
+        self.X_cid = torch.as_tensor(X_cid, dtype=torch.int64)
+        self.Y = torch.as_tensor(Y, dtype=torch.float32)
 
     def __len__(self) -> int:
         return len(self.Y)
 
     def __getitem__(self, idx: int) -> tuple:
         return (
-            torch.tensor(self.X_tgt[idx], dtype=torch.float32),
-            torch.tensor(self.X_ctx[idx], dtype=torch.float32),
-            torch.tensor(self.X_tid[idx], dtype=torch.int64),
-            torch.tensor(self.X_cid[idx], dtype=torch.int64),
-            torch.tensor(self.Y[idx], dtype=torch.float32),
+            self.X_tgt[idx],
+            self.X_ctx[idx],
+            self.X_tid[idx],
+            self.X_cid[idx],
+            self.Y[idx],
         )
 
 try:
@@ -131,6 +135,7 @@ class TrainingPipelineConfig:
     exploration_train_window: int = 150
     exploration_test_window: int = 42
     exploration_step_size: int = 42
+    exploration_batch_size: int = 32  # smaller batch for ~350 pre-pruned features on T4
 
     # Phase 4: HP tuning
     tuning_n_trials: int = 40
@@ -164,14 +169,14 @@ class TrainingPipelineConfig:
     model_type: str = "x_trend"
 
     # Base architecture (overridden by tuner in Phase 4)
-    d_hidden: int = 64
+    d_hidden: int = 128
     n_heads: int = 4
     lstm_layers: int = 2
     dropout: float = 0.1
     seq_len: int = 42
     n_context: int = 16
     lr: float = 1e-3
-    batch_size: int = 32
+    batch_size: int = 128
     loss_mode: str = "sharpe"
     mle_weight: float = 0.1
     max_position: float = 0.25
@@ -187,6 +192,12 @@ class TrainingPipelineConfig:
     # Cosine annealing LR with warmup
     use_cosine_lr: bool = True
     warmup_fraction: float = 0.1  # warmup for first 10% of training steps
+
+    # Data augmentation (Phase 5 only)
+    augmentation_enabled: bool = False
+    augmentation_factor: int = 3  # N_aug = N_real * factor (total = N_real * (1 + factor))
+    augmentation_noise_std: float = 0.02  # σ for calibrated noise on z-scored features
+    augmentation_p_group_drop: float = 0.10  # prob of dropping each feature group
 
 
 # ============================================================================
@@ -524,13 +535,17 @@ class TrainingPipeline:
         selector_path = checkpoint_dir / "phase2_selector.pkl"
 
         selector = state.get("selector")
-        if selector is None and selector_path.exists():
+        # Always try disk checkpoint — it may have more folds than the in-memory selector
+        if selector_path.exists():
             try:
-                selector = FeatureSelector.load(selector_path)
-                logger.info("Resumed Phase 2 selector from disk (%d folds already done)", selector.n_folds)
+                disk_selector = FeatureSelector.load(selector_path)
+                disk_folds = disk_selector.n_folds
+                mem_folds = selector.n_folds if selector is not None else 0
+                if disk_folds > mem_folds:
+                    selector = disk_selector
+                    logger.info("Resumed Phase 2 selector from disk (%d folds, was %d in memory)", disk_folds, mem_folds)
             except Exception as e:
-                logger.warning("Could not load Phase 2 selector (%s) — starting fresh", e)
-                selector = None
+                logger.warning("Could not load Phase 2 selector (%s) — using in-memory", e)
         if selector is None:
             selector = FeatureSelector(FeatureSelectionConfig())
         state["selector"] = selector
@@ -548,7 +563,7 @@ class TrainingPipeline:
             test_window=cfg.exploration_test_window,
             step_size=cfg.exploration_step_size,
             lr=cfg.lr,
-            batch_size=cfg.batch_size,
+            batch_size=cfg.exploration_batch_size,
             loss_mode=cfg.loss_mode,
             mle_weight=cfg.mle_weight,
             patience=cfg.patience,
@@ -661,7 +676,7 @@ class TrainingPipeline:
                 batch_size=x_cfg.batch_size,
                 shuffle=True,
                 pin_memory=_pin,
-                num_workers=2,
+                num_workers=4,
                 persistent_workers=True,
             )
 
@@ -690,7 +705,7 @@ class TrainingPipeline:
                     ctx_id = ctx_id.to(_DEVICE, non_blocking=_pin)
                     y_batch = y_batch.to(_DEVICE, non_blocking=_pin)
 
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)
 
                     if use_amp:
                         with torch.amp.autocast("cuda"):
@@ -735,14 +750,16 @@ class TrainingPipeline:
                 except Exception as e:
                     logger.warning("Failed to save Phase 2 selector: %s", e)
                 # Jump past the skip block below
-                del model
+                del optimizer, model
+                gc.collect()
                 torch.cuda.empty_cache()
                 start += x_cfg.step_size
                 fold_idx += 1
                 continue
 
             # NaN fold: skip VSN extraction, clean up
-            del model
+            del optimizer, model
+            gc.collect()
             torch.cuda.empty_cache()
             start += x_cfg.step_size
             fold_idx += 1
@@ -829,8 +846,6 @@ class TrainingPipeline:
 
     def _phase4_tuning(self, state: dict) -> None:
         """Run Optuna HP tuning on reduced features."""
-        import gc
-
         cfg = state["config"]
         result = state["result"]
 
@@ -1089,17 +1104,39 @@ class TrainingPipeline:
 
             # Build DataLoader for training subset
             _pin = _DEVICE is not None and _DEVICE.type == "cuda"
-            train_dataset = _TFTDataset(
-                X_tgt_arr[:n_train], X_ctx_arr[:n_train],
-                X_tid_arr[:n_train], X_cid_arr[:n_train],
-                Y_arr[:n_train],
-            )
+
+            if cfg.augmentation_enabled:
+                from .augmentation import AugmentedTFTDataset, AugmentationConfig
+                aug_cfg = AugmentationConfig(
+                    enabled=True,
+                    augmentation_factor=cfg.augmentation_factor,
+                    noise_std=cfg.augmentation_noise_std,
+                    p_group_drop=cfg.augmentation_p_group_drop,
+                )
+                train_dataset = AugmentedTFTDataset(
+                    X_tgt_arr[:n_train], X_ctx_arr[:n_train],
+                    X_tid_arr[:n_train], X_cid_arr[:n_train],
+                    Y_arr[:n_train],
+                    config=aug_cfg,
+                    feature_names=feature_names,
+                )
+                logger.info(
+                    "Augmentation ON: %d real → %d total episodes (factor=%d)",
+                    n_train, len(train_dataset), cfg.augmentation_factor,
+                )
+            else:
+                train_dataset = _TFTDataset(
+                    X_tgt_arr[:n_train], X_ctx_arr[:n_train],
+                    X_tid_arr[:n_train], X_cid_arr[:n_train],
+                    Y_arr[:n_train],
+                )
+
             train_loader = _torch_data.DataLoader(
                 train_dataset,
                 batch_size=x_cfg.batch_size,
                 shuffle=True,
                 pin_memory=_pin,
-                num_workers=2,
+                num_workers=4,
                 persistent_workers=True,
             )
 
@@ -1119,6 +1156,9 @@ class TrainingPipeline:
                 )
 
             for epoch in epoch_iter:
+                # Reseed augmentation RNG for variety across epochs
+                if cfg.augmentation_enabled and hasattr(train_dataset, 'reseed'):
+                    train_dataset.reseed(epoch)
                 model.train()
                 epoch_loss = 0.0
                 n_batches = 0
@@ -1130,7 +1170,7 @@ class TrainingPipeline:
                     ctx_id = ctx_id.to(_DEVICE, non_blocking=_pin)
                     y_batch = y_batch.to(_DEVICE, non_blocking=_pin)
 
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)
 
                     if use_amp:
                         with torch.amp.autocast("cuda"):
@@ -1208,6 +1248,7 @@ class TrainingPipeline:
 
             if best_state is not None:
                 model.load_state_dict(best_state)
+                best_state = None  # free CPU copy before OOS eval
                 model.to(_DEVICE)
 
             # OOS evaluation
@@ -1297,7 +1338,8 @@ class TrainingPipeline:
             except Exception as e:
                 logger.warning("Failed to save partial checkpoint: %s", e)
 
-            del model
+            del optimizer, model, best_state
+            gc.collect()
             torch.cuda.empty_cache()
 
             start += x_cfg.step_size
@@ -1435,12 +1477,26 @@ class TrainingPipeline:
                         "Using zeros."
                     )
 
-        # Vol-scale targets
+        # Vol-scale targets using CAUSAL rolling vol on raw (unshifted) returns.
+        # targets[t] = r[t+1] (forward return). We must NOT include r[t+1] in
+        # the vol denominator. Compute vol on raw returns r[t] = ret_1d[t],
+        # then divide: Y[t] = r[t+1] / sigma[t] where sigma[t] = std(r[t-19:t+1]).
         for a in range(n_assets):
-            col = targets[:, a]
-            vol = pd.Series(col).rolling(20, min_periods=10).std(ddof=1).values
+            # Extract raw (unshifted) returns for this asset
+            if ret_1d_idx is not None:
+                raw_ret = features[:, a, ret_1d_idx]  # r[t] = close(t)/close(t-1)-1
+            else:
+                # For close-price path: compute returns in-place
+                raw_ret = np.full(n_days, np.nan)
+                if close_idx is not None:
+                    close = features[:, a, close_idx]
+                    log_close = np.log(np.where(close > 0, close, np.nan))
+                    raw_ret[1:] = log_close[1:] - log_close[:-1]
+
+            # Rolling vol on raw returns (strictly causal: vol[t] uses r[t-19:t+1])
+            vol = pd.Series(raw_ret).rolling(20, min_periods=10).std(ddof=1).values
             safe_vol = np.where((vol > 0) & ~np.isnan(vol), vol, 1.0)
-            targets[:, a] = col / safe_vol
+            targets[:, a] = targets[:, a] / safe_vol
 
         return targets
 

@@ -1,0 +1,88 @@
+/* ---------------------------------------------------------------------------
+ * WebGL / Canvas container styles
+ *
+ * Used by the orderbook heatmap renderer, chart overlays, and any future
+ * GPU-accelerated visualizations in the terminal.
+ * --------------------------------------------------------------------------- */
+
+/* Generic WebGL mount point — fills parent, clips overflow */
+.webgl-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 2D canvas container (lightweight-charts, custom renderers) */
+.canvas-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Orderbook depth canvas — pixel-perfect rendering for heatmap cells */
+.orderbook-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Ensure canvases fill their container without layout shift */
+.webgl-container canvas,
+.canvas-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Overlay layer for crosshair / tooltip annotations on top of canvas */
+.canvas-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Allow pointer events only on interactive overlay children */
+.canvas-overlay .interactive {
+  pointer-events: auto;
+}
+
+/* Loading state while GPU context initializes */
+.webgl-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 13, 0.8);
+  z-index: 20;
+}
+
+/* Error state when WebGL context is lost */
+.webgl-context-lost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(8, 8, 13, 0.9);
+  color: #ff4d6a;
+  font-size: 0.75rem;
+  z-index: 20;
+}
+
+/* Prevent layout thrashing during resize */
+.webgl-container.resizing canvas {
+  will-change: width, height;
+}
+
+/* High-DPI sharpness: let JS set the actual pixel dimensions,
+   CSS dimensions are controlled by the container */
+.webgl-container canvas[data-hidpi="true"] {
+  image-rendering: auto;
+}

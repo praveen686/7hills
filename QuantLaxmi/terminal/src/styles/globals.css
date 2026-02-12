@@ -1,0 +1,151 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-terminal-border;
+  }
+
+  body {
+    @apply bg-terminal-bg text-gray-100 font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom scrollbars */
+  ::-webkit-scrollbar {
+    @apply w-1.5 h-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-terminal-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-terminal-border-bright;
+  }
+
+  /* Number tabular alignment */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Panel styles */
+  .panel {
+    @apply bg-terminal-surface border border-terminal-border rounded-lg overflow-hidden;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between px-3 py-2 border-b border-terminal-border bg-terminal-panel;
+  }
+
+  .panel-title {
+    @apply text-xs font-medium text-terminal-muted uppercase tracking-wider;
+  }
+
+  .panel-body {
+    @apply p-3;
+  }
+
+  /* Price display */
+  .price-up {
+    @apply text-terminal-profit;
+  }
+
+  .price-down {
+    @apply text-terminal-loss;
+  }
+
+  .price-flash-up {
+    @apply animate-flash-green;
+  }
+
+  .price-flash-down {
+    @apply animate-flash-red;
+  }
+
+  /* Metric cards */
+  .metric-card {
+    @apply panel p-3;
+  }
+
+  .metric-label {
+    @apply text-2xs font-medium text-terminal-muted uppercase tracking-wider;
+  }
+
+  .metric-value {
+    @apply text-lg font-semibold font-mono tabular-nums mt-0.5;
+  }
+
+  /* Table styles */
+  .data-table {
+    @apply w-full text-xs font-mono;
+  }
+
+  .data-table th {
+    @apply text-left text-terminal-muted uppercase tracking-wider font-medium px-2 py-1.5 border-b border-terminal-border;
+  }
+
+  .data-table td {
+    @apply px-2 py-1.5 border-b border-terminal-border/50 tabular-nums;
+  }
+
+  .data-table tr:hover td {
+    @apply bg-terminal-panel/50;
+  }
+
+  /* Button variants */
+  .btn-buy {
+    @apply bg-terminal-profit/20 text-terminal-profit border border-terminal-profit/30
+           hover:bg-terminal-profit/30 active:bg-terminal-profit/40
+           px-4 py-2 rounded text-sm font-semibold transition-colors;
+  }
+
+  .btn-sell {
+    @apply bg-terminal-loss/20 text-terminal-loss border border-terminal-loss/30
+           hover:bg-terminal-loss/30 active:bg-terminal-loss/40
+           px-4 py-2 rounded text-sm font-semibold transition-colors;
+  }
+
+  .btn-neutral {
+    @apply bg-terminal-panel text-gray-300 border border-terminal-border
+           hover:bg-terminal-border hover:text-gray-100
+           px-3 py-1.5 rounded text-xs font-medium transition-colors;
+  }
+
+  /* Connection status indicators */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-connected {
+    @apply bg-terminal-profit animate-pulse-slow;
+  }
+
+  .status-disconnected {
+    @apply bg-terminal-loss;
+  }
+
+  .status-connecting {
+    @apply bg-terminal-warning animate-pulse;
+  }
+
+  /* Keyboard shortcut badges */
+  .kbd {
+    @apply inline-flex items-center justify-center px-1.5 py-0.5
+           text-2xs font-mono text-terminal-muted bg-terminal-panel
+           border border-terminal-border rounded;
+  }
+}
+
+@layer utilities {
+  .text-profit { @apply text-terminal-profit; }
+  .text-loss { @apply text-terminal-loss; }
+  .bg-profit { @apply bg-terminal-profit; }
+  .bg-loss { @apply bg-terminal-loss; }
+}
