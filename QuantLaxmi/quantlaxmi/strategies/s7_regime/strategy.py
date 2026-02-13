@@ -96,8 +96,9 @@ class S7RegimeSwitchStrategy(BaseStrategy):
         """
         try:
             from quantlaxmi.models.rl.core.dynamic_programming import value_iteration
+            from quantlaxmi.models.rl.core.markov_process import FiniteMarkovDecisionProcess, NonTerminal
         except ImportError:
-            logger.warning("value_iteration not available, MDP disabled")
+            logger.warning("MDP components not available, MDP disabled")
             self._use_mdp = False
             return
 
@@ -114,26 +115,22 @@ class S7RegimeSwitchStrategy(BaseStrategy):
             "TOXIC":         {"TRENDING": 0.10, "MEAN_REVERTING": 0.10, "RANDOM": 0.30, "TOXIC": 0.50},
         }
 
-        def transition_fn(state, action):
-            """Return list of (prob, next_state) pairs."""
-            return [(trans_probs[state][ns], ns) for ns in states]
+        # Build transition_map: {state: {action: {(next_state, reward): prob}}}
+        transition_map = {}
+        for s in states:
+            transition_map[s] = {}
+            for a in actions:
+                reward = self._REWARD_TABLE.get((s, a), 0.0)
+                transition_map[s][a] = {
+                    (ns, reward): prob for ns, prob in trans_probs[s].items()
+                }
 
-        def reward_fn(state, action):
-            """Return expected reward for (state, action)."""
-            return self._REWARD_TABLE.get((state, action), 0.0)
+        mdp = FiniteMarkovDecisionProcess(transition_map, gamma=gamma)
+        V, policy = value_iteration(mdp, gamma=gamma)
 
-        V, policy = value_iteration(
-            states=states,
-            actions=actions,
-            transition_fn=transition_fn,
-            reward_fn=reward_fn,
-            gamma=gamma,
-            theta=1e-8,
-        )
-        self._mdp_policy = policy
-        logger.info("S7 MDP solved: policy=%s, V=%s",
-                     {s: policy[s] for s in states},
-                     {s: round(V[s], 6) for s in states})
+        # Extract mapping from mdp_policy (which is a DeterministicPolicy)
+        self._mdp_policy = {s: policy.act(NonTerminal(s)).sample() for s in states}
+        logger.info("S7 MDP solved: policy=%s", self._mdp_policy)
 
     def _regime_to_mdp_state(self, regime: MarketRegime, vpin: float) -> str:
         """Map MarketRegime enum + VPIN to MDP state string."""

@@ -64,12 +64,12 @@ class S10GammaScalpStrategy(BaseStrategy):
             try:
                 from quantlaxmi.models.rl.agents.deep_hedger import DeepHedgingAgent
                 self._deep_hedger = DeepHedgingAgent(
-                    n_instruments=1,
-                    state_dim=11,
-                    hidden_dims=(128, 64, 32),
-                    lr=1e-3,
-                    gamma_risk=0.5,
-                    cost_per_trade=0.001,
+                    instrument=self._symbols[0] if self._symbols else "NIFTY",
+                    strategy="straddle",
+                    hedging_interval="daily",
+                    hidden_layers=(128, 64, 32),
+                    learning_rate=1e-3,
+                    risk_aversion=0.5,
                 )
                 logger.info("S10 Gamma Scalp: Deep Hedging enabled")
             except ImportError:
@@ -247,38 +247,16 @@ class S10GammaScalpStrategy(BaseStrategy):
         """
         T = max(dte, 1) / 365.0
 
-        # BS delta for reference
-        from scipy.stats import norm as _norm
-        d1 = 0.0
-        if atm_iv > 1e-6 and T > 1e-10 and spot > 0 and strike > 0:
-            d1 = (math.log(spot / strike) + (0.065 + 0.5 * atm_iv ** 2) * T) / (
-                atm_iv * math.sqrt(T)
-            )
-        bs_delta = float(_norm.cdf(d1))
+        positions = {"strike": strike, "tau": T}
+        greeks = {"iv": atm_iv, "rv": realized_vol, "delta": current_delta}
 
-        # Gamma
-        gamma = 0.0
-        if atm_iv > 1e-6 and T > 1e-10 and spot > 0:
-            gamma = float(
-                math.exp(-0.5 * d1 ** 2) / (
-                    math.sqrt(2 * math.pi) * spot * atm_iv * math.sqrt(T)
-                )
-            )
-
-        state_dict = {
-            "spot_over_strike": spot / max(strike, 1.0),
-            "time_to_expiry": T,
-            "implied_vol": atm_iv,
-            "realized_vol": realized_vol,
-            "bs_delta": bs_delta,
-            "gamma": gamma,
-            "position_delta": current_delta,
-            "regime_trending": 0.0,
-            "regime_mean_reverting": 0.0,
-            "regime_random": 1.0,
-            "recent_pnl": 0.0,
-        }
-        return float(self._deep_hedger.get_hedge_action(state_dict))
+        res = self._deep_hedger.get_hedge_action(
+            spot=spot,
+            positions=positions,
+            greeks=greeks,
+            regime="random",
+        )
+        return float(res.get("underlying", 0.0))
 
 
 def create_strategy() -> S10GammaScalpStrategy:
