@@ -1,0 +1,341 @@
+﻿SLRT-GPU v1.0 — Structural Liquidity Regime Trading (CPU spine + GPU muscle)
+0) What this system does
+A regime-first strategy that trades only when the market is structurally unstable due to:
+    1. Off-manifold excursion (microstructure state departs its low-rank geometry),
+    2. Liquidity fragility (sweep cost + depth slope collapse + elasticity spike),
+    3. Follow-through / initiative confirmation (FTI, code-locked),
+    4. Flow toxicity (VPIN-style volume-time imbalance), 
+    5. Optional (perps): forced unwind pressure (funding/basis acceleration).
+Decisions are deterministic, auditable, replayable, with refusal (not fabrication) on data issues.
+
+1) Hard invariants (QuantLaxmi doctrine)
+1.1 No Silent Poisoning
+All vendor fields are tri-stated:
+    • Absent
+    • PresentNull
+    • Present(value)
+If any required input is not Present(value), the engine emits:
+    • RefuseSignal { reasons: [...] }
+and does nothing else.
+1.2 Deterministic Replay Parity
+Given identical WAL input, the run must reproduce:
+    • identical regime labels,
+    • identical trade intents,
+    • identical decision digests,
+    • within declared float tolerances for GPU (if enabled).
+1.3 Separation of concerns
+    • CPU: ingest, LOB/state, admission, risk, decisions, execution, WAL.
+    • GPU: high-rate feature transforms, optional subspace math assists.
+    • GPU never “decides” and never mutates authoritative market state.
+
+2) Inputs and time semantics
+2.1 Required inputs (per symbol)
+    • L2 snapshot (top N levels, default N=20)
+    • Trades stream (px, qty, ts; side if available, else inferred)
+    • Tick sizes, lot sizes, min notional, venue throttles
+    • Optional perps: funding and basis streams
+2.2 Canonical numeric representation
+Store all raw inputs in:
+    • fixed-point i64 mantissa + exponent (or your canonical price type)
+GPU may compute in fp32, with optional fp64 for covariance/eigensolve.
+2.3 Canonical timestamps
+    • Canonical ordering time = receive timestamp unless exchange timestamp ordering is provably consistent.
+    • All rolling windows are defined in canonical time.
+
+3) Feature stack (exact definitions)
+3.1 L2 features (snapshot features)
+Let best bid = b1​, best ask = a1​, sizes qb1​,qa1​.
+Mid
+m=2a1​+b1​​ 
+Microprice
+μ=qa1​+qb1​a1​qb1​+b1​qa1​​ 
+Top-k imbalance
+Ik​=∑i=1k​qbi​+∑i=1k​qai​+ϵ∑i=1k​qbi​−∑i=1k​qai​​ 
+Depth slope (per side)
+For bids and asks independently:
+    • define cumulative depth Qi​=∑j=1i​qj​
+    • define price distance Δpi​=∣pi​−p1​∣
+Fit robust slope:
+slope=mediani​(Qi​+ϵΔpi​​) 
+(cheap, stable, GPU-friendly)
+Sweep cost / gap risk
+Given target size Q\*, walk the book until filled.
+Let levels consumed be 1..L, fill quantity at level i = fi​.
+Compute VWAP execution price:
+psweep​=∑i=1L​fi​∑i=1L​pi​fi​​ 
+Compute slippage vs microprice:
+gapRisk(Q\*)=tickSize∣psweep​−μ∣​ 
+This “cost-to-sweep” framing is standard in execution/impact modeling. 
+
+3.2 Trade-flow features (rolling windows)
+Define a rolling window W∈{100ms,250ms,1s,5s}.
+Signed volume estimation
+If aggressor side is not provided:
+    • Use tick rule with microprice refinement:
+        ◦ if trade px > mid → buy
+        ◦ if trade px < mid → sell
+        ◦ if equal → use last non-equal sign (carry)
+Signed volume change
+ΔVWsigned​=t∈W∑​st​⋅vt​ 
+Elasticity proxy
+ϵW​=∣ΔVWsigned​∣+δ∣ΔmW​∣​ 
+Depth collapse rate
+Let Dk​(t)=∑i=1k​qi​(t) (side-specific or both).
+D˙k,W​=WDk​(t)−Dk​(t−W)​ 
+
+4) FTI — exact, code-locked from your ZIP
+Your file: research/indicators/timothy_masters/FTI.CPP
+4.1 What FTI computes (per candidate period)
+For each period P \in [\text{min_period}, \text{max_period}]:
+    1. Build a symmetric FIR low-pass filter with a sinc kernel, tapered by a Blackman–Harris-like window (hard-coded coefficients).
+    2. Filter the lookback channel → filtered series s(t)
+    3. Compute channel width as the β-fractile of ∣y(t)−s(t)∣
+    4. Compute “legs” of the filtered path (turning-point segments), find the longest leg, define noise cutoff = noise_cut * longest_leg
+    5. FTI = mean(legs above noise cutoff) / (width + 1e-5)
+4.2 Direct excerpt (your code, authoritative)
+// Width = beta fractile of |y - filtered|
+qsortd(0, lookback - half_length - 1, diff_work);
+i = (int)(beta * (lookback - half_length + 1)) - 1;
+width[iperiod-min_period] = diff_work[i];
+
+// Noise cutoff and FTI ratio
+noise_level = noise_cut * longest_leg;
+sum = mean(leg_work[i] where leg_work[i] > noise_level);
+fti[iperiod-min_period] = sum / (width[iperiod-min_period] + 1.e-5);
+
+4.3 Filter coefficient generator (exact)
+// Sinc lowpass with window taper
+fact = 2.0 / period;
+c[0] = fact;
+for (i=1; i<=half_length; i++)
+  c[i] = sin(i * fact * PI) / (i * PI);
+
+c[half_length] *= 0.5; // taper endpoint
+// Apply window and normalize gain
+...
+c[i] /= sumg;
+
+4.4 How SLRT uses FTI
+We do not use “FTI direction”. We use FTI as initiative / follow-through intensity:
+    • FTI_level = max over local maxima in period range (your code already sorts local maxima indices)
+    • FTI_slope = Δ FTI_level over 250ms/1s
+    • FTI_persist = fraction of last X windows above threshold
+FTI is a gate: it confirms that the move is not noise-chop.
+
+5) Manifold / regime engine (geometry-locked)
+We model “normal microstructure” states as living near a low-rank subspace Ut​.
+This is standard Grassmann/Stiefel geometry. 
+5.1 State vector xt​
+A normalized vector (robust scaling; no leakage):
+     gapRisk FTI toxicity xt​=[ μ−m, I10​, ϵ250ms​, D˙10,250ms​, gapRisk(Q\*), FTI, toxicity ] 
+5.2 Normalization (no leakage)
+Use expanding-warmup then rolling robust scale:
+    • warmup: first 5 minutes (or first 30k ticks)
+    • then rolling median/MAD over last 30 minutes (venue-dependent)
+    • resets at session boundary only
+5.3 Subspace tracking method (choose one; both are canonical)
+Default v1: EW covariance + periodic eigensolve
+    • Maintain Ct​=λCt−1​+(1−λ)xt​xt⊤​
+    • Every eig_stride batches, compute top-r eigenvectors → Ut​
+Alternative v2: Oja’s algorithm (online PCA) — canonical reference 
+    • Update principal components incrementally; GPU-friendly
+5.4 Regime metrics
+Projection:
+x∥​=UU⊤x,x⊥​=x−x∥​ 
+Off-manifold distance
+d⊥​=∥x⊥​∥2​ 
+Tangent speed
+v∥​=∥x∥​(t)−x∥​(t−Δ)∥2​ 
+Subspace rotation
+ρ=∥U(t)⊤U(t−Δ)−I∥F​ 
+5.5 Regime labels (deterministic)
+We define:
+    • R0 Stable
+    • R1 Flow/Trend
+    • R2 Stressed
+    • R3 Unstable (trade-eligible)
+R3 rule:
+R3 if
+  d_perp > tau_d
+  AND fragility_score > tau_f
+  AND (FTI_persist > tau_F OR toxicity_persist > tau_T)
+  AND confidence > tau_C
+else not R3
+Confidence is deterministic and penalizes missingness, unstable normalization, and excessive spread shock.
+
+6) Toxicity (VPIN-style), reference-locked
+VPIN concept is taken from the canonical flow-toxicity literature. 
+6.1 Volume-time buckets
+    • Define bucket size Vb per symbol (config)
+    • Accumulate signed volume into buckets
+    • For bucket j, compute imbalance:
+imbj​=Vb∣Vj+​−Vj−​∣​ 
+    • Toxicity = rolling average of imb_j over last M buckets
+6.2 Use in SLRT
+Toxicity is not a standalone signal.
+It is a confirmation gate in R3 classification and a veto feature for meta-labeling.
+
+7) Liquidity fragility score (definition-locked, GPU-ready)
+We define a single scalar fragility_score combining:
+    • sweep cost convexity,
+    • depth slope collapse,
+    • elasticity spike,
+    • spread stress.
+7.1 Components
+Let:
+    • gap = gapRisk(Q*)
+    • slope_bid, slope_ask
+    • elas = ε_250ms
+    • spr_z = zscore(spread over 30m rolling)
+Define:
+slopeMin=min(slope_bid,slope_ask) fragility=w1​⋅clip(gap)+w2​⋅clip(elas)+w3​⋅clip(−Δdepth)+w4​⋅clip(spr_z)+w5​⋅clip(slopeMin) 
+All clips are deterministic, with bounds in config.
+
+8) Decision engine (CPU-only, auditable)
+8.1 Admission / refusal (hard gate)
+If any of these fail:
+    • missing required fields,
+    • non-monotonic timestamps,
+    • crossed book sanity,
+    • spread beyond kill threshold,
+    • book integrity counters exceed thresholds,
+→ RefuseSignal and log reasons.
+8.2 Direction (only after R3)
+Direction score:
+Sdir​=α1​⋅sign(μ−m)+α2​⋅sign(ΔV250mssigned​)+α3​⋅sign(I10​) 
+If |S_dir| < tau_dir → no trade even in R3.
+8.3 Meta-label veto (recommended)
+A lightweight model (GBDT/logistic) predicts:
+    • p_edge = probability expectancy positive net costs
+    • expected_slip_ticks
+    • size_scalar
+Rules:
+    • if p_edge < tau_p → veto
+    • else size = base × size_scalar (bounded)
+
+9) Risk & exits (regime-conditional)
+    • Only trade in R3
+    • Max position per symbol
+    • Hard daily loss cap
+    • Time stop: if markout doesn’t improve within T seconds → exit
+    • Liquidity stop: if gapRisk explodes against position → exit
+    • Adverse selection stop: if short-horizon markout negative beyond bound → cut
+
+10) Execution controller (control, not alpha)
+Execution principles are consistent with optimal execution literature. 
+Actions:
+    • post-only at best,
+    • join 1 tick behind,
+    • IOC/take with slippage cap,
+    • cancel/replace with budget.
+Urgency increases with:
+    • fragility_score,
+    • d⊥,
+    • toxicity.
+
+11) GPU kernel contract (CUDA) + CPU batching
+11.1 Tensor layout (SoA, coalesced)
+Inputs (per batch):
+    • bid_px[L][S], bid_qty[L][S]
+    • ask_px[L][S], ask_qty[L][S]
+    • trades arrays per batch (optional) for flow features
+Outputs:
+    • features[S][F] (float32)
+    • optional partial sums for covariance updates
+11.2 CUDA kernel snippet (feature extraction)
+extern "C" __global__
+void compute_l2_features(
+    const float* __restrict__ bid_px,  // [L*S]
+    const float* __restrict__ bid_qty, // [L*S]
+    const float* __restrict__ ask_px,  // [L*S]
+    const float* __restrict__ ask_qty, // [L*S]
+    int L, int S,
+    float* __restrict__ out_feat        // [S*F]
+){
+    int s = blockIdx.x * blockDim.x + threadIdx.x;
+    if (s >= S) return;
+
+    // level 0 indices
+    int i0 = 0 * S + s;
+
+    float b1 = bid_px[i0], a1 = ask_px[i0];
+    float qb1 = bid_qty[i0], qa1 = ask_qty[i0];
+
+    float mid = 0.5f * (a1 + b1);
+    float micro = (a1*qb1 + b1*qa1) / (qa1 + qb1 + 1e-9f);
+
+    // top-k imbalance (k=10 or min(L,10))
+    int k = (L < 10 ? L : 10);
+    float sumB=0.f, sumA=0.f;
+    #pragma unroll
+    for (int i=0;i<10;i++){
+        if (i>=k) break;
+        int idx = i*S + s;
+        sumB += bid_qty[idx];
+        sumA += ask_qty[idx];
+    }
+    float imb = (sumB - sumA) / (sumB + sumA + 1e-9f);
+
+    // store features (example layout)
+    out_feat[s*F + 0] = mid;
+    out_feat[s*F + 1] = micro;
+    out_feat[s*F + 2] = micro - mid;
+    out_feat[s*F + 3] = imb;
+}
+11.3 Determinism policy
+    • No non-deterministic atomics for core features.
+    • For reductions (e.g., covariance), use deterministic block reductions or do covariance on CPU.
+
+12) WAL + manifests (implementation hooks)
+12.1 Minimal new events
+    • FeatureBatchComputed { batch_id, features_digest, gpu_policy }
+    • RegimeComputed { batch_id, d_perp, rho, fragility, regime, confidence, digest }
+    • SignalAdmitted | SignalRefused { reasons[], digest }
+    • IntentEmitted { side, qty, limit_px, urgency, digest }
+    • ExecutionReport { fills, slip_ticks, markout, digest }
+12.2 Hashing
+    • RunManifest includes:
+        ◦ feature schema version,
+        ◦ GPU kernel version hash,
+        ◦ float quantization policy,
+        ◦ thresholds.
+
+13) Implementation skeleton (Rust modules)
+13.1 Feature schema (strong typing)
+#[repr(u16)]
+pub enum FeatureId {
+    Mid = 0,
+    Micro = 1,
+    MicroMinusMid = 2,
+    ImbK10 = 3,
+    GapRiskQ = 4,
+    Elas250ms = 5,
+    DepthDecay250ms = 6,
+    Fti = 7,
+    Toxicity = 8,
+    DPerp = 9,
+    Rho = 10,
+    Fragility = 11,
+}13.2 Regime decision (deterministic)
+pub fn classify_regime(m: &Metrics, cfg: &Cfg) -> Regime {
+    if m.confidence < cfg.tau_c { return Regime::R2; }
+    let confirm = (m.fti_persist > cfg.tau_f) || (m.tox_persist > cfg.tau_t);
+    if m.d_perp > cfg.tau_d && m.fragility > cfg.tau_frag && confirm {
+        Regime::R3
+    } else if m.fragility > cfg.tau_frag_soft {
+        Regime::R2
+    } else {
+        Regime::R0
+    }
+}
+14) References (web-verified, canonical)
+    • VPIN / flow toxicity: David Easley, Marcos López de Prado, Maureen O'Hara — “Flow Toxicity and Liquidity in a High-Frequency World” (VPIN). 
+    • Online PCA: Erkki Oja (1982) incremental PCA rule. 
+    • Grassmann geometry: Alan Edelman, Tomas Arias, Steven T. Smith. 
+    • Optimal execution: Robert Almgren and Neil Chriss. 
+Venue scope (implementation targets):
+    • Binance perps/spot (rate limits & order types are venue docs)
+    • Zerodha (if/when you apply the same regime logic to NSE feeds)
+    • NVIDIA GPU execution (CUDA kernels)
+
+
