@@ -26,6 +26,11 @@ export interface ConnectionState {
   binance: ConnectionStatus;
   fastapi: ConnectionStatus;
   latencyMs: number;
+  mode?: string;
+  engineRunning?: boolean;
+  ticksReceived?: number;
+  barsCompleted?: number;
+  signalsEmitted?: number;
 }
 
 export interface ToastItem {
@@ -55,7 +60,41 @@ export const layoutAtom = atom<LayoutItem[]>([
 export const activePanelsAtom = atom<string[]>(["chart", "orderbook", "positions", "orders"]);
 
 /** Theme — dark by default (terminal aesthetic) */
-export const themeAtom = atom<"dark">("dark");
+export type Theme = "dark" | "light";
+
+const initialTheme = (): Theme => {
+  if (typeof window === "undefined") return "dark";
+  return (localStorage.getItem("ql-theme") as Theme) ?? "dark";
+};
+
+const baseThemeAtom = atom<Theme>(initialTheme());
+
+export const themeAtom = atom(
+  (get) => get(baseThemeAtom),
+  (_get, set, value: Theme) => {
+    set(baseThemeAtom, value);
+    document.documentElement.classList.toggle("dark", value === "dark");
+    localStorage.setItem("ql-theme", value);
+  },
+);
+
+/** Sidebar collapsed state (persisted to localStorage) */
+const initialSidebarCollapsed = (): boolean => {
+  if (typeof window === "undefined") return true;
+  const saved = localStorage.getItem("ql-sidebar");
+  // Default to collapsed for more screen real estate; only expand if explicitly set
+  return saved === null ? true : saved === "collapsed";
+};
+
+const baseSidebarAtom = atom<boolean>(initialSidebarCollapsed());
+
+export const sidebarCollapsedAtom = atom(
+  (get) => get(baseSidebarAtom),
+  (_get, set, value: boolean) => {
+    set(baseSidebarAtom, value);
+    localStorage.setItem("ql-sidebar", value ? "collapsed" : "expanded");
+  },
+);
 
 /** Command palette visibility */
 export const commandPaletteOpenAtom = atom<boolean>(false);
@@ -69,6 +108,11 @@ export const connectionAtom = atom<ConnectionState>({
   binance: "disconnected",
   fastapi: "disconnected",
   latencyMs: 0,
+  mode: "offline",
+  engineRunning: false,
+  ticksReceived: 0,
+  barsCompleted: 0,
+  signalsEmitted: 0,
 });
 
 /** Current market regime label */

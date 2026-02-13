@@ -1,5 +1,6 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +41,8 @@ export interface WhyPanelData {
 
 interface WhyPanelProps {
   data: WhyPanelData | null;
+  /** If provided and no data, fetch from API */
+  signalRef?: { strategyId: string; symbol: string; date: string } | null;
   open: boolean;
   onClose: () => void;
 }
@@ -48,35 +51,6 @@ interface WhyPanelProps {
 // Demo data
 // ---------------------------------------------------------------------------
 
-export const DEMO_WHY: WhyPanelData = {
-  signalId: "sig-abc-123",
-  strategy: "S25 DFF",
-  symbol: "NIFTY",
-  direction: "BUY",
-  conviction: 0.82,
-  regime: "trending",
-  timestamp: "2026-02-12 14:30:15",
-  gates: [
-    { gate: "DrawdownGate", passed: true, reason: "DD 1.82% < limit 5%" },
-    { gate: "ExposureGate", passed: true, reason: "Gross 42.5L < limit 100L" },
-    { gate: "VaRGate", passed: true, reason: "VaR95 1.85L < limit 5L" },
-    { gate: "ConvictionGate", passed: true, reason: "0.82 > threshold 0.50" },
-    { gate: "CorrelationGate", passed: false, reason: "Intra-day corr 0.87 > limit 0.85" },
-    { gate: "CircuitBreakerGate", passed: true, reason: "No breakers tripped" },
-  ],
-  riskSnapshot: {
-    drawdownPct: 1.82,
-    grossExposure: 4250000,
-    var95: 185000,
-    positionCount: 3,
-  },
-  tradeChain: [
-    { type: "signal", timestamp: "14:30:15.042", label: "Signal Generated", detail: "DFF composite Z=1.34, direction=BUY, conviction=0.82" },
-    { type: "gate", timestamp: "14:30:15.044", label: "Gate Evaluation", detail: "5/6 gates passed, CorrelationGate FAILED" },
-    { type: "order", timestamp: "14:30:15.051", label: "Order Submitted", detail: "MARKET BUY NIFTY 50 lots (gate override: manual)" },
-    { type: "fill", timestamp: "14:30:15.187", label: "Fill Received", detail: "Filled 50 @ 23,485.20, slippage 0.8 pts" },
-  ],
-};
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -96,21 +70,21 @@ function SignalHeader({ data }: { data: WhyPanelData }) {
         >
           {data.direction}
         </span>
-        <span className="font-mono text-sm font-semibold text-gray-100">{data.symbol}</span>
+        <span className="font-mono text-sm font-semibold text-terminal-text">{data.symbol}</span>
         <span className="text-xs text-terminal-accent">{data.strategy}</span>
       </div>
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded bg-terminal-surface border border-terminal-border px-2 py-1.5">
           <div className="text-2xs text-terminal-muted">Conviction</div>
-          <div className="font-mono text-sm text-gray-100">{(data.conviction * 100).toFixed(0)}%</div>
+          <div className="font-mono text-sm text-terminal-text">{(data.conviction * 100).toFixed(0)}%</div>
         </div>
         <div className="rounded bg-terminal-surface border border-terminal-border px-2 py-1.5">
           <div className="text-2xs text-terminal-muted">Regime</div>
-          <div className="font-mono text-sm text-gray-100">{data.regime}</div>
+          <div className="font-mono text-sm text-terminal-text">{data.regime}</div>
         </div>
         <div className="rounded bg-terminal-surface border border-terminal-border px-2 py-1.5">
           <div className="text-2xs text-terminal-muted">Time</div>
-          <div className="font-mono text-sm text-gray-100">{data.timestamp.split(" ")[1]}</div>
+          <div className="font-mono text-sm text-terminal-text">{data.timestamp.split(" ")[1]}</div>
         </div>
       </div>
     </div>
@@ -144,7 +118,7 @@ function GateDecisions({ gates }: { gates: GateDecision[] }) {
             >
               {g.passed ? "\u2713" : "\u2717"}
             </span>
-            <span className="font-medium text-gray-200 min-w-[120px]">{g.gate}</span>
+            <span className="font-medium text-terminal-text-secondary min-w-[120px]">{g.gate}</span>
             <span className="text-terminal-muted flex-1 truncate">{g.reason}</span>
           </div>
         ))}
@@ -166,7 +140,7 @@ function RiskAtTime({ snapshot }: { snapshot: RiskSnapshot }) {
         </div>
         <div className="rounded bg-terminal-surface border border-terminal-border px-2 py-1.5">
           <div className="text-2xs text-terminal-muted">Gross Exposure</div>
-          <div className="font-mono text-xs text-gray-100">{`₹${(snapshot.grossExposure / 100000).toFixed(1)}L`}</div>
+          <div className="font-mono text-xs text-terminal-text">{`₹${(snapshot.grossExposure / 100000).toFixed(1)}L`}</div>
         </div>
         <div className="rounded bg-terminal-surface border border-terminal-border px-2 py-1.5">
           <div className="text-2xs text-terminal-muted">VaR 95%</div>
@@ -174,7 +148,7 @@ function RiskAtTime({ snapshot }: { snapshot: RiskSnapshot }) {
         </div>
         <div className="rounded bg-terminal-surface border border-terminal-border px-2 py-1.5">
           <div className="text-2xs text-terminal-muted">Positions</div>
-          <div className="font-mono text-xs text-gray-100">{snapshot.positionCount}</div>
+          <div className="font-mono text-xs text-terminal-text">{snapshot.positionCount}</div>
         </div>
       </div>
     </section>
@@ -209,7 +183,7 @@ function TradeChainTimeline({ events }: { events: TradeChainEvent[] }) {
                   <span className="font-mono text-2xs text-terminal-muted">{ev.timestamp}</span>
                   <span className={cn("text-xs font-semibold", cfg.color)}>{ev.label}</span>
                 </div>
-                <p className="text-xs text-gray-300 mt-0.5 leading-relaxed">{ev.detail}</p>
+                <p className="text-xs text-terminal-text-secondary mt-0.5 leading-relaxed">{ev.detail}</p>
               </div>
             </div>
           );
@@ -223,7 +197,7 @@ function TradeChainTimeline({ events }: { events: TradeChainEvent[] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export function WhyPanel({ data, open, onClose }: WhyPanelProps) {
+export function WhyPanel({ data, signalRef, open, onClose }: WhyPanelProps) {
   // Close on Escape
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -239,7 +213,78 @@ export function WhyPanel({ data, open, onClose }: WhyPanelProps) {
     }
   }, [open, handleKeyDown]);
 
-  const panelData = data ?? DEMO_WHY;
+  const [fetchedData, setFetchedData] = useState<WhyPanelData | null>(null);
+
+  useEffect(() => {
+    if (data || !signalRef || !open) {
+      setFetchedData(null);
+      return;
+    }
+    apiFetch<{
+      strategy_id: string;
+      symbol: string;
+      date: string;
+      signals: Array<{ seq: number; ts: string; event_type: string; strategy_id: string; symbol: string; payload: any }>;
+      gates: Array<{ seq: number; ts: string; event_type: string; strategy_id: string; symbol: string; payload: any }>;
+      orders: Array<{ seq: number; ts: string; event_type: string; strategy_id: string; symbol: string; payload: any }>;
+      fills: Array<{ seq: number; ts: string; event_type: string; strategy_id: string; symbol: string; payload: any }>;
+      snapshot: { seq: number; ts: string; event_type: string; strategy_id: string; symbol: string; payload: any } | null;
+    }>(`/api/why/trades/${signalRef.strategyId}/${signalRef.symbol}/${signalRef.date}`).then((chain) => {
+      // Map to WhyPanelData
+      const firstSignal = chain.signals[0]?.payload ?? {};
+      const mapped: WhyPanelData = {
+        signalId: String(chain.signals[0]?.seq ?? ""),
+        strategy: chain.strategy_id,
+        symbol: chain.symbol,
+        direction: firstSignal.direction === "SELL" ? "SELL" : "BUY",
+        conviction: firstSignal.conviction ?? 0,
+        regime: firstSignal.regime ?? "",
+        timestamp: chain.signals[0]?.ts ?? chain.date,
+        gates: chain.gates.map((g) => ({
+          gate: g.payload?.gate ?? g.event_type,
+          passed: g.payload?.approved ?? true,
+          reason: g.payload?.reason ?? "",
+        })),
+        riskSnapshot: {
+          drawdownPct: chain.snapshot?.payload?.portfolio_dd ?? 0,
+          grossExposure: chain.snapshot?.payload?.total_exposure ?? 0,
+          var95: chain.snapshot?.payload?.var_95 ?? 0,
+          positionCount: chain.snapshot?.payload?.position_count ?? 0,
+        },
+        tradeChain: [
+          ...chain.signals.map((e) => ({ type: "signal" as const, timestamp: e.ts, label: "Signal Generated", detail: `${e.payload?.direction ?? ""} conviction=${(e.payload?.conviction ?? 0).toFixed(2)}` })),
+          ...chain.gates.map((e) => ({ type: "gate" as const, timestamp: e.ts, label: e.payload?.gate ?? "Gate", detail: e.payload?.reason ?? (e.payload?.approved ? "Passed" : "Blocked") })),
+          ...chain.orders.map((e) => ({ type: "order" as const, timestamp: e.ts, label: "Order Placed", detail: `${e.payload?.side ?? ""} ${e.payload?.quantity ?? ""} @ ${e.payload?.price ?? "market"}` })),
+          ...chain.fills.map((e) => ({ type: "fill" as const, timestamp: e.ts, label: "Fill", detail: `${e.payload?.quantity ?? ""} @ ${e.payload?.fill_price ?? ""}` })),
+        ].sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
+      };
+      setFetchedData(mapped);
+    }).catch(() => {});
+  }, [data, signalRef, open]);
+
+  if (!data && !fetchedData) {
+    return (
+      <>
+        {open && <div className="fixed inset-0 z-40 bg-black/40 transition-opacity" onClick={onClose} />}
+        <div className={cn(
+          "fixed top-0 right-0 z-50 h-full w-[420px] max-w-[90vw] bg-terminal-panel border-l border-terminal-border shadow-2xl transition-transform duration-300",
+          open ? "translate-x-0" : "translate-x-full",
+        )}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-terminal-text">Signal Explanation</h3>
+            <button onClick={onClose} className="rounded p-1 hover:bg-terminal-surface text-terminal-muted hover:text-terminal-text transition-colors">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M12 4L4 12M4 4l8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+            </button>
+          </div>
+          <div className="flex items-center justify-center h-[calc(100%-48px)] text-terminal-muted text-xs font-mono">
+            Select a signal to see explanation
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  const panelData = (data ?? fetchedData)!;
 
   return (
     <>
@@ -260,12 +305,12 @@ export function WhyPanel({ data, open, onClose }: WhyPanelProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-gray-100">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-terminal-text">
             Signal Explanation
           </h3>
           <button
             onClick={onClose}
-            className="rounded p-1 hover:bg-terminal-surface text-terminal-muted hover:text-gray-100 transition-colors"
+            className="rounded p-1 hover:bg-terminal-surface text-terminal-muted hover:text-terminal-text transition-colors"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

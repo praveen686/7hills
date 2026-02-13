@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from quantlaxmi.engine.state import PortfolioState, DEFAULT_STATE_FILE
 from quantlaxmi.engine.services.strategy_reader import StrategyReader
 from quantlaxmi.engine.services.market_data import MarketDataService
-from quantlaxmi.engine.api.routes import portfolio, strategies, backtest, risk, market, research, signals, why_panel, replay, diagnostics, trading
+from quantlaxmi.engine.api.routes import portfolio, strategies, backtest, risk, market, research, signals, why_panel, replay, diagnostics, trading, auth, settings, models
 from quantlaxmi.engine.api.routes.backtest import BacktestTracker
 from quantlaxmi.engine.api import ws as ws_module
 from quantlaxmi.engine.services.wal_query import WalQueryService
@@ -108,12 +108,40 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 7. WS connection manager
     app.state.ws_manager = ws_module.manager
 
+    # 8. Live engine (if mode=live or paper_live)
+    import os
+    mode = os.environ.get("QUANTLAXMI_MODE", "")
+    app.state.live_engine = None
+    app.state.event_bus = None
+
+    if mode in ("live", "paper_live", "paper"):
+        try:
+            from quantlaxmi.engine.live.live_engine import LiveEngine
+            live_engine = LiveEngine(
+                store=store,
+                registry=registry,
+                state_file=state_path,
+                mode="paper" if mode == "paper_live" else mode,
+            )
+            await live_engine.start()
+            app.state.live_engine = live_engine
+            app.state.event_bus = live_engine.event_bus
+            logger.info("LiveEngine started (mode=%s)", mode)
+        except Exception as exc:
+            logger.warning("LiveEngine start failed (non-fatal): %s", exc)
+
     logger.info("QuantLaxmi Engine API ready.")
 
     yield  # ---- application runs ----
 
     # Shutdown
     logger.info("QuantLaxmi Engine API shutting down...")
+    if app.state.live_engine:
+        try:
+            await app.state.live_engine.stop()
+            logger.info("LiveEngine stopped.")
+        except Exception as exc:
+            logger.warning("LiveEngine stop failed: %s", exc)
     market_svc.close()
     logger.info("Shutdown complete.")
 
@@ -170,6 +198,7 @@ def create_app(
     application.include_router(backtest.router)
     application.include_router(risk.router)
     application.include_router(market.router)
+    application.include_router(market.status_router)
     application.include_router(research.router)
     application.include_router(signals.router)
     application.include_router(why_panel.router)
@@ -177,6 +206,9 @@ def create_app(
     application.include_router(diagnostics.router)
     application.include_router(trading.router)
     application.include_router(ws_module.router)
+    application.include_router(auth.router)
+    application.include_router(settings.router)
+    application.include_router(models.router)
 
     # Health check
     @application.get("/health", tags=["system"])

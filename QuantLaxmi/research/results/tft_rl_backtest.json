@@ -1,0 +1,109 @@
+{
+  "total_sharpe": -0.2444293546050455,
+  "per_asset_sharpe": {
+    "NIFTY": -0.18665605129926946,
+    "BANKNIFTY": 0.08699589353679855,
+    "FINNIFTY": 0.19580156051494793,
+    "MIDCPNIFTY": -0.4129911775688866
+  },
+  "tft_only_sharpe": 0.6811853987449908,
+  "n_folds": 9,
+  "rl_episodes": 300,
+  "train_window": 252,
+  "test_window": 42,
+  "step_size": 42,
+  "checkpoint": "checkpoints/x_trend/v2_20260212_211057",
+  "elapsed_seconds": 1265.3177540302277,
+  "fold_details": [
+    {
+      "fold": 0,
+      "test_range": [
+        388,
+        430
+      ],
+      "oos_sharpe": 0.07964636101971456,
+      "oos_return": 0.2135974355197806,
+      "oos_max_dd": 0.9999268308846283
+    },
+    {
+      "fold": 1,
+      "test_range": [
+        430,
+        472
+      ],
+      "oos_sharpe": -0.40845513305036824,
+      "oos_return": -1.0611957932007612,
+      "oos_max_dd": 0.999826354891061
+    },
+    {
+      "fold": 2,
+      "test_range": [
+        472,
+        514
+      ],
+      "oos_sharpe": -0.1691839356712247,
+      "oos_return": -0.6625194174271419,
+      "oos_max_dd": 1.006196173506896
+    },
+    {
+      "fold": 3,
+      "test_range": [
+        514,
+        556
+      ],
+      "oos_sharpe": 0.8190625394025225,
+      "oos_return": 1.642906352145403,
+      "oos_max_dd": 0.9067078150969847
+    },
+    {
+      "fold": 4,
+      "test_range": [
+        556,
+        598
+      ],
+      "oos_sharpe": -0.13926054996048406,
+      "oos_return": -0.3909818482306534,
+      "oos_max_dd": 0.9998731422093687
+    },
+    {
+      "fold": 5,
+      "test_range": [
+        598,
+        640
+      ],
+      "oos_sharpe": -0.01367091871114824,
+      "oos_return": -0.03294013376856797,
+      "oos_max_dd": 0.9967198859514309
+    },
+    {
+      "fold": 6,
+      "test_range": [
+        640,
+        682
+      ],
+      "oos_sharpe": 0.512635011903927,
+      "oos_return": 1.521438035517407,
+      "oos_max_dd": 1.0134494398454121
+    },
+    {
+      "fold": 7,
+      "test_range": [
+        682,
+        724
+      ],
+      "oos_sharpe": -1.6179145082521749,
+      "oos_return": -3.8761605931823677,
+      "oos_max_dd": 0.999990836554832
+    },
+    {
+      "fold": 8,
+      "test_range": [
+        724,
+        766
+      ],
+      "oos_sharpe": 0.1576684105956241,
+      "oos_return": 0.46950829891955936,
+      "oos_max_dd": 1.0360015686898154
+    }
+  ]
+}

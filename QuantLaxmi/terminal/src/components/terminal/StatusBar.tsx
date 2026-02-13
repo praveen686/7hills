@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtomValue, useAtom } from "jotai";
-import { Wifi, WifiOff, Gauge } from "lucide-react";
+import { Wifi, WifiOff, Gauge, User, LogOut } from "lucide-react";
 
 import {
   connectionAtom,
@@ -10,7 +10,10 @@ import {
 } from "@/stores/workspace";
 import { selectedVpinAtom, selectedSymbolAtom } from "@/stores/market";
 import { appModeAtom, type AppMode } from "@/stores/mode";
+import { pageAtom } from "@/stores/auth";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/terminal/ThemeToggle";
+import { useAuth } from "@/hooks/useAuth";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,6 +54,22 @@ function vpinColor(vpin: number | null): string {
 // Component
 // ---------------------------------------------------------------------------
 
+/** Build a tooltip string summarizing user's trading access */
+function userTooltip(u: import("@/stores/auth").User): string {
+  const lines: string[] = [u.name];
+  if (u.email) lines.push(u.email);
+  if (u.provider === "zerodha") {
+    if (u.exchanges?.length) lines.push(`Exchanges: ${u.exchanges.join(", ")}`);
+    if (u.products?.length) lines.push(`Products: ${u.products.join(", ")}`);
+    if (u.order_types?.length) lines.push(`Order types: ${u.order_types.join(", ")}`);
+  } else if (u.provider === "binance") {
+    if (u.permissions?.length) lines.push(`Permissions: ${u.permissions.join(", ")}`);
+    if (u.account_type) lines.push(`Account: ${u.account_type}`);
+    lines.push(`Trade: ${u.can_trade ? "Yes" : "No"} | Withdraw: ${u.can_withdraw ? "Yes" : "No"}`);
+  }
+  return lines.join("\n");
+}
+
 export function StatusBar() {
   const connection = useAtomValue(connectionAtom);
   const regime = useAtomValue(regimeAtom);
@@ -58,6 +77,8 @@ export function StatusBar() {
   const vpin = useAtomValue(selectedVpinAtom);
   const symbol = useAtomValue(selectedSymbolAtom);
   const [mode, setMode] = useAtom(appModeAtom);
+  const page = useAtomValue(pageAtom);
+  const { user, logout } = useAuth();
   const [clock, setClock] = useState(() => formatIST(new Date()));
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -108,6 +129,28 @@ export function StatusBar() {
             {connection.latencyMs > 0 ? `${connection.latencyMs}ms` : "--"}
           </span>
         </div>
+
+        {/* Engine mode badge */}
+        {connection.engineRunning && (
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "px-1.5 py-0.5 rounded text-2xs font-mono font-bold uppercase tracking-wider",
+                connection.mode === "live"
+                  ? "bg-terminal-profit/20 text-terminal-profit border border-terminal-profit/40"
+                  : "bg-yellow-500/20 text-yellow-400 border border-yellow-500/40",
+              )}
+              title={`Engine mode: ${connection.mode}`}
+            >
+              {connection.mode === "live" ? "LIVE" : "PAPER"}
+            </span>
+            <span className="text-terminal-muted tabular-nums" title="ticks / bars / signals">
+              {(connection.ticksReceived ?? 0).toLocaleString()}t
+              {" "}{connection.barsCompleted ?? 0}b
+              {" "}{connection.signalsEmitted ?? 0}s
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Centre: mode toggle + VPIN + regime */}
@@ -142,10 +185,47 @@ export function StatusBar() {
         </div>
       </div>
 
-      {/* Right: workspace name + clock */}
+      {/* Right: user info + theme toggle + workspace name + clock */}
       <div className="flex items-center gap-4">
-        <span className="text-terminal-accent uppercase">{workspace}</span>
-        <span className="text-gray-400 tabular-nums">{clock} IST</span>
+        {user && (
+          <div
+            className="flex items-center gap-1.5 cursor-default"
+            title={userTooltip(user)}
+          >
+            <User size={11} className="text-terminal-accent" />
+            <span className="text-terminal-text">{user.name.split(" ")[0]}</span>
+            <span className={cn(
+              "px-1 rounded text-2xs font-bold uppercase",
+              user.provider === "zerodha" && "bg-[#387ed1]/20 text-[#5a9cf5]",
+              user.provider === "binance" && "bg-[#F0B90B]/20 text-[#F0B90B]",
+              user.provider === "google" && "bg-white/10 text-white",
+            )}>
+              {user.provider === "zerodha" ? "ZRD" : user.provider === "binance" ? "BIN" : "G"}
+            </span>
+            {user.provider === "zerodha" && user.exchanges && (
+              <span className="text-terminal-muted">
+                {user.exchanges.filter(e => ["NFO", "NSE", "MCX"].includes(e)).join("/")}
+              </span>
+            )}
+            {user.provider === "binance" && user.permissions && (
+              <span className="text-terminal-muted">
+                {user.permissions.join("/")}
+              </span>
+            )}
+            <button
+              onClick={logout}
+              className="text-terminal-muted hover:text-terminal-loss transition-colors ml-1"
+              title="Sign out"
+            >
+              <LogOut size={10} />
+            </button>
+          </div>
+        )}
+        <ThemeToggle />
+        <span className="text-terminal-accent uppercase">
+          {page === "terminal" ? workspace : page}
+        </span>
+        <span className="text-terminal-text-secondary tabular-nums">{clock} IST</span>
       </div>
     </div>
   );

@@ -53,11 +53,11 @@ function statusStyle(status: OrderStatus): string {
     case "PARTIALLY_FILLED":
       return "text-terminal-warning bg-terminal-warning/15";
     case "CANCELLED":
-      return "text-gray-400 bg-gray-500/15";
+      return "text-terminal-muted bg-terminal-muted/15";
     case "REJECTED":
       return "text-terminal-loss bg-terminal-loss/15";
     default:
-      return "text-gray-400 bg-gray-500/15";
+      return "text-terminal-muted bg-terminal-muted/15";
   }
 }
 
@@ -124,7 +124,7 @@ function buildColumns(showCancel: boolean): ColumnDef<Order>[] {
       header: "Symbol",
       size: 90,
       cell: ({ getValue }) => (
-        <span className="font-semibold text-gray-100">{getValue<string>()}</span>
+        <span className="font-semibold text-terminal-text">{getValue<string>()}</span>
       ),
     },
     {
@@ -267,7 +267,7 @@ export function OrdersTable() {
               "px-3 py-1.5 text-2xs font-mono transition-colors border-b-2",
               activeTab === tab.id
                 ? "text-terminal-accent border-terminal-accent"
-                : "text-terminal-muted border-transparent hover:text-gray-300",
+                : "text-terminal-muted border-transparent hover:text-terminal-text-secondary",
             )}
           >
             {tab.label}
@@ -288,7 +288,7 @@ export function OrdersTable() {
                     className={cn(
                       "px-2 py-1.5 text-left text-2xs text-terminal-muted font-normal",
                       "border-b border-terminal-border select-none",
-                      header.column.getCanSort() && "cursor-pointer hover:text-gray-300",
+                      header.column.getCanSort() && "cursor-pointer hover:text-terminal-text-secondary",
                     )}
                     style={{ width: header.getSize() }}
                     onClick={header.column.getToggleSortingHandler()}

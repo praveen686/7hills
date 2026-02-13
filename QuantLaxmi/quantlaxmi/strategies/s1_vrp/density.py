@@ -158,6 +158,7 @@ def build_density_series(
     end: date,
     symbol: str = "NIFTY",
     phys_window: int = DEFAULT_PHYS_WINDOW,
+    progress_cb=None,
 ) -> list[DensityDayObs]:
     """Build daily density-feature series from F&O data.
 
@@ -175,11 +176,19 @@ def build_density_series(
     prev_entropy: float = 0.0
     prev_rn_skew: float = 0.0
 
+    # Count trading days for progress reporting
+    total_cal_days = (end - start).days + 1
+    day_idx = 0
+
     d = start
     while d <= end:
         if not is_trading_day(d):
             d += timedelta(days=1)
             continue
+
+        day_idx += 1
+        if progress_cb and total_cal_days > 0:
+            progress_cb(int(day_idx * 100 / total_cal_days))
 
         snap, result, spot, atm_iv = _calibrate_density(store, d, symbol)
 
@@ -519,16 +528,25 @@ def run_multi_index_density_backtest(
     hold_days: int = DEFAULT_HOLD_DAYS,
     cost_bps: float = DEFAULT_COST_BPS,
     phys_window: int = DEFAULT_PHYS_WINDOW,
+    progress_cb=None,
 ) -> dict[str, DensityBacktestResult]:
     """Run density backtest for multiple indices."""
     if symbols is None:
         symbols = ["NIFTY", "BANKNIFTY", "MIDCPNIFTY", "FINNIFTY"]
 
     results: dict[str, DensityBacktestResult] = {}
+    n_syms = len(symbols)
 
-    for sym in symbols:
+    for si, sym in enumerate(symbols):
         print(f"\n  {sym}: building density series...", end="", flush=True)
-        series = build_density_series(store, start, end, sym, phys_window)
+
+        def _sym_progress(day_pct: int, _si=si) -> None:
+            if progress_cb:
+                sym_start = int(85 * _si / n_syms)
+                sym_end = int(85 * (_si + 1) / n_syms)
+                progress_cb(sym_start + int(day_pct * (sym_end - sym_start) / 100))
+
+        series = build_density_series(store, start, end, sym, phys_window, progress_cb=_sym_progress)
         print(f" {len(series)} days", end="", flush=True)
 
         if len(series) < lookback + 10:

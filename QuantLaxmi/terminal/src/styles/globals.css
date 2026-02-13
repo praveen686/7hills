@@ -1,5 +1,47 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
 
+:root {
+  --terminal-bg: 245 246 250;
+  --terminal-surface: 255 255 255;
+  --terminal-panel: 235 237 244;
+  --terminal-border: 205 210 222;
+  --terminal-border-bright: 180 186 200;
+  --terminal-muted: 100 105 130;
+  --terminal-accent: 45 110 240;
+  --terminal-accent-dim: 35 85 195;
+  --terminal-profit: 0 150 110;
+  --terminal-profit-dim: 0 125 90;
+  --terminal-loss: 210 45 65;
+  --terminal-loss-dim: 180 35 55;
+  --terminal-warning: 215 140 30;
+  --terminal-info: 25 130 220;
+  --terminal-text: 20 20 40;
+  --terminal-text-secondary: 60 62 90;
+  --chart-grid: #dce0ea;
+  --chart-crosshair: rgba(45,110,240,0.25);
+}
+
+.dark {
+  --terminal-bg: 8 8 13;
+  --terminal-surface: 15 15 23;
+  --terminal-panel: 19 19 29;
+  --terminal-border: 30 30 46;
+  --terminal-border-bright: 42 42 62;
+  --terminal-muted: 107 107 138;
+  --terminal-accent: 79 142 255;
+  --terminal-accent-dim: 58 106 204;
+  --terminal-profit: 0 212 170;
+  --terminal-profit-dim: 0 168 130;
+  --terminal-loss: 255 77 106;
+  --terminal-loss-dim: 204 61 85;
+  --terminal-warning: 255 184 77;
+  --terminal-info: 79 195 247;
+  --terminal-text: 229 229 239;
+  --terminal-text-secondary: 160 160 192;
+  --chart-grid: #1e1e2e;
+  --chart-crosshair: rgba(79,142,255,0.27);
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -10,7 +52,7 @@
   }
 
   body {
-    @apply bg-terminal-bg text-gray-100 font-sans antialiased;
+    @apply bg-terminal-bg text-terminal-text font-sans antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
@@ -113,8 +155,8 @@
   }
 
   .btn-neutral {
-    @apply bg-terminal-panel text-gray-300 border border-terminal-border
-           hover:bg-terminal-border hover:text-gray-100
+    @apply bg-terminal-panel text-terminal-text-secondary border border-terminal-border
+           hover:bg-terminal-border hover:text-terminal-text
            px-3 py-1.5 rounded text-xs font-medium transition-colors;
   }
 

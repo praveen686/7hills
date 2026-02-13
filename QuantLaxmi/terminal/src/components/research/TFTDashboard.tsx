@@ -1,4 +1,6 @@
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,39 +33,13 @@ interface TFTDashboardProps {
 // Demo data
 // ---------------------------------------------------------------------------
 
-const DEMO_HYPERPARAMS: HyperparamSet[] = [
-  { param: "hidden_size", value: 64 },
-  { param: "attention_heads", value: 4 },
-  { param: "dropout", value: 0.15 },
-  { param: "learning_rate", value: 0.0008 },
-  { param: "batch_size", value: 64 },
-  { param: "seq_len", value: 20 },
-  { param: "num_layers", value: 2 },
-  { param: "gradient_clip", value: 1.0 },
-  { param: "weight_decay", value: 0.0001 },
-];
-
-const DEMO_FOLDS: FoldMetric[] = [
-  { fold: 1, trainSharpe: 2.45, valSharpe: 1.87, trainLoss: 0.0342, valLoss: 0.0418, epochs: 50 },
-  { fold: 2, trainSharpe: 2.61, valSharpe: 1.74, trainLoss: 0.0328, valLoss: 0.0445, epochs: 50 },
-  { fold: 3, trainSharpe: 2.38, valSharpe: 2.16, trainLoss: 0.0351, valLoss: 0.0402, epochs: 48 },
-  { fold: 4, trainSharpe: 2.72, valSharpe: 1.04, trainLoss: 0.0315, valLoss: 0.0489, epochs: 50 },
-  { fold: 5, trainSharpe: 2.55, valSharpe: 1.92, trainLoss: 0.0335, valLoss: 0.0425, epochs: 47 },
-  { fold: 6, trainSharpe: 2.48, valSharpe: 1.68, trainLoss: 0.0340, valLoss: 0.0451, epochs: 50 },
-  { fold: 7, trainSharpe: 2.67, valSharpe: 2.05, trainLoss: 0.0320, valLoss: 0.0412, epochs: 50 },
-  { fold: 8, trainSharpe: 2.41, valSharpe: 1.55, trainLoss: 0.0348, valLoss: 0.0462, epochs: 45 },
-  { fold: 9, trainSharpe: 2.58, valSharpe: 1.88, trainLoss: 0.0330, valLoss: 0.0430, epochs: 50 },
-  { fold: 10, trainSharpe: 2.70, valSharpe: 1.95, trainLoss: 0.0318, valLoss: 0.0410, epochs: 50 },
-  { fold: 11, trainSharpe: 2.52, valSharpe: 1.78, trainLoss: 0.0338, valLoss: 0.0440, epochs: 49 },
-];
-
-const DEMO_PROPS: Required<TFTDashboardProps> = {
-  totalFolds: 16,
-  completedFolds: 11,
-  phase: "Phase 5 — Production Pass",
-  bestHyperparams: DEMO_HYPERPARAMS,
-  foldMetrics: DEMO_FOLDS,
-  status: "running",
+const EMPTY_DEFAULTS: Required<TFTDashboardProps> = {
+  totalFolds: 0,
+  completedFolds: 0,
+  phase: "Idle",
+  bestHyperparams: [],
+  foldMetrics: [],
+  status: "idle",
 };
 
 // ---------------------------------------------------------------------------
@@ -81,7 +57,43 @@ function sharpeColor(s: number): string {
 // ---------------------------------------------------------------------------
 
 export function TFTDashboard(props: TFTDashboardProps) {
-  const p = { ...DEMO_PROPS, ...props };
+  const [fetched, setFetched] = useState<Partial<TFTDashboardProps>>({});
+
+  useEffect(() => {
+    let active = true;
+    const fetchStatus = () => {
+      apiFetch<{
+        status: string;
+        total_folds: number;
+        completed_folds: number;
+        phase: string;
+        best_hyperparams: Array<{ param: string; value: string | number }>;
+        fold_metrics: Array<{
+          fold: number;
+          trainSharpe: number;
+          valSharpe: number;
+          trainLoss: number;
+          valLoss: number;
+          epochs: number;
+        }>;
+      }>("/api/research/tft-status").then((data) => {
+        if (!active) return;
+        setFetched({
+          status: data.status as any,
+          totalFolds: data.total_folds,
+          completedFolds: data.completed_folds,
+          phase: data.phase,
+          bestHyperparams: data.best_hyperparams,
+          foldMetrics: data.fold_metrics,
+        });
+      }).catch(() => {});
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000);
+    return () => { active = false; clearInterval(interval); };
+  }, []);
+
+  const p = { ...EMPTY_DEFAULTS, ...fetched, ...props };
   const progressPct = p.totalFolds > 0 ? (p.completedFolds / p.totalFolds) * 100 : 0;
 
   const avgTrainSharpe = p.foldMetrics.length > 0
@@ -94,7 +106,7 @@ export function TFTDashboard(props: TFTDashboardProps) {
   return (
     <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto scrollbar-thin">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-100">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
           TFT Training Dashboard
         </h2>
         <span className={cn(
@@ -140,7 +152,7 @@ export function TFTDashboard(props: TFTDashboardProps) {
             <tbody>
               {p.bestHyperparams.map((hp) => (
                 <tr key={hp.param} className="border-t border-terminal-border/50">
-                  <td className="px-3 py-1.5 text-gray-300">{hp.param}</td>
+                  <td className="px-3 py-1.5 text-terminal-text-secondary">{hp.param}</td>
                   <td className="px-3 py-1.5 text-right text-terminal-accent tabular-nums">
                     {String(hp.value)}
                   </td>
@@ -181,14 +193,14 @@ export function TFTDashboard(props: TFTDashboardProps) {
             <tbody>
               {p.foldMetrics.map((f) => (
                 <tr key={f.fold} className="border-t border-terminal-border/50 hover:bg-terminal-surface/50 transition-colors">
-                  <td className="px-3 py-1.5 text-center text-gray-300 font-semibold">{f.fold}</td>
+                  <td className="px-3 py-1.5 text-center text-terminal-text-secondary font-semibold">{f.fold}</td>
                   <td className="px-3 py-1.5 text-right text-terminal-accent tabular-nums">{f.trainSharpe.toFixed(2)}</td>
                   <td className={cn("px-3 py-1.5 text-right font-semibold tabular-nums", sharpeColor(f.valSharpe))}>
                     {f.valSharpe.toFixed(2)}
                   </td>
-                  <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums">{f.trainLoss.toFixed(4)}</td>
-                  <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums">{f.valLoss.toFixed(4)}</td>
-                  <td className="px-3 py-1.5 text-right text-gray-400 tabular-nums">{f.epochs}</td>
+                  <td className="px-3 py-1.5 text-right text-terminal-muted tabular-nums">{f.trainLoss.toFixed(4)}</td>
+                  <td className="px-3 py-1.5 text-right text-terminal-muted tabular-nums">{f.valLoss.toFixed(4)}</td>
+                  <td className="px-3 py-1.5 text-right text-terminal-muted tabular-nums">{f.epochs}</td>
                 </tr>
               ))}
             </tbody>

@@ -153,7 +153,7 @@ export function TapePanel() {
               placeholder="0"
               className={cn(
                 "w-14 px-1 py-0.5 rounded text-2xs font-mono",
-                "bg-terminal-bg border border-terminal-border text-gray-200",
+                "bg-terminal-bg border border-terminal-border text-terminal-text-secondary",
                 "focus:outline-none focus:border-terminal-accent",
               )}
             />
@@ -207,7 +207,7 @@ export function TapePanel() {
                 <span
                   className={cn(
                     "w-[64px] text-right",
-                    isLarge ? "text-terminal-warning" : "text-gray-300",
+                    isLarge ? "text-terminal-warning" : "text-terminal-text-secondary",
                   )}
                 >
                   {formatSize(trade.size)}

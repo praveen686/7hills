@@ -71,7 +71,7 @@ function TickerChip({
   const changePct = tick?.changePct ?? 0;
   const isUp = changePct >= 0;
   const priceColor = isUp ? "text-terminal-profit" : "text-terminal-loss";
-  const sparkColor = isUp ? "#00d4aa" : "#ff4d6a";
+  const sparkColor = isUp ? "rgb(var(--terminal-profit))" : "rgb(var(--terminal-loss))";
 
   return (
     <button
@@ -86,7 +86,7 @@ function TickerChip({
       `}
     >
       {/* Symbol name */}
-      <span className="text-xs font-semibold text-gray-300 whitespace-nowrap">
+      <span className="text-xs font-semibold text-terminal-text-secondary whitespace-nowrap">
         {symbol}
       </span>
 

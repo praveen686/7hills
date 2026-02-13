@@ -14,6 +14,8 @@ import { selectedSymbolAtom, selectedBarsAtom, barsAtom, type BarData } from "@/
 import { appModeAtom } from "@/stores/mode";
 import { apiFetch } from "@/lib/api";
 import { useTauriStream } from "@/hooks/useTauriStream";
+import { getChartColors, withAlpha } from "@/lib/chartTheme";
+import { themeAtom } from "@/stores/workspace";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,11 +33,11 @@ function toCandlestick(bar: BarData): CandlestickData<Time> {
 }
 
 /** Convert a BarData to a volume histogram point. */
-function toVolume(bar: BarData): HistogramData<Time> {
+function toVolume(bar: BarData, upColor: string, downColor: string): HistogramData<Time> {
   return {
     time: bar.time as Time,
     value: bar.volume,
-    color: bar.close >= bar.open ? "rgba(0,212,170,0.35)" : "rgba(255,77,106,0.35)",
+    color: bar.close >= bar.open ? upColor : downColor,
   };
 }
 
@@ -48,63 +50,68 @@ export function ChartPanel() {
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const volColorsRef = useRef({ up: "", down: "" });
 
   const symbol = useAtomValue(selectedSymbolAtom);
   const bars = useAtomValue(selectedBarsAtom);
   const mode = useAtomValue(appModeAtom);
   const setBars = useSetAtom(barsAtom);
+  const theme = useAtomValue(themeAtom);
 
-  // ---- Create chart on mount ----
+  // ---- Create chart on mount / theme change ----
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const c = getChartColors();
+    volColorsRef.current = { up: withAlpha(c.profit, "59"), down: withAlpha(c.loss, "59") };
+
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#08080d" },
-        textColor: "#6b6b8a",
+        background: { type: ColorType.Solid, color: c.bg },
+        textColor: c.text,
         fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: "#1e1e2e" },
-        horzLines: { color: "#1e1e2e" },
+        vertLines: { color: c.grid },
+        horzLines: { color: c.grid },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
-          color: "rgba(79,142,255,0.4)",
+          color: c.crosshair,
           width: 1,
           style: 2,
-          labelBackgroundColor: "#4f8eff",
+          labelBackgroundColor: c.accent,
         },
         horzLine: {
-          color: "rgba(79,142,255,0.4)",
+          color: c.crosshair,
           width: 1,
           style: 2,
-          labelBackgroundColor: "#4f8eff",
+          labelBackgroundColor: c.accent,
         },
       },
       timeScale: {
-        borderColor: "#1e1e2e",
+        borderColor: c.border,
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 5,
         barSpacing: 8,
       },
       rightPriceScale: {
-        borderColor: "#1e1e2e",
+        borderColor: c.border,
         scaleMargins: { top: 0.1, bottom: 0.25 },
       },
       handleScroll: { vertTouchDrag: false },
     });
 
     const candleSeries = chart.addCandlestickSeries({
-      upColor: "#00d4aa",
-      downColor: "#ff4d6a",
-      borderUpColor: "#00d4aa",
-      borderDownColor: "#ff4d6a",
-      wickUpColor: "#00d4aa",
-      wickDownColor: "#ff4d6a",
+      upColor: c.profit,
+      downColor: c.loss,
+      borderUpColor: c.profit,
+      borderDownColor: c.loss,
+      wickUpColor: c.profit,
+      wickDownColor: c.loss,
     });
 
     const volumeSeries = chart.addHistogramSeries({
@@ -136,7 +143,7 @@ export function ChartPanel() {
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, []);
+  }, [theme]);
 
   // ---- Fetch historical bars from API when symbol changes ----
   useEffect(() => {
@@ -171,7 +178,8 @@ export function ChartPanel() {
     if (bars.length === 0) return;
 
     const candles = bars.map(toCandlestick);
-    const volumes = bars.map(toVolume);
+    const { up, down } = volColorsRef.current;
+    const volumes = bars.map((b) => toVolume(b, up, down));
 
     candleSeriesRef.current.setData(candles);
     volumeSeriesRef.current.setData(volumes);
@@ -184,7 +192,8 @@ export function ChartPanel() {
     (bar: BarData) => {
       if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
       candleSeriesRef.current.update(toCandlestick(bar));
-      volumeSeriesRef.current.update(toVolume(bar));
+      const { up, down } = volColorsRef.current;
+      volumeSeriesRef.current.update(toVolume(bar, up, down));
     },
     [],
   );

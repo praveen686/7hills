@@ -186,6 +186,10 @@ class TrainingPipelineConfig:
     # Phase 5 early stopping patience (0 = disabled)
     phase5_patience: int = 10
 
+    # OOS transaction cost (one-way, in basis points)
+    # India FnO: ~3 bps commission + ~5 bps slippage + ~2 bps STT = ~10 bps
+    oos_cost_bps: float = 10.0
+
     # AMP (Automatic Mixed Precision) — only active on CUDA
     use_amp: bool = True
 
@@ -216,8 +220,11 @@ class TrainingResult:
     n_features_prefiltered: int = 0
     n_features_final: int = 0
     sharpe_oos: float = 0.0
+    sharpe_oos_net: float = 0.0  # net of transaction costs
     total_return_oos: float = 0.0
+    total_return_oos_net: float = 0.0  # net of transaction costs
     max_drawdown_oos: float = 0.0
+    max_drawdown_oos_net: float = 0.0  # net of transaction costs
     elapsed_seconds: float = 0.0
     phase_times: dict[str, float] = field(default_factory=dict)
 
@@ -406,7 +413,7 @@ class TrainingPipeline:
     def _phase1_prefilter(self, state: dict) -> None:
         """Build mega features and apply coverage + correlation filters."""
         from .feature_selection import FeatureSelector, FeatureSelectionConfig
-        from quantlaxmi.models.rl.integration.backbone import MegaFeatureAdapter
+        from quantlaxmi.models.ml.tft.production.mega_adapter import MegaFeatureAdapter
 
         cfg = state["config"]
         result = state["result"]
@@ -892,6 +899,16 @@ class TrainingPipeline:
             tuning_result.best_sharpe, tuning_result.n_trials_completed,
         )
 
+        # Persist best_params to disk so Phase 5 can resume after crash
+        checkpoint_dir = Path(cfg.checkpoint_base_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        phase4_path = checkpoint_dir / "phase4_best_params.pt"
+        try:
+            torch.save({"best_params": tuning_result.best_params}, phase4_path)
+            logger.info("Saved Phase 4 best_params to %s", phase4_path)
+        except Exception as e:
+            logger.warning("Failed to save Phase 4 checkpoint: %s", e)
+
         # Log fANOVA HP importances
         if tuning_result.hp_importances:
             state["hp_importances"] = tuning_result.hp_importances
@@ -938,8 +955,18 @@ class TrainingPipeline:
         n_days, n_assets, n_features = features.shape
         rng = np.random.default_rng(42)
 
-        # Build config from best params or defaults
+        # Build config from best params or defaults (try disk checkpoint if not in memory)
         best_params = state.get("best_params", {})
+        if not best_params:
+            phase4_path = Path(cfg.checkpoint_base_dir) / "phase4_best_params.pt"
+            if phase4_path.exists():
+                try:
+                    saved = torch.load(phase4_path, weights_only=False)
+                    best_params = saved["best_params"]
+                    state["best_params"] = best_params
+                    logger.info("Loaded Phase 4 best_params from disk: %s", best_params)
+                except Exception as e:
+                    logger.warning("Failed to load Phase 4 checkpoint: %s", e)
         if best_params:
             from .hp_tuner import HPTuner
             x_cfg = HPTuner.build_config_from_params(
@@ -971,8 +998,41 @@ class TrainingPipeline:
                 patience=cfg.patience,
             )
 
+        # Pre-compute per-asset rolling vol for cost scaling.
+        # Cost in raw return space = |delta_pos| * cost_bps / 10000.
+        # Since targets are vol-scaled (Y[t] = r[t+1] / vol[t]), we must
+        # vol-scale the cost too: cost_scaled = cost_raw / vol[t].
+        # raw_vol[t, a] = rolling std of raw returns at time t.
+        ret_1d_idx = None
+        for i, name in enumerate(feature_names):
+            if name == "ret_1d":
+                ret_1d_idx = i
+                break
+        raw_vol = np.ones((n_days, n_assets))
+        for a in range(n_assets):
+            if ret_1d_idx is not None:
+                raw_ret = features[:, a, ret_1d_idx]
+            else:
+                # Fallback: find close and compute returns
+                close_idx = None
+                for i, name in enumerate(feature_names):
+                    if "close" in name.lower() and "log" not in name.lower():
+                        close_idx = i
+                        break
+                if close_idx is not None:
+                    close = features[:, a, close_idx]
+                    log_close = np.log(np.where(close > 0, close, np.nan))
+                    raw_ret = np.full(n_days, np.nan)
+                    raw_ret[1:] = log_close[1:] - log_close[:-1]
+                else:
+                    raw_ret = np.full(n_days, np.nan)
+            vol = pd.Series(raw_ret).rolling(20, min_periods=10).std(ddof=1).values
+            raw_vol[:, a] = np.where((vol > 0) & ~np.isnan(vol), vol, 1.0)
+        one_way_cost_frac = cfg.oos_cost_bps / 10_000.0
+
         # Walk-forward with full epoch budget
         all_oos_returns = []
+        all_oos_returns_net = []  # net of transaction costs
         last_model_state = None
         last_norm_means = None
         last_norm_stds = None
@@ -992,6 +1052,7 @@ class TrainingPipeline:
                 completed_folds = partial.get("completed_folds", [])
                 fold_metrics = partial.get("fold_results", [])
                 all_oos_returns = partial.get("all_oos_returns", [])
+                all_oos_returns_net = partial.get("all_oos_returns_net", [])
                 last_model_state = partial.get("model_state")
                 last_norm_means = partial.get("norm_means")
                 last_norm_stds = partial.get("norm_stds")
@@ -1251,8 +1312,10 @@ class TrainingPipeline:
                 best_state = None  # free CPU copy before OOS eval
                 model.to(_DEVICE)
 
-            # OOS evaluation
+            # OOS evaluation (with transaction cost tracking)
             fold_returns = []
+            fold_returns_net = []
+            prev_pos = np.zeros(n_assets)  # reset at each fold start
             model.eval()
             with torch.no_grad():
                 for t in range(test_start, test_end):
@@ -1277,40 +1340,66 @@ class TrainingPipeline:
 
                         pos_val = model.predict_position(tgt_t, ctx_t, tid_t, cid_t).item()
                         pos_val = max(-x_cfg.max_position, min(x_cfg.max_position, pos_val))
-                        fold_returns.append(pos_val * tgt)
+
+                        gross_ret = pos_val * tgt
+                        fold_returns.append(gross_ret)
+
+                        # Transaction cost: |delta_pos| * cost_bps / (10000 * vol)
+                        # Vol-scaling matches target normalization
+                        delta_pos = abs(pos_val - prev_pos[a])
+                        cost_scaled = delta_pos * one_way_cost_frac / raw_vol[t, a]
+                        fold_returns_net.append(gross_ret - cost_scaled)
+                        prev_pos[a] = pos_val
 
             if fold_returns:
                 fold_arr = np.array(fold_returns)
+                fold_arr_net = np.array(fold_returns_net)
                 fold_sharpe = (fold_arr.mean() / max(fold_arr.std(ddof=1), 1e-8)) * math.sqrt(252)
+                fold_sharpe_net = (fold_arr_net.mean() / max(fold_arr_net.std(ddof=1), 1e-8)) * math.sqrt(252)
                 fold_metrics.append({
                     "fold": fold_idx,
                     "sharpe": float(fold_sharpe),
+                    "sharpe_net": float(fold_sharpe_net),
                     "n_predictions": len(fold_returns),
                     "mean_return": float(fold_arr.mean()),
+                    "mean_return_net": float(fold_arr_net.mean()),
+                    "total_cost": float(fold_arr.sum() - fold_arr_net.sum()),
                 })
                 all_oos_returns.extend(fold_returns)
+                all_oos_returns_net.extend(fold_returns_net)
                 logger.info(
-                    "Fold %d OOS: Sharpe=%.3f (%d predictions)",
-                    fold_idx, fold_sharpe, len(fold_returns),
+                    "Fold %d OOS: Sharpe=%.3f (net=%.3f, cost=%.4f) (%d predictions)",
+                    fold_idx, fold_sharpe, fold_sharpe_net,
+                    float(fold_arr.sum() - fold_arr_net.sum()), len(fold_returns),
                 )
 
                 # Log per-fold metrics to W&B
                 if self._wandb_run is not None:
                     try:
                         running_sharpe = 0.0
+                        running_sharpe_net = 0.0
                         if all_oos_returns:
                             oos_so_far = np.array(all_oos_returns)
                             running_sharpe = float(
                                 (oos_so_far.mean() / max(oos_so_far.std(ddof=1), 1e-8))
                                 * math.sqrt(252)
                             )
+                        if all_oos_returns_net:
+                            oos_net_so_far = np.array(all_oos_returns_net)
+                            running_sharpe_net = float(
+                                (oos_net_so_far.mean() / max(oos_net_so_far.std(ddof=1), 1e-8))
+                                * math.sqrt(252)
+                            )
                         self._wandb_run.log({
                             "fold/idx": fold_idx,
                             "fold/sharpe_oos": float(fold_sharpe),
+                            "fold/sharpe_oos_net": float(fold_sharpe_net),
                             "fold/n_predictions": len(fold_returns),
                             "fold/mean_return": float(fold_arr.mean()),
+                            "fold/mean_return_net": float(fold_arr_net.mean()),
                             "fold/best_val_sharpe": float(best_val_sharpe),
                             "running/sharpe_oos": running_sharpe,
+                            "running/sharpe_oos_net": running_sharpe_net,
                             "running/n_returns": len(all_oos_returns),
                         })
                     except Exception:
@@ -1324,6 +1413,7 @@ class TrainingPipeline:
                     'completed_folds': list(range(fold_idx + 1)),
                     'fold_results': fold_metrics,
                     'all_oos_returns': all_oos_returns,
+                    'all_oos_returns_net': all_oos_returns_net,
                     'model_state': last_model_state,
                     'optimizer_state': optimizer.state_dict(),
                     'norm_means': last_norm_means,
@@ -1345,7 +1435,7 @@ class TrainingPipeline:
             start += x_cfg.step_size
             fold_idx += 1
 
-        # Compute overall OOS metrics
+        # Compute overall OOS metrics (gross and net of costs)
         if all_oos_returns:
             oos_arr = np.array(all_oos_returns)
             result.sharpe_oos = float(
@@ -1353,11 +1443,31 @@ class TrainingPipeline:
             )
             result.total_return_oos = float(np.sum(oos_arr))
 
-            # Max drawdown
+            # Max drawdown (gross)
             cum = np.cumsum(oos_arr)
             running_max = np.maximum.accumulate(cum)
             dd = running_max - cum
             result.max_drawdown_oos = float(np.max(dd)) if len(dd) > 0 else 0.0
+
+        if all_oos_returns_net:
+            oos_net_arr = np.array(all_oos_returns_net)
+            result.sharpe_oos_net = float(
+                (oos_net_arr.mean() / max(oos_net_arr.std(ddof=1), 1e-8)) * math.sqrt(252)
+            )
+            result.total_return_oos_net = float(np.sum(oos_net_arr))
+
+            # Max drawdown (net)
+            cum_net = np.cumsum(oos_net_arr)
+            running_max_net = np.maximum.accumulate(cum_net)
+            dd_net = running_max_net - cum_net
+            result.max_drawdown_oos_net = float(np.max(dd_net)) if len(dd_net) > 0 else 0.0
+
+            total_cost = float(np.sum(oos_arr) - np.sum(oos_net_arr)) if all_oos_returns else 0.0
+            logger.info(
+                "Overall OOS: Gross Sharpe=%.3f, Net Sharpe=%.3f (cost_bps=%d, total_cost=%.4f)",
+                result.sharpe_oos, result.sharpe_oos_net,
+                int(cfg.oos_cost_bps), total_cost,
+            )
 
         # Save checkpoint (wrapped to never lose 8+ hours of training)
         if last_model_state is not None:
@@ -1543,9 +1653,12 @@ def main() -> None:
     print(f"{'=' * 60}")
     print(f"  Checkpoint: {result.checkpoint_path}")
     print(f"  Features: {result.n_features_initial} → {result.n_features_final}")
-    print(f"  OOS Sharpe: {result.sharpe_oos:.3f}")
-    print(f"  OOS Return: {result.total_return_oos:.4f}")
-    print(f"  Max DD: {result.max_drawdown_oos:.4f}")
+    print(f"  OOS Sharpe (gross): {result.sharpe_oos:.3f}")
+    print(f"  OOS Sharpe (net):   {result.sharpe_oos_net:.3f}")
+    print(f"  OOS Return (gross): {result.total_return_oos:.4f}")
+    print(f"  OOS Return (net):   {result.total_return_oos_net:.4f}")
+    print(f"  Max DD (gross): {result.max_drawdown_oos:.4f}")
+    print(f"  Max DD (net):   {result.max_drawdown_oos_net:.4f}")
     print(f"  Elapsed: {result.elapsed_seconds:.0f}s")
     for phase, t in result.phase_times.items():
         print(f"    {phase}: {t:.0f}s")

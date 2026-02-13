@@ -551,41 +551,55 @@ _PARSERS: dict[str, Any] = {
 
 
 def _load_all_results() -> list[dict]:
-    """Load and parse all research result .txt files from RESULTS_DIR."""
+    """Load and parse all research result .txt files from RESULTS_DIR.
+
+    When multiple files exist for the same strategy prefix (e.g. dated variants),
+    only the latest file (by reverse-sorted name) is used to avoid duplicates.
+    """
     results: list[dict] = []
     if not RESULTS_DIR.exists():
         logger.warning("RESULTS_DIR does not exist: %s", RESULTS_DIR)
         return results
 
-    for path in sorted(RESULTS_DIR.glob("s*.txt")):
+    # Group files by parser prefix, keeping only the latest (reverse-sorted)
+    used_prefixes: set[str] = set()
+
+    for path in sorted(RESULTS_DIR.glob("s*.txt"), reverse=True):
         stem = path.stem  # e.g. "s1_vrp_rndr_2026-02-07_061632"
-        text = path.read_text()
 
         # Find matching parser by prefix
-        parsed = None
+        matched_prefix = None
         for prefix, parser in _PARSERS.items():
             if stem.startswith(prefix):
-                try:
-                    parsed = parser(text)
-                    parsed["raw_text"] = text
-                    parsed["source_file"] = path.name
-                    # Extract date range from text
-                    dr_m = re.search(
-                        r"(?:date range|Date range):\s*(\S+)\s+to\s+(\S+)",
-                        text, re.IGNORECASE,
-                    )
-                    if dr_m:
-                        parsed["date_range"] = f"{dr_m.group(1)} to {dr_m.group(2)}"
-                    else:
-                        parsed["date_range"] = ""
-                except Exception as exc:
-                    logger.warning("Failed to parse %s: %s", path.name, exc)
+                matched_prefix = prefix
                 break
 
-        if parsed is not None:
-            results.append(parsed)
-        else:
+        if matched_prefix is None:
             logger.debug("No parser found for %s", path.name)
+            continue
+
+        # Skip if we already parsed a (newer) file for this prefix
+        if matched_prefix in used_prefixes:
+            continue
+        used_prefixes.add(matched_prefix)
+
+        text = path.read_text()
+        try:
+            parsed = _PARSERS[matched_prefix](text)
+            parsed["raw_text"] = text
+            parsed["source_file"] = path.name
+            # Extract date range from text
+            dr_m = re.search(
+                r"(?:date range|Date range):\s*(\S+)\s+to\s+(\S+)",
+                text, re.IGNORECASE,
+            )
+            if dr_m:
+                parsed["date_range"] = f"{dr_m.group(1)} to {dr_m.group(2)}"
+            else:
+                parsed["date_range"] = ""
+            results.append(parsed)
+        except Exception as exc:
+            logger.warning("Failed to parse %s: %s", path.name, exc)
 
     return results
 
@@ -840,4 +854,107 @@ async def get_scorecard(request: Request) -> ScorecardOut:
     return ScorecardOut(
         markdown=path.read_text(),
         source_file=path.name,
+    )
+
+
+class TFTStatusOut(BaseModel):
+    status: str  # "running" | "complete" | "idle" | "error"
+    total_folds: int
+    completed_folds: int
+    phase: str
+    best_hyperparams: list[dict]
+    fold_metrics: list[dict]
+
+
+@router.get("/tft-status", response_model=TFTStatusOut)
+async def get_tft_status(request: Request) -> TFTStatusOut:
+    """Return TFT training pipeline status from checkpoint files."""
+    import json as _json
+
+    checkpoints_dir = RESULTS_DIR.parent.parent / "checkpoints"
+
+    status = "idle"
+    total_folds = 0
+    completed_folds = 0
+    phase = "Idle"
+    best_hyperparams: list[dict] = []
+    fold_metrics: list[dict] = []
+
+    if not checkpoints_dir.exists():
+        return TFTStatusOut(
+            status=status, total_folds=total_folds,
+            completed_folds=completed_folds, phase=phase,
+            best_hyperparams=best_hyperparams, fold_metrics=fold_metrics,
+        )
+
+    # Detect phase from checkpoint files
+    if (checkpoints_dir / "phase5_production.pt").exists():
+        phase = "Production Training Complete"
+        status = "complete"
+    elif list(checkpoints_dir.glob("phase5_fold_*.pt")):
+        phase = "Production Training"
+        status = "running"
+        fold_files = sorted(checkpoints_dir.glob("phase5_fold_*.pt"))
+        completed_folds = len(fold_files)
+    elif (checkpoints_dir / "phase4_best_params.json").exists():
+        phase = "Hyperparameter Search Complete"
+        status = "complete"
+    elif (checkpoints_dir / "phase3_selected_features.json").exists():
+        phase = "Feature Pruning Complete"
+        status = "complete"
+    elif (checkpoints_dir / "phase2_vsn_weights.pt").exists():
+        phase = "VSN Weight Analysis Complete"
+        status = "complete"
+    elif (checkpoints_dir / "phase1_features.pt").exists():
+        phase = "Feature Selection Complete"
+        status = "complete"
+
+    # Read metadata
+    meta_path = checkpoints_dir / "metadata.json"
+    if meta_path.exists():
+        try:
+            meta = _json.loads(meta_path.read_text())
+            total_folds = meta.get("total_folds", 16)
+            if "best_params" in meta:
+                bp = meta["best_params"]
+                best_hyperparams = [
+                    {"param": k, "value": v} for k, v in bp.items()
+                ]
+        except Exception:
+            pass
+
+    # Read fold metrics
+    for p in sorted(checkpoints_dir.glob("fold_*_metrics.json")):
+        try:
+            fm = _json.loads(p.read_text())
+            fold_metrics.append({
+                "fold": fm.get("fold", 0),
+                "trainSharpe": fm.get("train_sharpe", 0),
+                "valSharpe": fm.get("val_sharpe", 0),
+                "trainLoss": fm.get("train_loss", 0),
+                "valLoss": fm.get("val_loss", 0),
+                "epochs": fm.get("epochs", 0),
+            })
+        except Exception:
+            pass
+
+    # Also try phase4 optuna results
+    p4_path = checkpoints_dir / "phase4_best_params.json"
+    if p4_path.exists() and not best_hyperparams:
+        try:
+            p4 = _json.loads(p4_path.read_text())
+            best_hyperparams = [
+                {"param": k, "value": v} for k, v in p4.items()
+                if k != "trial_number"
+            ]
+        except Exception:
+            pass
+
+    if total_folds == 0:
+        total_folds = max(len(fold_metrics), 16)
+
+    return TFTStatusOut(
+        status=status, total_folds=total_folds,
+        completed_folds=completed_folds, phase=phase,
+        best_hyperparams=best_hyperparams, fold_metrics=fold_metrics,
     )

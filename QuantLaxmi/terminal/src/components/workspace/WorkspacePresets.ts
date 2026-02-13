@@ -33,6 +33,7 @@ export const PANEL_TITLES: Record<string, string> = {
   riskDashboard: "Risk Dashboard",
   signals: "Signals",
   orders: "Orders",
+  modelPredictions: "Model Predictions",
 };
 
 // ---------------------------------------------------------------------------
@@ -62,7 +63,7 @@ export const WORKSPACE_PRESETS: Record<WorkspaceId, LayoutItem[]> = {
     { i: "strategy", x: 0, y: 0, w: 4, h: 5, minW: 3, minH: 3 },
     { i: "equityCurve", x: 4, y: 0, w: 8, h: 5, minW: 4, minH: 3 },
     { i: "featureImportance", x: 0, y: 5, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: "walkForward", x: 4, y: 5, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: "modelPredictions", x: 4, y: 5, w: 4, h: 5, minW: 3, minH: 3 },
     { i: "risk", x: 8, y: 5, w: 4, h: 5, minW: 3, minH: 3 },
   ],
 

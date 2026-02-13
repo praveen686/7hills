@@ -744,5 +744,9 @@ class HPTuner:
             if param_key in params:
                 kwargs[cfg_key] = params[param_key]
 
+        # Ensure ctx_len matches seq_len (context windows must be same length as target)
+        if "seq_len" in kwargs and "ctx_len" not in kwargs:
+            kwargs["ctx_len"] = kwargs["seq_len"]
+
         kwargs.update(overrides)
         return XTrendConfig(**kwargs)

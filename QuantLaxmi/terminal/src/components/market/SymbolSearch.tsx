@@ -125,12 +125,12 @@ export function SymbolSearch() {
           <Search size={16} className="text-terminal-muted flex-shrink-0" />
           <Command.Input
             placeholder="Search symbols..."
-            className="flex-1 h-11 bg-transparent text-sm text-gray-100 placeholder:text-terminal-muted outline-none"
+            className="flex-1 h-11 bg-transparent text-sm text-terminal-text placeholder:text-terminal-muted outline-none"
             autoFocus
           />
           <button
             onClick={close}
-            className="p-1 rounded hover:bg-terminal-border text-terminal-muted hover:text-gray-300 transition-colors"
+            className="p-1 rounded hover:bg-terminal-border text-terminal-muted hover:text-terminal-text-secondary transition-colors"
             aria-label="Close symbol search"
           >
             <X size={14} />
@@ -229,14 +229,14 @@ function SymbolItem({
       value={`${entry.symbol} ${entry.name}`}
       onSelect={() => onSelect(entry.symbol)}
       className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer
-                 data-[selected=true]:bg-terminal-panel data-[selected=true]:text-gray-100
+                 data-[selected=true]:bg-terminal-panel data-[selected=true]:text-terminal-text
                  hover:bg-terminal-panel/60 transition-colors"
     >
       <TypeIcon type={entry.type} />
-      <span className="font-semibold text-gray-200 w-28 truncate font-mono text-xs">
+      <span className="font-semibold text-terminal-text-secondary w-28 truncate font-mono text-xs">
         {entry.symbol}
       </span>
-      <span className="flex-1 text-xs text-gray-400 truncate">{entry.name}</span>
+      <span className="flex-1 text-xs text-terminal-muted truncate">{entry.name}</span>
       <ExchangeBadge exchange={entry.exchange} />
       <span className="text-2xs text-terminal-muted uppercase w-14 text-right">
         {entry.type}

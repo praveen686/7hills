@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createChart,
   type IChartApi,
@@ -8,6 +8,10 @@ import {
   ColorType,
   LineStyle,
 } from "lightweight-charts";
+import { useAtomValue } from "jotai";
+import { themeAtom } from "@/stores/workspace";
+import { getChartColors, withAlpha } from "@/lib/chartTheme";
+import { apiFetch } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,24 +31,6 @@ interface DrawdownChartProps {
   height?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Default demo data — last 30 days
-// ---------------------------------------------------------------------------
-
-function generateDemoData(): DrawdownPoint[] {
-  const points: DrawdownPoint[] = [];
-  const now = Date.now();
-  let dd = 0;
-  for (let i = 29; i >= 0; i--) {
-    const date = new Date(now - i * 86400000);
-    const dateStr = date.toISOString().slice(0, 10);
-    dd += (Math.random() - 0.45) * 0.4;
-    dd = Math.min(dd, 0);
-    dd = Math.max(dd, -4.5);
-    points.push({ time: dateStr, value: dd });
-  }
-  return points;
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -58,46 +44,71 @@ export function DrawdownChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
+  const theme = useAtomValue(themeAtom);
 
-  const points = data ?? generateDemoData();
+  const [fetchedData, setFetchedData] = useState<DrawdownPoint[]>([]);
 
-  // Create chart once
+  useEffect(() => {
+    if (data) return;
+    let active = true;
+    const fetchDD = () => {
+      apiFetch<{
+        drawdown_history: Array<{ date: string; drawdown_pct: number }>;
+      }>("/api/portfolio").then((portfolio) => {
+        if (!active) return;
+        setFetchedData(
+          (portfolio.drawdown_history ?? []).map((p) => ({
+            time: p.date,
+            value: -p.drawdown_pct,
+          }))
+        );
+      }).catch(() => {});
+    };
+    fetchDD();
+    const interval = setInterval(fetchDD, 10000);
+    return () => { active = false; clearInterval(interval); };
+  }, [data]);
+
+  const points = data ?? fetchedData;
+
+  // Create chart once (recreate on theme change)
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const c = getChartColors();
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height,
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#6b6b8a",
+        textColor: c.text,
         fontSize: 10,
         fontFamily: "JetBrains Mono, monospace",
       },
       grid: {
-        vertLines: { color: "#1e1e2e" },
-        horzLines: { color: "#1e1e2e" },
+        vertLines: { color: c.grid },
+        horzLines: { color: c.grid },
       },
       rightPriceScale: {
-        borderColor: "#1e1e2e",
+        borderColor: c.border,
         scaleMargins: { top: 0.05, bottom: 0.05 },
         invertScale: true,
       },
       timeScale: {
-        borderColor: "#1e1e2e",
+        borderColor: c.border,
         timeVisible: false,
       },
       crosshair: {
-        horzLine: { color: "#4f8eff44", style: LineStyle.Dashed },
-        vertLine: { color: "#4f8eff44", style: LineStyle.Dashed },
+        horzLine: { color: c.crosshair, style: LineStyle.Dashed },
+        vertLine: { color: c.crosshair, style: LineStyle.Dashed },
       },
     });
 
     const series = chart.addAreaSeries({
-      lineColor: "#ff4d6a",
+      lineColor: c.loss,
       lineWidth: 2,
-      topColor: "rgba(255, 77, 106, 0.4)",
-      bottomColor: "rgba(255, 77, 106, 0.02)",
+      topColor: withAlpha(c.loss, "66"),
+      bottomColor: withAlpha(c.loss, "05"),
       priceFormat: {
         type: "custom",
         formatter: (price: number) => `${price.toFixed(2)}%`,
@@ -121,40 +132,43 @@ export function DrawdownChart({
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [height]);
+  }, [height, theme]);
 
   // Update data
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current) return;
 
+    const c = getChartColors();
     const mapped: AreaData<Time>[] = points.map((p) => ({
       time: p.time as Time,
       value: p.value,
     }));
     seriesRef.current.setData(mapped);
 
-    // Max DD annotation via price line
-    const maxDD = Math.min(...points.map((p) => p.value));
-    seriesRef.current.createPriceLine({
-      price: maxDD,
-      color: "#ffb84d",
-      lineWidth: 1,
-      lineStyle: LineStyle.Dashed,
-      axisLabelVisible: true,
-      title: `Max DD ${maxDD.toFixed(2)}%`,
-    });
+    if (points.length > 0) {
+      // Max DD annotation via price line
+      const maxDD = Math.min(...points.map((p) => p.value));
+      seriesRef.current.createPriceLine({
+        price: maxDD,
+        color: c.warning,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `Max DD ${maxDD.toFixed(2)}%`,
+      });
 
-    // Limit line
-    seriesRef.current.createPriceLine({
-      price: limitPct,
-      color: "#ff4d6a",
-      lineWidth: 1,
-      lineStyle: LineStyle.Dotted,
-      axisLabelVisible: true,
-      title: `Limit ${limitPct}%`,
-    });
+      // Limit line
+      seriesRef.current.createPriceLine({
+        price: limitPct,
+        color: c.loss,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        axisLabelVisible: true,
+        title: `Limit ${limitPct}%`,
+      });
 
-    chartRef.current.timeScale().fitContent();
+      chartRef.current.timeScale().fitContent();
+    }
   }, [points, limitPct]);
 
   return (

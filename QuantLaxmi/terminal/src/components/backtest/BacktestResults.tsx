@@ -6,7 +6,11 @@ import {
   ColorType,
   LineStyle,
 } from "lightweight-charts";
+import { useAtomValue } from "jotai";
+import { themeAtom } from "@/stores/workspace";
+import { getChartColors, withAlpha } from "@/lib/chartTheme";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,69 +66,6 @@ interface BacktestResultsProps {
 // Demo data
 // ---------------------------------------------------------------------------
 
-function generateDemo(): BacktestResultData {
-  const equity: EquityPoint[] = [];
-  const drawdown: DrawdownPoint[] = [];
-  const now = Date.now();
-  let eq = 10000000;
-  let peak = eq;
-
-  for (let i = 365; i >= 0; i--) {
-    const d = new Date(now - i * 86400000);
-    const dateStr = d.toISOString().slice(0, 10);
-    eq += (Math.random() - 0.42) * 18000;
-    eq = Math.max(eq, 9200000);
-    peak = Math.max(peak, eq);
-    const dd = ((eq - peak) / peak) * 100;
-    equity.push({ time: dateStr, value: eq });
-    drawdown.push({ time: dateStr, value: dd });
-  }
-
-  const monthly: MonthlyReturn[] = [];
-  for (let y = 2025; y <= 2026; y++) {
-    const maxM = y === 2026 ? 2 : 12;
-    for (let m = 1; m <= maxM; m++) {
-      monthly.push({ year: y, month: m, returnPct: (Math.random() - 0.35) * 3 });
-    }
-  }
-
-  const trades: TradeRow[] = [];
-  const symbols = ["NIFTY", "BANKNIFTY"];
-  const sides: ("BUY" | "SELL")[] = ["BUY", "SELL"];
-  for (let i = 0; i < 20; i++) {
-    const sym = symbols[i % 2];
-    const side = sides[Math.floor(Math.random() * 2)];
-    const entry = sym === "NIFTY" ? 23000 + Math.random() * 500 : 49500 + Math.random() * 1000;
-    const pnl = (Math.random() - 0.4) * 15000;
-    trades.push({
-      id: `bt-${i}`,
-      timestamp: new Date(now - (i + 1) * 3 * 86400000).toISOString().slice(0, 16).replace("T", " "),
-      symbol: sym,
-      side,
-      quantity: sym === "NIFTY" ? 50 : 25,
-      entryPrice: Math.round(entry * 100) / 100,
-      exitPrice: Math.round((entry + pnl / (sym === "NIFTY" ? 50 : 25)) * 100) / 100,
-      pnl: Math.round(pnl),
-      returnPct: Math.round((pnl / 10000000) * 10000) / 100,
-    });
-  }
-
-  return {
-    totalReturn: 6.09,
-    sharpe: 1.87,
-    sortino: 2.64,
-    maxDD: 2.05,
-    winRate: 0.64,
-    profitFactor: 1.78,
-    totalTrades: 93,
-    equityCurve: equity,
-    drawdownCurve: drawdown,
-    monthlyReturns: monthly,
-    trades,
-  };
-}
-
-const DEMO = generateDemo();
 
 // ---------------------------------------------------------------------------
 // Metric pill
@@ -134,7 +75,7 @@ function MetricCard({ label, value, color }: { label: string; value: string; col
   return (
     <div className="flex flex-col items-center gap-0.5 rounded bg-terminal-surface px-3 py-2 border border-terminal-border min-w-[80px]">
       <span className="text-2xs text-terminal-muted uppercase tracking-wider">{label}</span>
-      <span className={cn("font-mono text-sm font-bold", color ?? "text-gray-100")}>{value}</span>
+      <span className={cn("font-mono text-sm font-bold", color ?? "text-terminal-text")}>{value}</span>
     </div>
   );
 }
@@ -143,7 +84,7 @@ function MetricCard({ label, value, color }: { label: string; value: string; col
 // Charts
 // ---------------------------------------------------------------------------
 
-function EquityAndDrawdownChart({ equity, drawdown }: { equity: EquityPoint[]; drawdown: DrawdownPoint[] }) {
+function EquityAndDrawdownChart({ equity, drawdown, theme }: { equity: EquityPoint[]; drawdown: DrawdownPoint[]; theme: string }) {
   const eqRef = useRef<HTMLDivElement>(null);
   const ddRef = useRef<HTMLDivElement>(null);
   const chartsRef = useRef<IChartApi[]>([]);
@@ -151,29 +92,30 @@ function EquityAndDrawdownChart({ equity, drawdown }: { equity: EquityPoint[]; d
   useEffect(() => {
     if (!eqRef.current || !ddRef.current) return;
 
+    const c = getChartColors();
     const opts = {
       width: eqRef.current.clientWidth,
       layout: {
         background: { type: ColorType.Solid as const, color: "transparent" },
-        textColor: "#6b6b8a",
+        textColor: c.text,
         fontSize: 10,
         fontFamily: "JetBrains Mono, monospace",
       },
-      grid: { vertLines: { color: "#1e1e2e" }, horzLines: { color: "#1e1e2e" } },
-      rightPriceScale: { borderColor: "#1e1e2e" },
-      timeScale: { borderColor: "#1e1e2e", timeVisible: false },
+      grid: { vertLines: { color: c.grid }, horzLines: { color: c.grid } },
+      rightPriceScale: { borderColor: c.border },
+      timeScale: { borderColor: c.border, timeVisible: false },
       crosshair: {
-        horzLine: { color: "#4f8eff44", style: LineStyle.Dashed },
-        vertLine: { color: "#4f8eff44", style: LineStyle.Dashed },
+        horzLine: { color: c.crosshair, style: LineStyle.Dashed },
+        vertLine: { color: c.crosshair, style: LineStyle.Dashed },
       },
     };
 
     const eqChart = createChart(eqRef.current, { ...opts, height: 200 });
     const eqSeries = eqChart.addAreaSeries({
-      lineColor: "#4f8eff",
+      lineColor: c.accent,
       lineWidth: 2,
-      topColor: "rgba(79,142,255,0.25)",
-      bottomColor: "rgba(79,142,255,0.01)",
+      topColor: withAlpha(c.accent, "40"),
+      bottomColor: withAlpha(c.accent, "03"),
       priceFormat: { type: "custom", formatter: (p: number) => `₹${(p / 100000).toFixed(1)}L` },
     });
     eqSeries.setData(equity.map((p) => ({ time: p.time as Time, value: p.value })));
@@ -181,10 +123,10 @@ function EquityAndDrawdownChart({ equity, drawdown }: { equity: EquityPoint[]; d
 
     const ddChart = createChart(ddRef.current, { ...opts, height: 100 });
     const ddSeries = ddChart.addAreaSeries({
-      lineColor: "#ff4d6a",
+      lineColor: c.loss,
       lineWidth: 2,
-      topColor: "rgba(255,77,106,0.3)",
-      bottomColor: "rgba(255,77,106,0.02)",
+      topColor: withAlpha(c.loss, "4D"),
+      bottomColor: withAlpha(c.loss, "05"),
       invertFilledArea: true,
       priceFormat: { type: "custom", formatter: (p: number) => `${p.toFixed(2)}%` },
     });
@@ -215,7 +157,7 @@ function EquityAndDrawdownChart({ equity, drawdown }: { equity: EquityPoint[]; d
       eqChart.remove();
       ddChart.remove();
     };
-  }, [equity, drawdown]);
+  }, [equity, drawdown, theme]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -269,7 +211,7 @@ function MonthlyHeatmap({ returns }: { returns: MonthlyReturn[] }) {
               const ytd = yearReturns.reduce((s, r) => s + r.returnPct, 0);
               return (
                 <tr key={year}>
-                  <td className="px-2 py-1.5 text-gray-300 font-semibold border-b border-terminal-border">{year}</td>
+                  <td className="px-2 py-1.5 text-terminal-text-secondary font-semibold border-b border-terminal-border">{year}</td>
                   {Array.from({ length: 12 }, (_, i) => {
                     const ret = getReturn(year, i + 1);
                     return (
@@ -344,25 +286,25 @@ function TradeList({ trades }: { trades: TradeRow[] }) {
         <table className="w-full text-xs font-mono border-collapse">
           <thead className="sticky top-0 z-10">
             <tr className="bg-terminal-surface text-terminal-muted">
-              <th className="px-3 py-1.5 text-left cursor-pointer hover:text-gray-200" onClick={() => handleSort("timestamp")}>Time{sortIcon("timestamp")}</th>
-              <th className="px-3 py-1.5 text-left cursor-pointer hover:text-gray-200" onClick={() => handleSort("symbol")}>Symbol{sortIcon("symbol")}</th>
+              <th className="px-3 py-1.5 text-left cursor-pointer hover:text-terminal-text" onClick={() => handleSort("timestamp")}>Time{sortIcon("timestamp")}</th>
+              <th className="px-3 py-1.5 text-left cursor-pointer hover:text-terminal-text" onClick={() => handleSort("symbol")}>Symbol{sortIcon("symbol")}</th>
               <th className="px-3 py-1.5 text-left">Side</th>
               <th className="px-3 py-1.5 text-right">Qty</th>
               <th className="px-3 py-1.5 text-right">Entry</th>
               <th className="px-3 py-1.5 text-right">Exit</th>
-              <th className="px-3 py-1.5 text-right cursor-pointer hover:text-gray-200" onClick={() => handleSort("pnl")}>P&L{sortIcon("pnl")}</th>
-              <th className="px-3 py-1.5 text-right cursor-pointer hover:text-gray-200" onClick={() => handleSort("returnPct")}>Ret%{sortIcon("returnPct")}</th>
+              <th className="px-3 py-1.5 text-right cursor-pointer hover:text-terminal-text" onClick={() => handleSort("pnl")}>P&L{sortIcon("pnl")}</th>
+              <th className="px-3 py-1.5 text-right cursor-pointer hover:text-terminal-text" onClick={() => handleSort("returnPct")}>Ret%{sortIcon("returnPct")}</th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((t) => (
               <tr key={t.id} className="border-t border-terminal-border hover:bg-terminal-surface/50">
-                <td className="px-3 py-1 text-gray-400">{t.timestamp}</td>
-                <td className="px-3 py-1 text-gray-200">{t.symbol}</td>
+                <td className="px-3 py-1 text-terminal-muted">{t.timestamp}</td>
+                <td className="px-3 py-1 text-terminal-text">{t.symbol}</td>
                 <td className={cn("px-3 py-1", t.side === "BUY" ? "text-terminal-profit" : "text-terminal-loss")}>{t.side}</td>
-                <td className="px-3 py-1 text-right text-gray-200">{t.quantity}</td>
-                <td className="px-3 py-1 text-right text-gray-300">{t.entryPrice.toLocaleString("en-IN")}</td>
-                <td className="px-3 py-1 text-right text-gray-300">{t.exitPrice.toLocaleString("en-IN")}</td>
+                <td className="px-3 py-1 text-right text-terminal-text">{t.quantity}</td>
+                <td className="px-3 py-1 text-right text-terminal-text-secondary">{t.entryPrice.toLocaleString("en-IN")}</td>
+                <td className="px-3 py-1 text-right text-terminal-text-secondary">{t.exitPrice.toLocaleString("en-IN")}</td>
                 <td className={cn("px-3 py-1 text-right font-semibold", t.pnl >= 0 ? "text-terminal-profit" : "text-terminal-loss")}>
                   {t.pnl >= 0 ? "+" : ""}{t.pnl.toLocaleString("en-IN")}
                 </td>
@@ -382,12 +324,117 @@ function TradeList({ trades }: { trades: TradeRow[] }) {
 // Main component
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Research results summary (when no live backtest data)
+// ---------------------------------------------------------------------------
+
+interface ResearchStrategy {
+  strategy_id: string;
+  name: string;
+  sharpe: number;
+  return_pct: number;
+  max_dd: number;
+  win_rate: number;
+  n_closed: number;
+  status: string;
+}
+
+function ResearchResultsSummary() {
+  const [strategies, setStrategies] = useState<ResearchStrategy[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch<{ strategies: ResearchStrategy[] }>("/api/strategies")
+      .then((res) => {
+        const sorted = [...res.strategies]
+          .filter((s) => s.sharpe !== 0 || s.n_closed > 0)
+          .sort((a, b) => b.sharpe - a.sharpe);
+        setStrategies(sorted);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center flex-1 text-terminal-muted text-xs font-mono animate-pulse">
+        Loading research results...
+      </div>
+    );
+  }
+
+  if (strategies.length === 0) {
+    return (
+      <div className="flex items-center justify-center flex-1 text-terminal-muted text-xs font-mono">
+        Run a backtest to see results
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 flex-1 overflow-y-auto">
+      <p className="text-2xs text-terminal-muted">
+        Research backtest results from all strategies. Run a new backtest for detailed equity curves.
+      </p>
+      <div className="overflow-x-auto rounded border border-terminal-border">
+        <table className="w-full text-xs font-mono border-collapse">
+          <thead>
+            <tr className="bg-terminal-surface text-terminal-muted">
+              <th className="px-2 py-1.5 text-left border-b border-terminal-border">Strategy</th>
+              <th className="px-2 py-1.5 text-right border-b border-terminal-border">Sharpe</th>
+              <th className="px-2 py-1.5 text-right border-b border-terminal-border">Return</th>
+              <th className="px-2 py-1.5 text-right border-b border-terminal-border">Max DD</th>
+              <th className="px-2 py-1.5 text-right border-b border-terminal-border">Win%</th>
+              <th className="px-2 py-1.5 text-right border-b border-terminal-border">Trades</th>
+            </tr>
+          </thead>
+          <tbody>
+            {strategies.map((s) => (
+              <tr key={s.strategy_id} className="border-t border-terminal-border/50 hover:bg-terminal-surface/50">
+                <td className="px-2 py-1.5 text-terminal-text font-medium">{s.name}</td>
+                <td className={cn("px-2 py-1.5 text-right tabular-nums font-semibold", s.sharpe >= 1.5 ? "text-terminal-profit" : s.sharpe >= 0 ? "text-terminal-warning" : "text-terminal-loss")}>
+                  {s.sharpe.toFixed(2)}
+                </td>
+                <td className={cn("px-2 py-1.5 text-right tabular-nums", s.return_pct >= 0 ? "text-terminal-profit" : "text-terminal-loss")}>
+                  {s.return_pct >= 0 ? "+" : ""}{s.return_pct.toFixed(2)}%
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-terminal-loss">
+                  {s.max_dd.toFixed(2)}%
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-terminal-text-secondary">
+                  {s.win_rate.toFixed(0)}%
+                </td>
+                <td className="px-2 py-1.5 text-right tabular-nums text-terminal-muted">
+                  {s.n_closed}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function BacktestResults({ data }: BacktestResultsProps) {
-  const result = data ?? DEMO;
+  const theme = useAtomValue(themeAtom);
+
+  if (!data) {
+    return (
+      <div className="flex flex-col gap-4 p-4 h-full">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
+          Backtest Results
+        </h2>
+        <ResearchResultsSummary />
+      </div>
+    );
+  }
+
+  const result = data;
 
   return (
     <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto">
-      <h2 className="text-sm font-bold uppercase tracking-widest text-gray-100">
+      <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
         Backtest Results
       </h2>
 
@@ -402,7 +449,7 @@ export function BacktestResults({ data }: BacktestResultsProps) {
         <MetricCard label="Trades" value={String(result.totalTrades)} />
       </div>
 
-      <EquityAndDrawdownChart equity={result.equityCurve} drawdown={result.drawdownCurve} />
+      <EquityAndDrawdownChart equity={result.equityCurve} drawdown={result.drawdownCurve} theme={theme} />
       <MonthlyHeatmap returns={result.monthlyReturns} />
       <TradeList trades={result.trades} />
     </div>

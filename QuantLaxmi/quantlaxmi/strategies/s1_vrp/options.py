@@ -578,16 +578,26 @@ def run_multi_index_options_backtest(
     phys_window: int = DEFAULT_PHYS_WINDOW,
     short_offset: float = SHORT_OFFSET,
     long_offset: float = LONG_OFFSET,
+    progress_cb=None,
 ) -> dict[str, SpreadBacktestResult]:
     """Run density-options backtest for multiple indices."""
     if symbols is None:
         symbols = ["BANKNIFTY", "MIDCPNIFTY", "FINNIFTY"]
 
     results: dict[str, SpreadBacktestResult] = {}
+    n_syms = len(symbols)
 
-    for sym in symbols:
+    for si, sym in enumerate(symbols):
         print(f"\n  {sym}: building density series...", end="", flush=True)
-        series = build_density_series(store, start, end, sym, phys_window)
+
+        def _sym_progress(day_pct: int) -> None:
+            """Map per-day pct within this symbol's slice of overall 0-85%."""
+            if progress_cb:
+                sym_start = int(85 * si / n_syms)
+                sym_end = int(85 * (si + 1) / n_syms)
+                progress_cb(sym_start + int(day_pct * (sym_end - sym_start) / 100))
+
+        series = build_density_series(store, start, end, sym, phys_window, progress_cb=_sym_progress)
         print(f" {len(series)} days", end="", flush=True)
 
         if len(series) < lookback + 10:

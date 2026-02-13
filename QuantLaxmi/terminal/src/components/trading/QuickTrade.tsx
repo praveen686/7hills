@@ -141,7 +141,7 @@ export function QuickTrade() {
           onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
           className={cn(
             "w-16 px-1.5 py-1 rounded text-xs font-mono tabular-nums text-center",
-            "bg-terminal-bg border border-terminal-border text-gray-100",
+            "bg-terminal-bg border border-terminal-border text-terminal-text",
             "focus:outline-none focus:border-terminal-accent",
           )}
           onKeyDown={(e) => {

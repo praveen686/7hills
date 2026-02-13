@@ -162,60 +162,116 @@ _INDEX_NAMES = {
 async def ws_ticks_generic(websocket: WebSocket) -> None:
     """Stream market summary ticks for all tracked instruments.
 
-    Pushes latest close prices for NIFTY, BANKNIFTY, etc. every 2s.
-    Used by the terminal TickerBar and ChartPanel components.
+    In live mode: subscribes to EventBus TICK events for real-time data.
+    In paper mode: pushes latest close prices from DuckDB every 2s.
     """
     channel = "ticks"
     await manager.connect(channel, websocket)
 
     try:
-        while True:
-            ticks = []
-            try:
-                svc = websocket.app.state.market_data_service
-                store = svc.store
-                for sym, index_name in _INDEX_NAMES.items():
-                    try:
-                        df = store.sql(
-                            'SELECT "Closing Index Value", "Open Index Value", '
-                            '"High Index Value", "Low Index Value", "Index Date" '
-                            'FROM nse_index_close '
-                            'WHERE LOWER("Index Name") = LOWER(?) '
-                            'ORDER BY "Index Date" DESC LIMIT 2',
-                            [index_name],
-                        )
-                        if not df.empty:
-                            row = df.iloc[0]
-                            close = float(row.iloc[0])
-                            open_ = float(row.iloc[1])
-                            high = float(row.iloc[2])
-                            low = float(row.iloc[3])
-                            prev_close = float(df.iloc[1, 0]) if len(df) > 1 else close
-                            change = close - prev_close
-                            change_pct = (change / prev_close * 100) if prev_close else 0
-                            ticks.append({
-                                "symbol": sym,
-                                "ltp": close,
-                                "open": open_,
-                                "high": high,
-                                "low": low,
-                                "close": close,
-                                "change": round(change, 2),
-                                "change_pct": round(change_pct, 2),
-                                "volume": 0,
-                            })
-                    except Exception as exc:
-                        logger.debug("Tick fetch failed for %s: %s", sym, exc)
-            except Exception as exc:
-                logger.debug("WS ticks generic error: %s", exc)
+        # Check if live engine is running
+        live_engine = getattr(websocket.app.state, "live_engine", None)
+        event_bus = getattr(websocket.app.state, "event_bus", None)
 
-            payload = {
-                "type": "tick_update",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "ticks": ticks,
-            }
-            await websocket.send_json(payload)
-            await asyncio.sleep(2)
+        if event_bus and live_engine and live_engine.running:
+            # LIVE MODE: Subscribe to EventBus TICK events
+            from quantlaxmi.engine.live.event_bus import EventType
+            tick_queue = event_bus.subscribe(EventType.TICK, max_size=256)
+
+            # Also keep a latest-tick cache per symbol for periodic pushes
+            latest_ticks: dict[str, dict] = {}
+
+            try:
+                while True:
+                    # Drain tick events (non-blocking batch)
+                    batch_count = 0
+                    while batch_count < 50:
+                        try:
+                            event = await asyncio.wait_for(tick_queue.get(), timeout=0.5)
+                            data = event.data
+                            sym = data.get("symbol", "")
+                            if sym:
+                                latest_ticks[sym] = {
+                                    "symbol": sym,
+                                    "ltp": data.get("ltp", data.get("last_price", 0)),
+                                    "open": data.get("open", 0),
+                                    "high": data.get("high", 0),
+                                    "low": data.get("low", 0),
+                                    "close": data.get("ltp", data.get("last_price", 0)),
+                                    "change": data.get("change", 0),
+                                    "change_pct": data.get("change_pct", 0),
+                                    "volume": data.get("volume", 0),
+                                    "oi": data.get("oi", 0),
+                                    "vpin": data.get("vpin", 0),
+                                    "entropy": data.get("entropy", 0),
+                                }
+                            batch_count += 1
+                        except asyncio.TimeoutError:
+                            break
+
+                    # Push latest ticks to client
+                    if latest_ticks:
+                        payload = {
+                            "type": "tick_update",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "ticks": list(latest_ticks.values()),
+                            "live": True,
+                        }
+                        await websocket.send_json(payload)
+
+                    await asyncio.sleep(1)
+            finally:
+                event_bus.unsubscribe(EventType.TICK, tick_queue)
+        else:
+            # PAPER MODE: Read from DuckDB
+            while True:
+                ticks = []
+                try:
+                    svc = websocket.app.state.market_data_service
+                    store = svc.store
+                    for sym, index_name in _INDEX_NAMES.items():
+                        try:
+                            df = store.sql(
+                                'SELECT "Closing Index Value", "Open Index Value", '
+                                '"High Index Value", "Low Index Value", "Index Date" '
+                                'FROM nse_index_close '
+                                'WHERE LOWER("Index Name") = LOWER(?) '
+                                'ORDER BY "Index Date" DESC LIMIT 2',
+                                [index_name],
+                            )
+                            if not df.empty:
+                                row = df.iloc[0]
+                                close = float(row.iloc[0])
+                                open_ = float(row.iloc[1])
+                                high = float(row.iloc[2])
+                                low = float(row.iloc[3])
+                                prev_close = float(df.iloc[1, 0]) if len(df) > 1 else close
+                                change = close - prev_close
+                                change_pct = (change / prev_close * 100) if prev_close else 0
+                                ticks.append({
+                                    "symbol": sym,
+                                    "ltp": close,
+                                    "open": open_,
+                                    "high": high,
+                                    "low": low,
+                                    "close": close,
+                                    "change": round(change, 2),
+                                    "change_pct": round(change_pct, 2),
+                                    "volume": 0,
+                                })
+                        except Exception as exc:
+                            logger.debug("Tick fetch failed for %s: %s", sym, exc)
+                except Exception as exc:
+                    logger.debug("WS ticks generic error: %s", exc)
+
+                payload = {
+                    "type": "tick_update",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "ticks": ticks,
+                    "live": False,
+                }
+                await websocket.send_json(payload)
+                await asyncio.sleep(2)
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -361,31 +417,57 @@ async def push_signal(signal: dict[str, Any]) -> None:
 async def ws_signals(websocket: WebSocket) -> None:
     """Stream strategy signals in real time.
 
-    Signals are broadcast as they are generated by the orchestrator.
-    Each message contains the strategy_id, symbol, direction, conviction,
-    and timestamp.
+    In live mode: subscribes to EventBus SIGNAL events.
+    In paper mode: reads from the signal queue (orchestrator pushes).
     """
     channel = "signals"
     await manager.connect(channel, websocket)
 
     try:
-        while True:
-            # Wait for a signal to appear in the queue
+        # Check for live EventBus
+        event_bus = getattr(websocket.app.state, "event_bus", None)
+        live_engine = getattr(websocket.app.state, "live_engine", None)
+
+        if event_bus and live_engine and live_engine.running:
+            # LIVE MODE: Subscribe to EventBus SIGNAL events
+            from quantlaxmi.engine.live.event_bus import EventType
+            signal_queue = event_bus.subscribe(EventType.SIGNAL, max_size=128)
+
             try:
-                signal = await asyncio.wait_for(_signal_queue.get(), timeout=5.0)
-                payload = {
-                    "type": "signal",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    **signal,
-                }
-                # Broadcast to all signal subscribers
-                await manager.broadcast(channel, payload)
-            except asyncio.TimeoutError:
-                # Send heartbeat to keep connection alive
-                await websocket.send_json({
-                    "type": "heartbeat",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
+                while True:
+                    try:
+                        event = await asyncio.wait_for(signal_queue.get(), timeout=5.0)
+                        payload = {
+                            "type": "signal",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "live": True,
+                            **event.data,
+                        }
+                        await manager.broadcast(channel, payload)
+                    except asyncio.TimeoutError:
+                        await websocket.send_json({
+                            "type": "heartbeat",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+            finally:
+                event_bus.unsubscribe(EventType.SIGNAL, signal_queue)
+        else:
+            # PAPER MODE: Read from signal queue
+            while True:
+                try:
+                    signal = await asyncio.wait_for(_signal_queue.get(), timeout=5.0)
+                    payload = {
+                        "type": "signal",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "live": False,
+                        **signal,
+                    }
+                    await manager.broadcast(channel, payload)
+                except asyncio.TimeoutError:
+                    await websocket.send_json({
+                        "type": "heartbeat",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -402,7 +484,7 @@ async def ws_signals(websocket: WebSocket) -> None:
 async def ws_risk(websocket: WebSocket) -> None:
     """Stream risk metrics (drawdown, VaR, exposure, VPIN) every 2s.
 
-    Used by the terminal RiskDashboard and StatusBar VPIN gauge.
+    In live mode: reads real VPIN from TickHandler and risk from RiskMonitor.
     """
     channel = "risk"
     await manager.connect(channel, websocket)
@@ -410,6 +492,29 @@ async def ws_risk(websocket: WebSocket) -> None:
     try:
         while True:
             state = websocket.app.state.engine
+            live_engine = getattr(websocket.app.state, "live_engine", None)
+
+            # Get VPIN from live tick handler if available
+            vpin_val = 0.0
+            if live_engine and live_engine.tick_handler:
+                # Get max VPIN across all tracked tokens
+                for token in live_engine.token_map.values():
+                    v = live_engine.tick_handler.get_vpin(token)
+                    if v > vpin_val and not (v != v):  # skip NaN
+                        vpin_val = v
+
+            # Get risk snapshot from live monitor
+            risk_data: dict[str, Any] = {}
+            if live_engine and live_engine.risk_monitor:
+                try:
+                    snap = live_engine.risk_monitor.snapshot()
+                    risk_data = {
+                        "mtm_pnl": round(snap.mark_to_market_pnl, 6),
+                        "intraday_pnl": round(snap.intraday_pnl, 6),
+                        "intraday_dd": round(snap.intraday_dd, 6),
+                    }
+                except Exception:
+                    pass
 
             payload = {
                 "type": "vpin_update",
@@ -421,7 +526,9 @@ async def ws_risk(websocket: WebSocket) -> None:
                 "last_regime": state.last_regime,
                 "n_positions": len(state.positions),
                 "equity": round(state.equity, 6),
-                "vpin": 0.0,  # Placeholder until live VPIN feed connected
+                "vpin": round(vpin_val, 4),
+                "live": live_engine is not None and live_engine.running,
+                **risk_data,
             }
 
             await websocket.send_json(payload)
@@ -430,5 +537,47 @@ async def ws_risk(websocket: WebSocket) -> None:
         pass
     except Exception as exc:
         logger.debug("WS risk error: %s", exc)
+    finally:
+        await manager.disconnect(channel, websocket)
+
+
+# ------------------------------------------------------------------
+# /ws/engine — engine diagnostics stream
+# ------------------------------------------------------------------
+
+@router.websocket("/ws/engine")
+async def ws_engine(websocket: WebSocket) -> None:
+    """Stream live engine diagnostics every 5 seconds.
+
+    Includes EventBus stats, TickHandler stats, SignalGenerator stats,
+    KiteTickFeed connection status.
+    """
+    channel = "engine"
+    await manager.connect(channel, websocket)
+
+    try:
+        while True:
+            live_engine = getattr(websocket.app.state, "live_engine", None)
+
+            if live_engine and live_engine.running:
+                payload = {
+                    "type": "engine_status",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    **live_engine.stats(),
+                }
+            else:
+                payload = {
+                    "type": "engine_status",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "running": False,
+                    "mode": "offline",
+                }
+
+            await websocket.send_json(payload)
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.debug("WS engine error: %s", exc)
     finally:
         await manager.disconnect(channel, websocket)

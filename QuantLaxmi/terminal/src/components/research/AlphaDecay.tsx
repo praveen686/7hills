@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,18 +21,6 @@ interface AlphaDecayProps {
 // Demo data — declining IC over 30-day horizon
 // ---------------------------------------------------------------------------
 
-function generateDecayData(): AlphaPoint[] {
-  const points: AlphaPoint[] = [];
-  let ic = 0.085;
-  for (let d = 0; d <= 30; d++) {
-    ic *= 0.93 + Math.random() * 0.05; // exponential decay with noise
-    ic = Math.max(ic, -0.01);
-    points.push({ day: d, ic: Math.round(ic * 10000) / 10000 });
-  }
-  return points;
-}
-
-const DEMO_DATA = generateDecayData();
 
 // ---------------------------------------------------------------------------
 // Component
@@ -42,7 +31,35 @@ export function AlphaDecay({
   threshold = 0.02,
   signalName = "DFF Composite",
 }: AlphaDecayProps) {
-  const points = data ?? DEMO_DATA;
+  const [fetchedPoints, setFetchedPoints] = useState<AlphaPoint[]>([]);
+
+  useEffect(() => {
+    if (data) return;
+    apiFetch<Array<{
+      feature: string;
+      ic_mean: number;
+      horizon: string;
+    }>>("/api/research/feature-ic").then((list) => {
+      // Group by horizon and average IC
+      const byHorizon = new Map<string, number[]>();
+      for (const f of list) {
+        if (!f.horizon) continue;
+        const arr = byHorizon.get(f.horizon) ?? [];
+        arr.push(Math.abs(f.ic_mean));
+        byHorizon.set(f.horizon, arr);
+      }
+      const points: AlphaPoint[] = [];
+      for (const [h, ics] of byHorizon) {
+        const day = parseInt(h);
+        if (isNaN(day)) continue;
+        points.push({ day, ic: ics.reduce((a, b) => a + b, 0) / ics.length });
+      }
+      points.sort((a, b) => a.day - b.day);
+      if (points.length > 0) setFetchedPoints(points);
+    }).catch(() => {});
+  }, [data]);
+
+  const points = data ?? fetchedPoints;
 
   // SVG dimensions
   const svgW = 500;
@@ -89,7 +106,7 @@ export function AlphaDecay({
   return (
     <div className="flex flex-col gap-3 p-4 h-full">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-100">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
           Alpha Decay
         </h2>
         <span className="text-2xs text-terminal-muted font-mono">{signalName}</span>
@@ -117,8 +134,8 @@ export function AlphaDecay({
             const y = padT + (1 - (tick - minIC) / (maxIC - minIC || 1)) * plotH;
             return (
               <g key={i}>
-                <line x1={padL} x2={svgW - padR} y1={y} y2={y} stroke="#1e1e2e" strokeWidth={1} />
-                <text x={padL - 5} y={y + 3} textAnchor="end" fill="#6b6b8a" fontSize={9} fontFamily="JetBrains Mono">
+                <line x1={padL} x2={svgW - padR} y1={y} y2={y} stroke="rgb(var(--terminal-border))" strokeWidth={1} />
+                <text x={padL - 5} y={y + 3} textAnchor="end" fill="rgb(var(--terminal-muted))" fontSize={9} fontFamily="JetBrains Mono">
                   {tick.toFixed(3)}
                 </text>
               </g>
@@ -129,7 +146,7 @@ export function AlphaDecay({
           {[0, 10, 20, 30].filter((d) => d <= (points[points.length - 1]?.day ?? 30)).map((d) => {
             const x = padL + (d / (points[points.length - 1]?.day ?? 30)) * plotW;
             return (
-              <text key={d} x={x} y={svgH - 5} textAnchor="middle" fill="#6b6b8a" fontSize={9} fontFamily="JetBrains Mono">
+              <text key={d} x={x} y={svgH - 5} textAnchor="middle" fill="rgb(var(--terminal-muted))" fontSize={9} fontFamily="JetBrains Mono">
                 {d}d
               </text>
             );
@@ -141,11 +158,11 @@ export function AlphaDecay({
             x2={svgW - padR}
             y1={thresholdY}
             y2={thresholdY}
-            stroke="#ffb84d"
+            stroke="rgb(var(--terminal-warning))"
             strokeWidth={1}
             strokeDasharray="4,3"
           />
-          <text x={svgW - padR + 2} y={thresholdY + 3} fill="#ffb84d" fontSize={8} fontFamily="JetBrains Mono">
+          <text x={svgW - padR + 2} y={thresholdY + 3} fill="rgb(var(--terminal-warning))" fontSize={8} fontFamily="JetBrains Mono">
             thr
           </text>
 
@@ -153,7 +170,7 @@ export function AlphaDecay({
           <polyline
             points={polyline}
             fill="none"
-            stroke="#4f8eff"
+            stroke="rgb(var(--terminal-accent))"
             strokeWidth={2}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -163,7 +180,7 @@ export function AlphaDecay({
           {points.length > 0 && (
             <polygon
               points={`${padL},${padT + plotH} ${polyline} ${padL + (points[points.length - 1].day / (points[points.length - 1]?.day ?? 30)) * plotW},${padT + plotH}`}
-              fill="rgba(79,142,255,0.1)"
+              fill="rgb(var(--terminal-accent) / 0.1)"
             />
           )}
 
@@ -177,8 +194,8 @@ export function AlphaDecay({
                 cx={x}
                 cy={y}
                 r={4}
-                fill={belowThreshold ? "#ff4d6a" : "#4f8eff"}
-                stroke="#0f0f17"
+                fill={belowThreshold ? "rgb(var(--terminal-loss))" : "rgb(var(--terminal-accent))"}
+                stroke="rgb(var(--terminal-surface))"
                 strokeWidth={2}
               />
             );

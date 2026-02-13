@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
-from quantlaxmi.data._paths import STRATEGY_RESULTS_DIR
+from quantlaxmi.data._paths import RESEARCH_RESULTS_DIR
 
-RESULTS_DIR = STRATEGY_RESULTS_DIR
+RESULTS_DIR = RESEARCH_RESULTS_DIR
 
 
 # ------------------------------------------------------------------
@@ -598,3 +598,55 @@ async def get_strategy(strategy_id: str, request: Request) -> StrategyDetailOut:
         recent_trades=trades_out,
         metadata=metadata,
     )
+
+
+# ------------------------------------------------------------------
+# Strategy parameter & toggle routes
+# ------------------------------------------------------------------
+
+class ParamOut(BaseModel):
+    params: dict[str, Any]
+
+
+class ToggleOut(BaseModel):
+    strategy_id: str
+    enabled: bool
+
+
+@router.get("/{strategy_id}/params", response_model=ParamOut)
+async def get_strategy_params(strategy_id: str, request: Request) -> ParamOut:
+    """Return configurable parameters for a strategy."""
+    registry = request.app.state.strategy_registry
+    strategy = registry.get(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found.")
+    params = strategy.get_params() if hasattr(strategy, "get_params") else {}
+    return ParamOut(params=params)
+
+
+@router.put("/{strategy_id}/params", response_model=ParamOut)
+async def update_strategy_params(strategy_id: str, request: Request) -> ParamOut:
+    """Update strategy parameters."""
+    registry = request.app.state.strategy_registry
+    strategy = registry.get(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found.")
+    body = await request.json()
+    if hasattr(strategy, "set_params"):
+        strategy.set_params(body)
+    params = strategy.get_params() if hasattr(strategy, "get_params") else {}
+    return ParamOut(params=params)
+
+
+@router.post("/{strategy_id}/toggle", response_model=ToggleOut)
+async def toggle_strategy(strategy_id: str, request: Request) -> ToggleOut:
+    """Enable or disable a strategy."""
+    registry = request.app.state.strategy_registry
+    strategy = registry.get(strategy_id)
+    if strategy is None:
+        raise HTTPException(status_code=404, detail=f"Strategy '{strategy_id}' not found.")
+    current = strategy.get_state("enabled", True) if hasattr(strategy, "get_state") else True
+    new_val = not current
+    if hasattr(strategy, "set_state"):
+        strategy.set_state("enabled", new_val)
+    return ToggleOut(strategy_id=strategy_id, enabled=new_val)

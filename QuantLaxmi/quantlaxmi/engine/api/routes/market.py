@@ -17,16 +17,68 @@ from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/market", tags=["market"])
+status_router = APIRouter(prefix="/api/status", tags=["status"])
 
 
 # ------------------------------------------------------------------
 # Response models
 # ------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# Connection status endpoint
+# ------------------------------------------------------------------
+
+class ConnectionStatus(BaseModel):
+    zerodha: str
+    binance: str
+    mode: str
+    engine_running: bool
+    ticks_received: int
+    bars_completed: int
+    signals_emitted: int
+    uptime_seconds: int
+    strategies_registered: int
+    tokens_subscribed: int
+
+
+@status_router.get("/connections", response_model=ConnectionStatus)
+async def get_connection_status(request: Request) -> ConnectionStatus:
+    """Return live engine connection status and diagnostics."""
+    live_engine = getattr(request.app.state, "live_engine", None)
+
+    if live_engine and live_engine.running:
+        stats = live_engine.stats()
+        return ConnectionStatus(
+            zerodha="connected" if stats.get("feed_connected") else "disconnected",
+            binance="disconnected",
+            mode=stats.get("mode", "unknown"),
+            engine_running=True,
+            ticks_received=stats.get("ticks_received", 0),
+            bars_completed=stats.get("bars_completed", 0),
+            signals_emitted=stats.get("signals_emitted", 0),
+            uptime_seconds=stats.get("uptime_seconds", 0),
+            strategies_registered=stats.get("strategies_registered", 0),
+            tokens_subscribed=stats.get("tokens_subscribed", 0),
+        )
+
+    return ConnectionStatus(
+        zerodha="disconnected",
+        binance="disconnected",
+        mode="offline",
+        engine_running=False,
+        ticks_received=0,
+        bars_completed=0,
+        signals_emitted=0,
+        uptime_seconds=0,
+        strategies_registered=0,
+        tokens_subscribed=0,
+    )
+
 
 class OptionChainOut(BaseModel):
     symbol: str
@@ -259,11 +311,13 @@ class SymbolOut(BaseModel):
 
 
 class OrderbookOut(BaseModel):
+    model_config = {"populate_by_name": True}
+
     symbol: str
     bids: list[list[float]]
     asks: list[list[float]]
     spread: float
-    mid_price: float
+    mid_price: float = Field(serialization_alias="midPrice")
 
 
 # ------------------------------------------------------------------

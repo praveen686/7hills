@@ -149,23 +149,35 @@ def block_bootstrap(
     (x_tgt_aug, x_ctx_aug) with same shapes as input
     """
     seq_len = x_tgt.shape[0]
-    if block_length >= seq_len:
+    ctx_len = x_ctx.shape[1]
+    # Use the shorter of target/context to avoid index-out-of-bounds
+    eff_len = min(seq_len, ctx_len)
+    if block_length >= eff_len:
         return x_tgt.copy(), x_ctx.copy()
 
     # Build the shared time-index map
-    n_blocks = int(np.ceil(seq_len / block_length))
+    n_blocks = int(np.ceil(eff_len / block_length))
     # Sample block start positions (with replacement)
-    max_start = seq_len - block_length
+    max_start = eff_len - block_length
     block_starts = rng.integers(0, max_start + 1, size=n_blocks)
 
-    # Build concatenated index array, trim to seq_len
+    # Build concatenated index array, trim to eff_len
     indices = np.concatenate(
         [np.arange(s, s + block_length) for s in block_starts]
-    )[:seq_len]
+    )[:eff_len]
 
     # Apply same indices to target and all context slices
-    x_tgt_aug = x_tgt[indices]
-    x_ctx_aug = x_ctx[:, indices, :]  # (n_context, seq_len, n_features)
+    # If seq_len > ctx_len, only bootstrap the first eff_len timesteps of target
+    if seq_len > ctx_len:
+        x_tgt_aug = x_tgt.copy()
+        x_tgt_aug[:eff_len] = x_tgt[indices]
+    else:
+        x_tgt_aug = x_tgt[indices]
+    if ctx_len > seq_len:
+        x_ctx_aug = x_ctx.copy()
+        x_ctx_aug[:, :eff_len, :] = x_ctx[:, indices, :]
+    else:
+        x_ctx_aug = x_ctx[:, indices, :]  # (n_context, eff_len, n_features)
 
     return x_tgt_aug, x_ctx_aug
 

@@ -97,7 +97,7 @@ const columns: ColumnDef<TradeRow>[] = [
     size: 90,
     enableGlobalFilter: true,
     cell: ({ getValue }) => (
-      <span className="font-semibold text-gray-100">{getValue<string>()}</span>
+      <span className="font-semibold text-terminal-text">{getValue<string>()}</span>
     ),
   },
   {
@@ -224,7 +224,7 @@ export function TradesTable() {
             placeholder="Filter..."
             className={cn(
               "w-24 px-2 py-0.5 rounded text-2xs font-mono",
-              "bg-terminal-bg border border-terminal-border text-gray-200",
+              "bg-terminal-bg border border-terminal-border text-terminal-text-secondary",
               "focus:outline-none focus:border-terminal-accent",
             )}
           />
@@ -234,7 +234,7 @@ export function TradesTable() {
             className={cn(
               "px-2 py-0.5 rounded text-2xs font-mono transition-colors",
               "bg-terminal-panel border border-terminal-border text-terminal-muted",
-              "hover:text-gray-200 hover:border-terminal-border-bright",
+              "hover:text-terminal-text-secondary hover:border-terminal-border-bright",
             )}
           >
             Export CSV
@@ -254,7 +254,7 @@ export function TradesTable() {
                     className={cn(
                       "px-2 py-1.5 text-left text-2xs text-terminal-muted font-normal",
                       "border-b border-terminal-border select-none",
-                      header.column.getCanSort() && "cursor-pointer hover:text-gray-300",
+                      header.column.getCanSort() && "cursor-pointer hover:text-terminal-text-secondary",
                     )}
                     style={{ width: header.getSize() }}
                     onClick={header.column.getToggleSortingHandler()}

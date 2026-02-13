@@ -89,6 +89,7 @@ class BacktestStatusOut(BaseModel):
     created_at: str
     completed_at: str | None = None
     error: str | None = None
+    progress: int = 0  # 0-100 real progress
     result: BacktestResultOut | None = None
 
 
@@ -230,6 +231,7 @@ class BacktestTracker:
                 "completed_at": None,
                 "error": None,
                 "result": None,
+                "progress": 0,
             }
         return job_id
 
@@ -237,6 +239,11 @@ class BacktestTracker:
         async with self._lock:
             if job_id in self._jobs:
                 self._jobs[job_id]["status"] = BacktestStatus.RUNNING
+
+    def set_progress_sync(self, job_id: str, pct: int) -> None:
+        """Thread-safe progress update (called from executor threads)."""
+        if job_id in self._jobs:
+            self._jobs[job_id]["progress"] = min(max(pct, 0), 100)
 
     async def set_completed(self, job_id: str, result: dict[str, Any]) -> None:
         async with self._lock:
@@ -268,8 +275,9 @@ class BacktestTracker:
 # Strategy-specific backtest functions
 # ------------------------------------------------------------------
 
-def _run_s1(store, start: date, end: date, p: dict) -> dict:
+def _run_s1(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S1 VRP-RNDR: density-based directional or options spreads."""
+    if progress_cb: progress_cb(5)
     variant = p.get("variant", "options")
     entry_pctile = float(p.get("entry_pctile", 0.80))
     hold_days = int(p.get("hold_days", 5))
@@ -278,6 +286,7 @@ def _run_s1(store, start: date, end: date, p: dict) -> dict:
         from quantlaxmi.strategies.s1_vrp.options import run_multi_index_options_backtest
         results = run_multi_index_options_backtest(
             store, start, end, entry_pctile=entry_pctile, hold_days=hold_days,
+            progress_cb=progress_cb,
         )
         # Aggregate: pick the best-performing index
         best = None
@@ -317,7 +326,7 @@ def _run_s1(store, start: date, end: date, p: dict) -> dict:
         }
 
 
-def _run_s2(store, start: date, end: date, p: dict) -> dict:
+def _run_s2(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S2 Ramanujan Cycles: intraday phase-based trading.
 
     Adapts run_research to return structured results instead of just printing.
@@ -330,12 +339,15 @@ def _run_s2(store, start: date, end: date, p: dict) -> dict:
     dates = store.available_dates("nfo_1min")
     dates = [d for d in dates if start <= d <= end]
     dates.sort()
+    n_dates = len(dates)
 
     daily_returns: list[float] = []
     total_trades = 0
     total_wins = 0
 
-    for d in dates:
+    for di, d in enumerate(dates):
+        if progress_cb and n_dates > 0:
+            progress_cb(int(5 + 80 * di / n_dates))
         try:
             df = store.sql(
                 "SELECT * FROM nfo_1min WHERE date = ? AND name = ? "
@@ -429,7 +441,7 @@ def _run_s2(store, start: date, end: date, p: dict) -> dict:
     return _compute_metrics_from_daily(daily_returns, total_trades, total_wins)
 
 
-def _run_s3(store, start: date, end: date, p: dict) -> dict:
+def _run_s3(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S3 Institutional Flow: signal quality evaluation with forward returns."""
     top_n = int(p.get("top_n", 10))
     cost_bps = float(p.get("cost_bps", 10.0))
@@ -441,12 +453,15 @@ def _run_s3(store, start: date, end: date, p: dict) -> dict:
     dates = available_dates(store, "nse_delivery")
     dates = [d for d in dates if start <= d <= end]
     dates.sort()
+    n_dates = max(len(dates) - 5, 1)
 
     daily_returns: list[float] = []
     total_trades = 0
     total_wins = 0
 
     for i, d in enumerate(dates[:-5]):
+        if progress_cb and n_dates > 0:
+            progress_cb(int(5 + 80 * i / n_dates))
         try:
             signals = run_daily_scan(d, store=store, top_n=top_n)
         except Exception:
@@ -498,7 +513,7 @@ def _get_cm_close(store, symbol: str, d: date) -> float | None:
     return None
 
 
-def _run_s4(store, start: date, end: date, p: dict) -> dict:
+def _run_s4(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S4 IV Mean-Reversion: SANOS-calibrated IV percentile strategy."""
     iv_lookback = int(p.get("iv_lookback", 30))
     entry_pctile = float(p.get("entry_pctile", 0.80))
@@ -539,7 +554,7 @@ def _run_s4(store, start: date, end: date, p: dict) -> dict:
     }
 
 
-def _run_s5(store, start: date, end: date, p: dict) -> dict:
+def _run_s5(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S5 Hawkes Microstructure: feature-based next-day signal backtest.
 
     Uses CPU-only Hawkes estimation (no GPU required for backtest mode).
@@ -554,13 +569,16 @@ def _run_s5(store, start: date, end: date, p: dict) -> dict:
 
     dates = store.available_dates("ticks")
     dates = sorted(d for d in dates if start <= d <= end)
+    n_dates = len(dates)
 
-    if len(dates) < lookback + 20:
+    if n_dates < lookback + 20:
         return {"trades": 0, "total_return_pct": 0, "sharpe": 0, "max_dd_pct": 0, "win_rate": 0}
 
     # Load tick data and compute Hawkes features (CPU only, sequential)
     daily_features: list[dict] = []
-    for d in dates:
+    for di, d in enumerate(dates):
+        if progress_cb and n_dates > 0:
+            progress_cb(int(5 + 80 * di / n_dates))
         try:
             rec = _load_day_data(d.isoformat(), token)
             if rec is not None:
@@ -583,7 +601,7 @@ def _run_s5(store, start: date, end: date, p: dict) -> dict:
     return result
 
 
-def _run_s6(store, start: date, end: date, p: dict) -> dict:
+def _run_s6(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S6 Multi-Factor XGBoost: walk-forward prediction backtest."""
     target_index = p.get("target_index", "Nifty 50")
     train_window = int(p.get("train_window", 60))
@@ -612,7 +630,7 @@ def _run_s6(store, start: date, end: date, p: dict) -> dict:
     }
 
 
-def _run_s7(store, start: date, end: date, p: dict) -> dict:
+def _run_s7(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S7 Regime Switch: entropy/VPIN regime detection with sub-strategies."""
     from quantlaxmi.strategies.s7_regime.research import backtest_regime_switch
 
@@ -627,7 +645,7 @@ def _run_s7(store, start: date, end: date, p: dict) -> dict:
     )
 
 
-def _run_s8(store, start: date, end: date, p: dict) -> dict:
+def _run_s8(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S8 Expiry-Day Theta: iron condors on expiry using actual option prices."""
     from quantlaxmi.strategies.s8_expiry_theta.strategy import backtest_expiry_theta
 
@@ -641,7 +659,7 @@ def _run_s8(store, start: date, end: date, p: dict) -> dict:
     )
 
 
-def _run_s9(store, start: date, end: date, p: dict) -> dict:
+def _run_s9(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S9 Cross-Sectional Momentum: weekly rebalance stock portfolio."""
     from quantlaxmi.strategies.s9_momentum.research import backtest_momentum
 
@@ -651,7 +669,7 @@ def _run_s9(store, start: date, end: date, p: dict) -> dict:
     return backtest_momentum(store, start, end, top_n=top_n, cost_bps=cost_bps)
 
 
-def _run_s10(store, start: date, end: date, p: dict) -> dict:
+def _run_s10(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S10 Gamma Scalping: buy straddles in low-IV with actual option prices."""
     from quantlaxmi.strategies.s10_gamma_scalp.research import backtest_gamma_scalp
 
@@ -665,7 +683,7 @@ def _run_s10(store, start: date, end: date, p: dict) -> dict:
     )
 
 
-def _run_s11(store, start: date, end: date, p: dict) -> dict:
+def _run_s11(store, start: date, end: date, p: dict, progress_cb=None) -> dict:
     """S11 Statistical Pairs: cointegration-based spread trading."""
     from quantlaxmi.strategies.s11_pairs.research import backtest_pairs
 
@@ -972,9 +990,14 @@ async def _run_backtest_task(
         # Run in executor to avoid blocking event loop
         import concurrent.futures
         loop = asyncio.get_event_loop()
+
+        def _progress_cb(pct: int) -> None:
+            """Called from runner thread to report 0-90% (last 10% is equity curve)."""
+            tracker.set_progress_sync(job_id, pct)
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             raw = await loop.run_in_executor(
-                pool, lambda: runner(store, start, end, merged_params)
+                pool, lambda: runner(store, start, end, merged_params, progress_cb=_progress_cb)
             )
 
         logger.info(
@@ -982,9 +1005,14 @@ async def _run_backtest_task(
             job_id, raw.get("trades", 0), raw.get("sharpe", 0), raw.get("total_return_pct", 0),
         )
 
-        # Normalize and build equity curve
-        result_dict = _build_equity_curve(raw, start, end, params.initial_capital, store)
+        tracker.set_progress_sync(job_id, 90)
 
+        # Normalize and build equity curve (in executor — available_dates() scans filesystem)
+        result_dict = await loop.run_in_executor(
+            None, lambda: _build_equity_curve(raw, start, end, params.initial_capital, store)
+        )
+
+        tracker.set_progress_sync(job_id, 100)
         await tracker.set_completed(job_id, result_dict)
         logger.info("Backtest %s completed successfully", job_id)
 
@@ -1107,5 +1135,6 @@ async def get_backtest_status(
         created_at=job["created_at"],
         completed_at=job["completed_at"],
         error=job["error"],
+        progress=job.get("progress", 0),
         result=result_out,
     )

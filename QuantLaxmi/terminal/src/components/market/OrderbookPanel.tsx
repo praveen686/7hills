@@ -48,7 +48,8 @@ function buildLevels(
   });
 }
 
-function formatPrice(p: number): string {
+function formatPrice(p: number | undefined): string {
+  if (p == null) return "—";
   return p.toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -120,7 +121,14 @@ export function OrderbookPanel() {
   const { execute: fetchBook } = useTauriCommand<OrderbookData>("get_orderbook");
 
   useEffect(() => {
-    fetchBook({ symbol }).then((data) => {
+    fetchBook({ symbol }).then((raw: any) => {
+      // Normalize snake_case → camelCase from backend
+      const data: OrderbookData = {
+        bids: raw.bids,
+        asks: raw.asks,
+        spread: raw.spread,
+        midPrice: raw.midPrice ?? raw.mid_price ?? 0,
+      };
       setOrderbook((prev) => {
         const next = new Map(prev);
         next.set(symbol, data);
@@ -205,7 +213,7 @@ export function OrderbookPanel() {
             {formatPrice(spread)}
           </span>
           <span className="text-terminal-muted ml-3 mr-1">Mid</span>
-          <span className="text-gray-200 font-semibold">
+          <span className="text-terminal-text-secondary font-semibold">
             {formatPrice(midPrice)}
           </span>
         </div>

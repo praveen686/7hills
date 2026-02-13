@@ -160,10 +160,10 @@ export function VpinGauge() {
         {/* Gradient definition */}
         <defs>
           <linearGradient id="vpin-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#00d4aa" />
-            <stop offset="33%" stopColor="#ffb84d" />
-            <stop offset="66%" stopColor="#ff8c00" />
-            <stop offset="100%" stopColor="#ff4d6a" />
+            <stop offset="0%" stopColor="rgb(var(--terminal-profit))" />
+            <stop offset="33%" stopColor="rgb(var(--terminal-warning))" />
+            <stop offset="66%" stopColor="rgb(var(--terminal-warning))" />
+            <stop offset="100%" stopColor="rgb(var(--terminal-loss))" />
           </linearGradient>
         </defs>
 
@@ -171,7 +171,7 @@ export function VpinGauge() {
         <path
           d={backgroundArc}
           fill="none"
-          stroke="#1e1e2e"
+          stroke="rgb(var(--terminal-border))"
           strokeWidth={STROKE_WIDTH}
           strokeLinecap="round"
         />
@@ -205,13 +205,13 @@ export function VpinGauge() {
                 y1={y1}
                 x2={x2}
                 y2={y2}
-                stroke="#6b6b8a"
+                stroke="rgb(var(--terminal-muted))"
                 strokeWidth={1}
               />
               <text
                 x={x2 + (Math.cos(angle) > 0.1 ? 4 : Math.cos(angle) < -0.1 ? -4 : 0)}
                 y={y2 + 4}
-                fill="#6b6b8a"
+                fill="rgb(var(--terminal-muted))"
                 fontSize="8"
                 fontFamily="'JetBrains Mono', monospace"
                 textAnchor={Math.cos(angle) > 0.1 ? "start" : Math.cos(angle) < -0.1 ? "end" : "middle"}
@@ -234,7 +234,7 @@ export function VpinGauge() {
           className="transition-all duration-300"
         />
         <circle cx={CENTER} cy={CENTER} r={4} fill={color} />
-        <circle cx={CENTER} cy={CENTER} r={2} fill="#08080d" />
+        <circle cx={CENTER} cy={CENTER} r={2} fill="rgb(var(--terminal-bg))" />
 
         {/* Value text */}
         <text

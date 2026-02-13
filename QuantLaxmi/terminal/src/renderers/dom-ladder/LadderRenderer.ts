@@ -18,17 +18,39 @@ type LadderClickHandler = (event: LadderClickEvent) => void;
 // Constants
 // ---------------------------------------------------------------------------
 
-const GRID_COLOR = "#1e1e2e";
-const TEXT_COLOR = "#c8c8d4";
-const MUTED_COLOR = "#6b6b8a";
-const BID_COLOR = "rgba(0, 212, 170, ";
-const ASK_COLOR = "rgba(255, 77, 106, ";
-const CENTER_BG = "#13131d";
 const FONT = "11px 'JetBrains Mono', monospace";
 const SMALL_FONT = "9px 'JetBrains Mono', monospace";
 const ROW_HEIGHT = 22;
 const PRICE_COL_W = 90;
 const SIZE_COL_W = 70;
+
+// ---------------------------------------------------------------------------
+// Theme-aware color reader
+// ---------------------------------------------------------------------------
+
+function getThemeColors() {
+  const s = getComputedStyle(document.documentElement);
+  const rgb = (prop: string, fallback: string) => {
+    const v = s.getPropertyValue(prop).trim();
+    if (!v) return fallback;
+    if (v.startsWith("#") || v.startsWith("rgb")) return v;
+    return `rgb(${v.split(/\s+/).join(", ")})`;
+  };
+  const rawChannels = (prop: string) => s.getPropertyValue(prop).trim();
+  const profitChannels = rawChannels("--terminal-profit") || "0, 212, 170";
+  const lossChannels = rawChannels("--terminal-loss") || "255, 77, 106";
+  return {
+    grid: rgb("--terminal-border", "#1e1e2e"),
+    text: rgb("--terminal-text", "#c8c8d4"),
+    muted: rgb("--terminal-muted", "#6b6b8a"),
+    centerBg: rgb("--terminal-panel", "#13131d"),
+    accent: rgb("--terminal-accent", "#4f8eff"),
+    profit: rgb("--terminal-profit", "#00d4aa"),
+    loss: rgb("--terminal-loss", "#ff4d6a"),
+    bidColor: `rgba(${profitChannels.replace(/ /g, ", ")}, `,
+    askColor: `rgba(${lossChannels.replace(/ /g, ", ")}, `,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // LadderRenderer class
@@ -78,6 +100,7 @@ export class LadderRenderer {
 
     const { ctx, width, height } = this;
     const dpr = window.devicePixelRatio || 1;
+    const colors = getThemeColors();
 
     // Set canvas actual size for HiDPI
     if (this.canvas.width !== width * dpr || this.canvas.height !== height * dpr) {
@@ -121,12 +144,12 @@ export class LadderRenderer {
 
       // Row background
       if (isCenter) {
-        ctx.fillStyle = CENTER_BG;
+        ctx.fillStyle = colors.centerBg;
         ctx.fillRect(0, y, width, ROW_HEIGHT);
       }
 
       // Grid line
-      ctx.strokeStyle = GRID_COLOR;
+      ctx.strokeStyle = colors.grid;
       ctx.beginPath();
       ctx.moveTo(0, y + ROW_HEIGHT);
       ctx.lineTo(width, y + ROW_HEIGHT);
@@ -135,17 +158,17 @@ export class LadderRenderer {
       // Bid size bar (right-aligned in bid column)
       if (bidSize > 0) {
         const barW = (bidSize / maxSize) * SIZE_COL_W * 0.85;
-        ctx.fillStyle = BID_COLOR + "0.35)";
+        ctx.fillStyle = colors.bidColor + "0.35)";
         ctx.fillRect(bidColX + SIZE_COL_W - barW, y + 2, barW, ROW_HEIGHT - 4);
 
-        ctx.fillStyle = TEXT_COLOR;
+        ctx.fillStyle = colors.text;
         ctx.font = SMALL_FONT;
         ctx.textAlign = "right";
         ctx.fillText(this.formatSize(bidSize), bidColX + SIZE_COL_W - 4, yMid);
       }
 
       // Price label
-      ctx.fillStyle = isCenter ? "#4f8eff" : (bidSize > 0 ? "#00d4aa" : askSize > 0 ? "#ff4d6a" : MUTED_COLOR);
+      ctx.fillStyle = isCenter ? colors.accent : (bidSize > 0 ? colors.profit : askSize > 0 ? colors.loss : colors.muted);
       ctx.font = FONT;
       ctx.textAlign = "center";
       ctx.fillText(price.toFixed(2), priceColX + PRICE_COL_W / 2, yMid);
@@ -153,10 +176,10 @@ export class LadderRenderer {
       // Ask size bar (left-aligned in ask column)
       if (askSize > 0) {
         const barW = (askSize / maxSize) * SIZE_COL_W * 0.85;
-        ctx.fillStyle = ASK_COLOR + "0.35)";
+        ctx.fillStyle = colors.askColor + "0.35)";
         ctx.fillRect(askColX, y + 2, barW, ROW_HEIGHT - 4);
 
-        ctx.fillStyle = TEXT_COLOR;
+        ctx.fillStyle = colors.text;
         ctx.font = SMALL_FONT;
         ctx.textAlign = "left";
         ctx.fillText(this.formatSize(askSize), askColX + 4, yMid);
@@ -164,7 +187,7 @@ export class LadderRenderer {
     }
 
     // Column dividers
-    ctx.strokeStyle = GRID_COLOR;
+    ctx.strokeStyle = colors.grid;
     ctx.beginPath();
     ctx.moveTo(SIZE_COL_W, 0);
     ctx.lineTo(SIZE_COL_W, height);
@@ -173,7 +196,7 @@ export class LadderRenderer {
     ctx.stroke();
 
     // Column headers
-    ctx.fillStyle = MUTED_COLOR;
+    ctx.fillStyle = colors.muted;
     ctx.font = SMALL_FONT;
     ctx.textAlign = "center";
     ctx.fillText("BID", SIZE_COL_W / 2, 12);

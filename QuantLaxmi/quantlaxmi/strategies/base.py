@@ -14,6 +14,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from quantlaxmi.data._paths import STRATEGY_STATE
 from quantlaxmi.data.store import MarketDataStore
@@ -146,3 +147,38 @@ class BaseStrategy(ABC):
         daily_vol = get_daily_vol(close)
         threshold = daily_vol * threshold_mult
         return cusum_filter(close, threshold=threshold)
+
+    # ------------------------------------------------------------------
+    # Configurable parameters
+    # ------------------------------------------------------------------
+
+    def get_params(self) -> dict[str, dict]:
+        """Return configurable parameters with metadata.
+
+        Override in subclasses to expose tunable parameters.
+
+        Returns
+        -------
+        dict[str, dict]
+            Mapping of param_name -> {
+                "value": current_value,
+                "type": "int" | "float" | "bool" | "select",
+                "min": ..., "max": ..., "step": ...,
+                "options": [...],  # for select type
+                "description": "..."
+            }
+        """
+        return {}
+
+    def set_params(self, params: dict[str, Any]) -> None:
+        """Update strategy parameters and persist.
+
+        Parameters
+        ----------
+        params : dict
+            Mapping of param_name -> new_value.
+        """
+        current = self.get_params()
+        for key, value in params.items():
+            if key in current:
+                self.set_state(f"param_{key}", value)

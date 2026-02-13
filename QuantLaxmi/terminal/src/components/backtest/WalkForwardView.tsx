@@ -1,4 +1,6 @@
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,12 +25,6 @@ interface WalkForwardViewProps {
 // Demo data
 // ---------------------------------------------------------------------------
 
-const DEFAULT_FOLDS: WalkForwardFold[] = [
-  { foldNum: 1, trainStart: "2025-01-01", trainEnd: "2025-04-01", testStart: "2025-04-02", testEnd: "2025-07-01", isSharpe: 2.14, oosSharpe: 1.87 },
-  { foldNum: 2, trainStart: "2025-04-02", trainEnd: "2025-07-01", testStart: "2025-07-02", testEnd: "2025-10-01", isSharpe: 2.45, oosSharpe: 1.74 },
-  { foldNum: 3, trainStart: "2025-07-02", trainEnd: "2025-10-01", testStart: "2025-10-02", testEnd: "2026-01-01", isSharpe: 1.98, oosSharpe: 2.16 },
-  { foldNum: 4, trainStart: "2025-10-02", trainEnd: "2026-01-01", testStart: "2026-01-02", testEnd: "2026-02-12", isSharpe: 2.31, oosSharpe: 1.04 },
-];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -111,15 +107,40 @@ function SharpeBarChart({ folds }: { folds: WalkForwardFold[] }) {
 // ---------------------------------------------------------------------------
 
 export function WalkForwardView({ folds, strategyName }: WalkForwardViewProps) {
-  const data = folds ?? DEFAULT_FOLDS;
-  const avgOOS = data.reduce((s, f) => s + f.oosSharpe, 0) / data.length;
-  const avgIS = data.reduce((s, f) => s + f.isSharpe, 0) / data.length;
+  const [fetchedFolds, setFetchedFolds] = useState<WalkForwardFold[]>([]);
+
+  useEffect(() => {
+    if (folds) return;
+    apiFetch<Array<{
+      fold: number;
+      train_start: string;
+      train_end: string;
+      test_start: string;
+      test_end: string;
+      train_sharpe: number;
+      test_sharpe: number;
+    }>>("/api/research/walk-forward").then((list) => {
+      setFetchedFolds(list.map((f) => ({
+        foldNum: f.fold,
+        trainStart: f.train_start,
+        trainEnd: f.train_end,
+        testStart: f.test_start,
+        testEnd: f.test_end,
+        isSharpe: f.train_sharpe,
+        oosSharpe: f.test_sharpe,
+      })));
+    }).catch(() => {});
+  }, [folds]);
+
+  const data = folds ?? fetchedFolds;
+  const avgOOS = data.length > 0 ? data.reduce((s, f) => s + f.oosSharpe, 0) / data.length : 0;
+  const avgIS = data.length > 0 ? data.reduce((s, f) => s + f.isSharpe, 0) / data.length : 0;
   const avgDeg = degradation(avgIS, avgOOS);
 
   return (
     <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-100">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
           Walk-Forward Validation{strategyName ? ` — ${strategyName}` : ""}
         </h2>
         <div className="flex items-center gap-3">
@@ -162,13 +183,13 @@ export function WalkForwardView({ folds, strategyName }: WalkForwardViewProps) {
                     sharpeBgColor(fold.oosSharpe),
                   )}
                 >
-                  <td className="px-3 py-2 text-center text-gray-200 font-semibold">
+                  <td className="px-3 py-2 text-center text-terminal-text-secondary font-semibold">
                     {fold.foldNum}
                   </td>
-                  <td className="px-3 py-2 text-gray-400">
+                  <td className="px-3 py-2 text-terminal-muted">
                     {fold.trainStart} → {fold.trainEnd}
                   </td>
-                  <td className="px-3 py-2 text-gray-400">
+                  <td className="px-3 py-2 text-terminal-muted">
                     {fold.testStart} → {fold.testEnd}
                   </td>
                   <td className="px-3 py-2 text-right text-terminal-accent">
@@ -198,7 +219,13 @@ export function WalkForwardView({ folds, strategyName }: WalkForwardViewProps) {
         </table>
       </div>
 
-      <SharpeBarChart folds={data} />
+      {data.length > 0 && <SharpeBarChart folds={data} />}
+
+      {data.length === 0 && (
+        <div className="flex items-center justify-center h-32 text-terminal-muted text-xs font-mono">
+          No walk-forward data available
+        </div>
+      )}
     </div>
   );
 }

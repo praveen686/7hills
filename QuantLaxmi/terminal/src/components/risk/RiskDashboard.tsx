@@ -46,19 +46,12 @@ interface RiskState {
   killSwitchActive: boolean;
 }
 
-const DEFAULT_RISK: RiskState = {
-  greeks: { delta: 0.42, gamma: 0.018, theta: -1240, vega: 3850 },
-  var: { var95: 185000, var99: 312000 },
-  drawdown: { currentPct: 1.82, maxPct: 3.47, limitPct: 5.0 },
-  exposure: { gross: 4250000, net: 720000, long: 2485000, short: 1765000 },
-  circuitBreakers: [
-    { name: "Max Drawdown", status: "ok" },
-    { name: "Daily Loss Limit", status: "ok" },
-    { name: "Position Concentration", status: "ok" },
-    { name: "Gross Exposure", status: "ok" },
-    { name: "VaR Breach", status: "ok" },
-    { name: "Correlation Spike", status: "tripped", reason: "Intra-day corr > 0.85" },
-  ],
+const EMPTY_RISK: RiskState = {
+  greeks: { delta: 0, gamma: 0, theta: 0, vega: 0 },
+  var: { var95: 0, var99: 0 },
+  drawdown: { currentPct: 0, maxPct: 0, limitPct: 5.0 },
+  exposure: { gross: 0, net: 0, long: 0, short: 0 },
+  circuitBreakers: [],
   killSwitchActive: false,
 };
 
@@ -80,7 +73,7 @@ function MiniCard({
       <span className="text-2xs font-medium uppercase tracking-wider text-terminal-muted">
         {label}
       </span>
-      <span className={cn("font-mono text-sm font-semibold", color ?? "text-gray-100")}>
+      <span className={cn("font-mono text-sm font-semibold", color ?? "text-terminal-text")}>
         {value}
       </span>
     </div>
@@ -94,14 +87,14 @@ function GreeksRow({ greeks }: { greeks: Greeks }) {
         Portfolio Greeks
       </h3>
       <div className="grid grid-cols-4 gap-2">
-        <MiniCard label="Delta" value={greeks.delta.toFixed(3)} />
-        <MiniCard label="Gamma" value={greeks.gamma.toFixed(4)} />
+        <MiniCard label="Delta" value={(greeks?.delta ?? 0).toFixed(3)} />
+        <MiniCard label="Gamma" value={(greeks?.gamma ?? 0).toFixed(4)} />
         <MiniCard
           label="Theta"
-          value={greeks.theta.toLocaleString("en-IN")}
+          value={(greeks?.theta ?? 0).toLocaleString("en-IN")}
           color="text-terminal-loss"
         />
-        <MiniCard label="Vega" value={greeks.vega.toLocaleString("en-IN")} />
+        <MiniCard label="Vega" value={(greeks?.vega ?? 0).toLocaleString("en-IN")} />
       </div>
     </section>
   );
@@ -116,12 +109,12 @@ function VaRSection({ varData }: { varData: VaR }) {
       <div className="grid grid-cols-2 gap-2">
         <MiniCard
           label="VaR 95%"
-          value={`₹${(varData.var95 / 1000).toFixed(0)}K`}
+          value={`₹${((varData?.var95 ?? 0) / 1000).toFixed(0)}K`}
           color="text-terminal-warning"
         />
         <MiniCard
           label="VaR 99%"
-          value={`₹${(varData.var99 / 1000).toFixed(0)}K`}
+          value={`₹${((varData?.var99 ?? 0) / 1000).toFixed(0)}K`}
           color="text-terminal-loss"
         />
       </div>
@@ -130,8 +123,11 @@ function VaRSection({ varData }: { varData: VaR }) {
 }
 
 function DrawdownSection({ dd }: { dd: Drawdown }) {
-  const barWidth = Math.min((dd.currentPct / dd.limitPct) * 100, 100);
-  const maxBarWidth = Math.min((dd.maxPct / dd.limitPct) * 100, 100);
+  const cur = dd?.currentPct ?? 0;
+  const mx = dd?.maxPct ?? 0;
+  const lim = dd?.limitPct ?? 5;
+  const barWidth = Math.min((cur / lim) * 100, 100);
+  const maxBarWidth = Math.min((mx / lim) * 100, 100);
 
   return (
     <section>
@@ -141,12 +137,12 @@ function DrawdownSection({ dd }: { dd: Drawdown }) {
       <div className="grid grid-cols-2 gap-2 mb-3">
         <MiniCard
           label="Current DD"
-          value={`${dd.currentPct.toFixed(2)}%`}
+          value={`${cur.toFixed(2)}%`}
           color="text-terminal-loss"
         />
         <MiniCard
           label="Max DD"
-          value={`${dd.maxPct.toFixed(2)}%`}
+          value={`${mx.toFixed(2)}%`}
           color="text-terminal-loss"
         />
       </div>
@@ -169,28 +165,29 @@ function DrawdownSection({ dd }: { dd: Drawdown }) {
       </div>
       <div className="flex justify-between mt-1 text-2xs text-terminal-muted font-mono">
         <span>0%</span>
-        <span>Limit: {dd.limitPct}%</span>
+        <span>Limit: {lim}%</span>
       </div>
     </section>
   );
 }
 
 function ExposureSection({ exposure }: { exposure: Exposure }) {
-  const fmt = (v: number) => `₹${(v / 100000).toFixed(1)}L`;
+  const fmt = (v: number | undefined) => `₹${((v ?? 0) / 100000).toFixed(1)}L`;
+  const net = exposure?.net ?? 0;
   return (
     <section>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-terminal-muted">
         Exposure
       </h3>
       <div className="grid grid-cols-4 gap-2">
-        <MiniCard label="Gross" value={fmt(exposure.gross)} />
+        <MiniCard label="Gross" value={fmt(exposure?.gross)} />
         <MiniCard
           label="Net"
-          value={fmt(exposure.net)}
-          color={exposure.net >= 0 ? "text-terminal-profit" : "text-terminal-loss"}
+          value={fmt(net)}
+          color={net >= 0 ? "text-terminal-profit" : "text-terminal-loss"}
         />
-        <MiniCard label="Long" value={fmt(exposure.long)} color="text-terminal-profit" />
-        <MiniCard label="Short" value={fmt(exposure.short)} color="text-terminal-loss" />
+        <MiniCard label="Long" value={fmt(exposure?.long)} color="text-terminal-profit" />
+        <MiniCard label="Short" value={fmt(exposure?.short)} color="text-terminal-loss" />
       </div>
     </section>
   );
@@ -220,7 +217,7 @@ function CircuitBreakerList({ breakers }: { breakers: CircuitBreaker[] }) {
                   cb.status === "ok" ? "bg-terminal-profit" : "bg-terminal-loss animate-pulse",
                 )}
               />
-              <span className="text-gray-200">{cb.name}</span>
+              <span className="text-terminal-text-secondary">{cb.name}</span>
             </div>
             {cb.status === "tripped" && (
               <span className="text-terminal-loss text-2xs">{cb.reason}</span>
@@ -238,7 +235,7 @@ function CircuitBreakerList({ breakers }: { breakers: CircuitBreaker[] }) {
 
 export function RiskDashboard() {
   const { data, execute } = useTauriCommand<RiskState>("get_risk_state");
-  const [risk, setRisk] = useState<RiskState>(DEFAULT_RISK);
+  const [risk, setRisk] = useState<RiskState>(EMPTY_RISK);
   const [killConfirm, setKillConfirm] = useState(false);
 
   useEffect(() => {
@@ -252,7 +249,41 @@ export function RiskDashboard() {
   }, [execute]);
 
   useEffect(() => {
-    if (data) setRisk(data);
+    if (!data) return;
+    // Map snake_case API response to camelCase frontend types
+    const raw = data as any;
+    try {
+      const mapped: RiskState = {
+        greeks: {
+          delta: raw.greeks?.net_delta ?? raw.greeks?.delta ?? 0,
+          gamma: raw.greeks?.net_gamma ?? raw.greeks?.gamma ?? 0,
+          theta: raw.greeks?.net_theta ?? raw.greeks?.theta ?? 0,
+          vega: raw.greeks?.net_vega ?? raw.greeks?.vega ?? 0,
+        },
+        var: {
+          var95: raw.var?.var_95 ?? raw.var?.var95 ?? 0,
+          var99: raw.var?.var_99 ?? raw.var?.var99 ?? 0,
+        },
+        drawdown: {
+          currentPct: raw.portfolio_drawdown_pct ?? raw.drawdown?.currentPct ?? 0,
+          maxPct: raw.drawdown?.maxPct ?? raw.drawdown?.max_pct ?? 0,
+          limitPct: raw.drawdown?.limitPct ?? raw.drawdown?.limit_pct ?? 5.0,
+        },
+        exposure: {
+          gross: raw.concentration?.gross_exposure ?? raw.exposure?.gross ?? 0,
+          net: raw.concentration?.net_exposure ?? raw.exposure?.net ?? 0,
+          long: raw.concentration?.long_exposure ?? raw.exposure?.long ?? 0,
+          short: raw.concentration?.short_exposure ?? raw.exposure?.short ?? 0,
+        },
+        circuitBreakers: Array.isArray(raw.circuitBreakers ?? raw.circuit_breakers)
+          ? (raw.circuitBreakers ?? raw.circuit_breakers)
+          : [],
+        killSwitchActive: raw.circuit_breaker_active ?? raw.killSwitchActive ?? false,
+      };
+      setRisk(mapped);
+    } catch {
+      // Keep defaults on mapping failure
+    }
   }, [data]);
 
   const handleKillSwitch = useCallback(() => {
@@ -271,14 +302,14 @@ export function RiskDashboard() {
   return (
     <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto scrollbar-thin">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-100">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
           Risk Dashboard
         </h2>
         <div className="flex items-center gap-2">
           {killConfirm && (
             <button
               onClick={handleKillCancel}
-              className="rounded px-3 py-1.5 text-xs font-medium bg-terminal-surface border border-terminal-border text-terminal-muted hover:text-gray-100 transition-colors"
+              className="rounded px-3 py-1.5 text-xs font-medium bg-terminal-surface border border-terminal-border text-terminal-muted hover:text-terminal-text transition-colors"
             >
               Cancel
             </button>

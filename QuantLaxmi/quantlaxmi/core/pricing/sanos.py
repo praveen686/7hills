@@ -319,7 +319,7 @@ def fit_sanos(
         method="highs",
         options={
             "presolve": True,
-            "time_limit": 60,
+            "time_limit": 5,
             "dual_feasibility_tolerance": 1e-10,
             "primal_feasibility_tolerance": 1e-10,
         },

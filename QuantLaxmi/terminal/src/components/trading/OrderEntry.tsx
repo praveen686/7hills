@@ -235,8 +235,8 @@ export function OrderEntry() {
               className={cn(
                 "flex-1 py-1.5 text-2xs font-mono rounded transition-colors",
                 orderType === ot
-                  ? "bg-terminal-panel text-gray-100 font-semibold"
-                  : "text-terminal-muted hover:text-gray-300",
+                  ? "bg-terminal-panel text-terminal-text font-semibold"
+                  : "text-terminal-muted hover:text-terminal-text-secondary",
               )}
             >
               {ot}
@@ -257,7 +257,7 @@ export function OrderEntry() {
               onChange={(e) => setLots(Math.max(1, parseInt(e.target.value) || 1))}
               className={cn(
                 "flex-1 px-2 py-1.5 rounded text-xs font-mono tabular-nums",
-                "bg-terminal-bg border border-terminal-border text-gray-100",
+                "bg-terminal-bg border border-terminal-border text-terminal-text",
                 "focus:outline-none focus:border-terminal-accent",
               )}
             />
@@ -294,7 +294,7 @@ export function OrderEntry() {
               placeholder={ltp > 0 ? formatPrice(ltp) : "0.00"}
               className={cn(
                 "w-full px-2 py-1.5 rounded text-xs font-mono tabular-nums",
-                "bg-terminal-bg border border-terminal-border text-gray-100",
+                "bg-terminal-bg border border-terminal-border text-terminal-text",
                 "focus:outline-none focus:border-terminal-accent",
               )}
             />
@@ -315,7 +315,7 @@ export function OrderEntry() {
               placeholder="0.00"
               className={cn(
                 "w-full px-2 py-1.5 rounded text-xs font-mono tabular-nums",
-                "bg-terminal-bg border border-terminal-border text-gray-100",
+                "bg-terminal-bg border border-terminal-border text-terminal-text",
                 "focus:outline-none focus:border-terminal-accent",
               )}
             />
@@ -334,8 +334,8 @@ export function OrderEntry() {
                 className={cn(
                   "py-1.5 text-2xs font-mono rounded transition-colors",
                   product === p
-                    ? "bg-terminal-panel text-gray-100 font-semibold"
-                    : "text-terminal-muted hover:text-gray-300",
+                    ? "bg-terminal-panel text-terminal-text font-semibold"
+                    : "text-terminal-muted hover:text-terminal-text-secondary",
                 )}
               >
                 {p}
@@ -347,7 +347,7 @@ export function OrderEntry() {
         {/* Estimated Margin */}
         <div className="flex items-center justify-between px-2 py-1.5 bg-terminal-bg rounded text-2xs font-mono border-t border-terminal-border">
           <span className="text-terminal-muted">Est. Margin</span>
-          <span className="text-gray-200">
+          <span className="text-terminal-text-secondary">
             {margin ? formatINR(margin.required) : formatINR(estimatedMargin)}
           </span>
         </div>

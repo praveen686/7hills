@@ -88,21 +88,21 @@ function Toast({ item }: { item: ToastItem }) {
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold text-gray-200 truncate">
+          <span className="text-xs font-semibold text-terminal-text-secondary truncate">
             {item.title}
           </span>
           <span className="text-2xs text-terminal-muted tabular-nums flex-shrink-0">
             {timeStr}
           </span>
         </div>
-        <p className="text-2xs text-gray-400 mt-0.5 leading-relaxed line-clamp-2">
+        <p className="text-2xs text-terminal-muted mt-0.5 leading-relaxed line-clamp-2">
           {item.message}
         </p>
       </div>
 
       <button
         onClick={handleDismiss}
-        className="flex-shrink-0 p-0.5 rounded hover:bg-terminal-border text-terminal-muted hover:text-gray-300 transition-colors"
+        className="flex-shrink-0 p-0.5 rounded hover:bg-terminal-border text-terminal-muted hover:text-terminal-text-secondary transition-colors"
         aria-label="Dismiss"
       >
         <X size={12} />

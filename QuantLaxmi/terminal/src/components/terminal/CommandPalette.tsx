@@ -3,6 +3,7 @@ import { Command } from "cmdk";
 import { useAtom, useSetAtom } from "jotai";
 import {
   Layout,
+  LayoutDashboard,
   BarChart3,
   ShoppingCart,
   XCircle,
@@ -14,10 +15,13 @@ import {
   Crosshair,
   TrendingUp,
   Layers,
+  Settings,
+  UserCircle,
 } from "lucide-react";
 
 import { activeWorkspaceAtom, symbolSearchOpenAtom } from "@/stores/workspace";
 import type { WorkspaceId } from "@/stores/workspace";
+import { pageAtom, type PageId } from "@/stores/auth";
 import { selectedSymbolAtom } from "@/stores/market";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +41,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [, setActiveWorkspace] = useAtom(activeWorkspaceAtom);
   const setSymbolSearch = useSetAtom(symbolSearchOpenAtom);
   const setSelectedSymbol = useSetAtom(selectedSymbolAtom);
+  const setPage = useSetAtom(pageAtom);
 
   // Close on escape
   useEffect(() => {
@@ -52,12 +57,22 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
 
+  const navigateTo = useCallback(
+    (page: PageId, ws?: WorkspaceId) => {
+      setPage(page);
+      if (ws) setActiveWorkspace(ws);
+      close();
+    },
+    [setPage, setActiveWorkspace, close],
+  );
+
   const switchWorkspace = useCallback(
     (ws: WorkspaceId) => {
+      setPage("terminal");
       setActiveWorkspace(ws);
       close();
     },
-    [setActiveWorkspace, close],
+    [setPage, setActiveWorkspace, close],
   );
 
   const openSymbolSearch = useCallback(() => {
@@ -94,7 +109,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <Search size={16} className="text-terminal-muted flex-shrink-0" />
           <Command.Input
             placeholder="Type a command or search..."
-            className="flex-1 h-12 bg-transparent text-sm text-gray-100 placeholder:text-terminal-muted outline-none"
+            className="flex-1 h-12 bg-transparent text-sm text-terminal-text placeholder:text-terminal-muted outline-none"
             autoFocus
           />
           <kbd className="kbd">ESC</kbd>
@@ -114,6 +129,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </span>
             }
           >
+            <CommandItem
+              icon={<LayoutDashboard size={16} />}
+              label="Dashboard"
+              shortcut="Alt+0"
+              onSelect={() => navigateTo("dashboard")}
+            />
             <CommandItem
               icon={<Crosshair size={16} />}
               label="Trading Workspace"
@@ -137,6 +158,21 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               label="Monitor Workspace"
               shortcut="Alt+4"
               onSelect={() => switchWorkspace("monitor")}
+            />
+            <CommandItem
+              icon={<Layers size={16} />}
+              label="Strategies"
+              onSelect={() => navigateTo("strategies")}
+            />
+            <CommandItem
+              icon={<Settings size={16} />}
+              label="Settings"
+              onSelect={() => navigateTo("settings")}
+            />
+            <CommandItem
+              icon={<UserCircle size={16} />}
+              label="Profile"
+              onSelect={() => navigateTo("profile")}
             />
           </Command.Group>
 
@@ -270,8 +306,8 @@ function CommandItem({
     <Command.Item
       value={label}
       onSelect={onSelect}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-300 cursor-pointer
-                 data-[selected=true]:bg-terminal-panel data-[selected=true]:text-gray-100
+      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-terminal-text-secondary cursor-pointer
+                 data-[selected=true]:bg-terminal-panel data-[selected=true]:text-terminal-text
                  hover:bg-terminal-panel/60 transition-colors"
     >
       <span className="text-terminal-muted flex-shrink-0">{icon}</span>

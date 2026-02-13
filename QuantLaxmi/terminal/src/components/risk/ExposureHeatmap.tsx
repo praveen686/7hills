@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTauriCommand } from "@/hooks/useTauriCommand";
+import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -22,25 +22,10 @@ interface ExposureData {
 // Defaults
 // ---------------------------------------------------------------------------
 
-const DEFAULT_DATA: ExposureData = {
-  strategies: ["S1 VRP", "S4 IV-MR", "S5 Hawkes", "S8 Theta", "S11 Pairs", "S25 DFF"],
-  symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "HDFCBANK", "TCS"],
-  cells: [
-    { strategy: "S1 VRP", symbol: "NIFTY", exposure: 850000 },
-    { strategy: "S1 VRP", symbol: "BANKNIFTY", exposure: -420000 },
-    { strategy: "S4 IV-MR", symbol: "NIFTY", exposure: 310000 },
-    { strategy: "S4 IV-MR", symbol: "BANKNIFTY", exposure: 280000 },
-    { strategy: "S4 IV-MR", symbol: "FINNIFTY", exposure: -150000 },
-    { strategy: "S5 Hawkes", symbol: "NIFTY", exposure: -560000 },
-    { strategy: "S5 Hawkes", symbol: "BANKNIFTY", exposure: 720000 },
-    { strategy: "S8 Theta", symbol: "NIFTY", exposure: -200000 },
-    { strategy: "S8 Theta", symbol: "BANKNIFTY", exposure: -180000 },
-    { strategy: "S11 Pairs", symbol: "RELIANCE", exposure: 450000 },
-    { strategy: "S11 Pairs", symbol: "HDFCBANK", exposure: -440000 },
-    { strategy: "S11 Pairs", symbol: "TCS", exposure: 220000 },
-    { strategy: "S25 DFF", symbol: "NIFTY", exposure: 680000 },
-    { strategy: "S25 DFF", symbol: "BANKNIFTY", exposure: -350000 },
-  ],
+const EMPTY_DATA: ExposureData = {
+  strategies: [],
+  symbols: [],
+  cells: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -75,16 +60,38 @@ function formatLakhs(v: number): string {
 // ---------------------------------------------------------------------------
 
 export function ExposureHeatmap() {
-  const { data, execute } = useTauriCommand<ExposureData>("get_exposure_matrix");
-  const [matrix, setMatrix] = useState<ExposureData>(DEFAULT_DATA);
+  const [matrix, setMatrix] = useState<ExposureData>(EMPTY_DATA);
 
   useEffect(() => {
-    execute().catch(() => {});
-  }, [execute]);
+    let active = true;
 
-  useEffect(() => {
-    if (data) setMatrix(data);
-  }, [data]);
+    const fetchData = () => {
+      apiFetch<{
+        positions: Array<{
+          strategy_id: string;
+          symbol: string;
+          direction: string;
+          weight: number;
+          current_price: number;
+        }>;
+      }>("/api/portfolio").then((portfolio) => {
+        if (!active) return;
+        const positions = portfolio.positions ?? [];
+        const cells: ExposureCell[] = positions.map((p) => ({
+          strategy: p.strategy_id,
+          symbol: p.symbol,
+          exposure: (p.direction === "BUY" ? 1 : -1) * p.weight * p.current_price,
+        }));
+        const strategies = [...new Set(cells.map((c) => c.strategy))];
+        const symbols = [...new Set(cells.map((c) => c.symbol))];
+        setMatrix({ cells, strategies, symbols });
+      }).catch(() => {});
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 10000);
+    return () => { active = false; clearInterval(interval); };
+  }, []);
 
   const maxAbs = Math.max(
     ...matrix.cells.map((c) => Math.abs(c.exposure)),
@@ -110,6 +117,11 @@ export function ExposureHeatmap() {
       <h3 className="text-xs font-semibold uppercase tracking-wider text-terminal-muted px-1">
         Exposure Matrix — Strategy x Symbol
       </h3>
+      {matrix.strategies.length === 0 ? (
+        <div className="flex items-center justify-center h-24 text-terminal-muted text-xs font-mono">
+          No exposure data
+        </div>
+      ) : (
       <div className="overflow-x-auto rounded border border-terminal-border">
         <table className="w-full text-xs font-mono border-collapse">
           <thead>
@@ -135,7 +147,7 @@ export function ExposureHeatmap() {
               const rt = rowTotal(strat);
               return (
                 <tr key={strat} className="hover:bg-terminal-surface/50 transition-colors">
-                  <td className="sticky left-0 z-10 bg-terminal-panel px-3 py-1.5 text-gray-200 font-medium border-r border-b border-terminal-border whitespace-nowrap">
+                  <td className="sticky left-0 z-10 bg-terminal-panel px-3 py-1.5 text-terminal-text-secondary font-medium border-r border-b border-terminal-border whitespace-nowrap">
                     {strat}
                   </td>
                   {matrix.symbols.map((sym) => {
@@ -203,6 +215,7 @@ export function ExposureHeatmap() {
           </tfoot>
         </table>
       </div>
+      )}
     </div>
   );
 }

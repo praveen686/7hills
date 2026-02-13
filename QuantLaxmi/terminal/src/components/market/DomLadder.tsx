@@ -10,6 +10,8 @@ import { useTauriCommand } from "@/hooks/useTauriCommand";
 import { useTauriStream } from "@/hooks/useTauriStream";
 import { useAtom } from "jotai";
 import { orderbookAtom } from "@/stores/market";
+import { themeAtom } from "@/stores/workspace";
+import { getChartColors, withAlpha } from "@/lib/chartTheme";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -21,24 +23,30 @@ const SIZE_COL_WIDTH = 70;
 const TICK_SIZE = 0.05; // Minimum price increment for NSE
 
 // ---------------------------------------------------------------------------
-// Colors (matching terminal theme)
+// Colors (theme-aware via CSS custom properties)
 // ---------------------------------------------------------------------------
 
-const C = {
-  bg: "#08080d",
-  surface: "#0f0f17",
-  panel: "#13131d",
-  border: "#1e1e2e",
-  muted: "#6b6b8a",
-  accent: "#4f8eff",
-  profit: "#00d4aa",
-  profitDim: "rgba(0,212,170,0.12)",
-  loss: "#ff4d6a",
-  lossDim: "rgba(255,77,106,0.12)",
-  currentRow: "rgba(79,142,255,0.15)",
-  text: "#e0e0f0",
-  font: "11px 'JetBrains Mono', 'Fira Code', monospace",
-} as const;
+function getThemeAwareColors() {
+  const c = getChartColors();
+  const s = getComputedStyle(document.documentElement);
+  const panelRaw = s.getPropertyValue("--terminal-panel").trim();
+  const textRaw = s.getPropertyValue("--terminal-text").trim();
+  return {
+    bg: c.bg,
+    surface: c.surface,
+    panel: panelRaw ? `rgb(${panelRaw.split(/\s+/).join(", ")})` : c.surface,
+    border: c.border,
+    muted: c.text,
+    accent: c.accent,
+    profit: c.profit,
+    profitDim: withAlpha(c.profit, "1f"),
+    loss: c.loss,
+    lossDim: withAlpha(c.loss, "1f"),
+    currentRow: withAlpha(c.accent, "26"),
+    text: textRaw ? `rgb(${textRaw.split(/\s+/).join(", ")})` : c.text,
+    font: "11px 'JetBrains Mono', 'Fira Code', monospace",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,6 +77,7 @@ export function DomLadder() {
   const book = useAtomValue(selectedOrderbookAtom);
   const tick = useAtomValue(selectedTickAtom);
   const [, setOrderbook] = useAtom(orderbookAtom);
+  const theme = useAtomValue(themeAtom);
 
   const [scrollOffset, setScrollOffset] = useState(0);
   const { execute: placeOrder } = useTauriCommand<{ orderId: string }>("place_order");
@@ -119,6 +128,8 @@ export function DomLadder() {
     ro.observe(container);
 
     const render = () => {
+      const C = getThemeAwareColors();
+
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = C.bg;
       ctx.fillRect(0, 0, width, height);
@@ -257,7 +268,7 @@ export function DomLadder() {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
     };
-  }, [book, currentPrice, scrollOffset]);
+  }, [book, currentPrice, scrollOffset, theme]);
 
   // ---- Click handler: detect bid/ask column ----
   const handleCanvasClick = useCallback(
@@ -336,7 +347,7 @@ export function DomLadder() {
         </div>
         <div className="flex items-center gap-1">
           <span className="text-2xs text-terminal-muted">LTP</span>
-          <span className="text-xs font-mono font-semibold text-gray-100">
+          <span className="text-xs font-mono font-semibold text-terminal-text">
             {currentPrice > 0 ? currentPrice.toFixed(2) : "--"}
           </span>
         </div>

@@ -1,5 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { BacktestResultData } from "@/components/backtest/BacktestResults";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,59 +23,149 @@ interface BacktestConfig {
   params: Record<string, number | string>;
 }
 
-export interface BacktestResultSummary {
-  totalReturn: number;
-  sharpe: number;
-  maxDD: number;
-  totalTrades: number;
-}
-
 interface BacktestRunnerProps {
-  onComplete?: (result: BacktestResultSummary) => void;
+  onComplete?: (result: BacktestResultData) => void;
 }
 
 // ---------------------------------------------------------------------------
-// Available strategies
+// Helpers
 // ---------------------------------------------------------------------------
 
-const STRATEGIES: StrategyOption[] = [
-  { id: "s1", name: "S1 VRP Options", defaultParams: { threshold: 0.5, cost_pts: 3 } },
-  { id: "s4", name: "S4 IV Mean-Reversion", defaultParams: { zscore_entry: 2.0, zscore_exit: 0.5, lookback: 20, cost_bps: 3 } },
-  { id: "s5", name: "S5 Hawkes Jump", defaultParams: { intensity_threshold: 1.5, decay: 0.1, cost_bps: 3 } },
-  { id: "s6", name: "S6 Multi-Factor", defaultParams: { n_factors: 5, rebalance_days: 5, cost_bps: 3 } },
-  { id: "s8", name: "S8 Expiry Theta", defaultParams: { dte_entry: 7, width_pct: 3.0, cost_pts: 5 } },
-  { id: "s11", name: "S11 Statistical Pairs", defaultParams: { zscore_entry: 2.0, zscore_exit: 0.5, half_life: 15, cost_bps: 3 } },
-  { id: "s25", name: "S25 Divergence Flow Field", defaultParams: { threshold: 0.3, scale: 1.5, lookback: 20, cost_bps: 3 } },
-  { id: "s26", name: "S26 Crypto Flow", defaultParams: { vpin_threshold: 0.7, ofi_threshold: 1.0, cost_bps: 5 } },
-];
+/** Map raw backend result object to BacktestResultData. */
+function mapBacktestResult(r: any): BacktestResultData {
+  return {
+    totalReturn: (r.total_return ?? 0) * 100,
+    sharpe: r.sharpe_ratio ?? 0,
+    sortino: r.sortino_ratio ?? 0,
+    maxDD: (r.max_drawdown ?? 0) * 100,
+    winRate: (r.win_rate ?? 0) / 100,
+    profitFactor: r.profit_factor ?? 0,
+    totalTrades: r.n_trades ?? 0,
+    equityCurve: (r.equity_curve ?? []).map((p: any) => ({
+      time: p.date,
+      value: p.equity,
+    })),
+    drawdownCurve: (r.drawdown_curve ?? []).map((p: any) => ({
+      time: p.date,
+      value: (p.drawdown ?? 0) * 100,
+    })),
+    monthlyReturns: (r.monthly_returns ?? []).map((p: any) => ({
+      year: p.year,
+      month: p.month,
+      returnPct: p.return_pct,
+    })),
+    trades: [],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
+  const [strategies, setStrategies] = useState<StrategyOption[]>([]);
+  const [strategiesLoading, setStrategiesLoading] = useState(true);
+  const [strategiesError, setStrategiesError] = useState<string | null>(null);
   const [status, setStatus] = useState<BacktestStatus>("configuring");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const [config, setConfig] = useState<BacktestConfig>({
-    strategyId: "s25",
+    strategyId: "",
     startDate: "2025-01-01",
     endDate: "2026-02-12",
     initialCapital: 10000000,
-    params: { ...STRATEGIES[6].defaultParams },
+    params: {},
   });
 
-  const selectedStrategy = STRATEGIES.find((s) => s.id === config.strategyId);
+  // Fetch strategy list on mount with fallback
+  useEffect(() => {
+    setStrategiesLoading(true);
+    setStrategiesError(null);
+
+    apiFetch<Array<{ strategy_id: string; name: string; default_params: Record<string, any> }>>(
+      "/api/backtest/strategies"
+    ).then((list) => {
+      const mapped = list.map((s) => ({
+        id: s.strategy_id,
+        name: s.name,
+        defaultParams: s.default_params,
+      }));
+      setStrategies(mapped);
+      if (mapped.length > 0) {
+        setConfig((prev) => prev.strategyId ? prev : ({
+          ...prev,
+          strategyId: mapped[0].id,
+          params: { ...mapped[0].defaultParams },
+        }));
+      }
+    }).catch(() => {
+      // Fallback: try the main strategies endpoint
+      return apiFetch<{ strategies: Array<{ strategy_id: string; name: string }> }>(
+        "/api/strategies"
+      ).then((data) => {
+        const mapped = data.strategies.map((s) => ({
+          id: s.strategy_id,
+          name: s.name,
+          defaultParams: {},
+        }));
+        setStrategies(mapped);
+        if (mapped.length > 0) {
+          setConfig((prev) => prev.strategyId ? prev : ({
+            ...prev,
+            strategyId: mapped[0].id,
+          }));
+        }
+      });
+    }).catch((err) => {
+      setStrategiesError(
+        err instanceof Error ? err.message : "Failed to load strategies. Is the API running?"
+      );
+    }).finally(() => {
+      setStrategiesLoading(false);
+    });
+  }, []);
+
+  // When strategy changes, load the most recent completed backtest result
+  useEffect(() => {
+    if (!config.strategyId) return;
+
+    apiFetch<Array<{
+      backtest_id: string;
+      status: string;
+      strategy_id: string;
+      start_date: string;
+      end_date: string;
+      created_at: string;
+      completed_at: string | null;
+      error: string | null;
+      progress: number;
+      result: any | null;
+    }>>("/api/backtest/history")
+      .then((history) => {
+        const match = history.find(
+          (h) =>
+            h.status === "completed" &&
+            h.strategy_id === config.strategyId &&
+            h.result != null
+        );
+        if (match) {
+          onComplete?.(mapBacktestResult(match.result));
+        }
+      })
+      .catch(() => {});
+  }, [config.strategyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedStrategy = strategies.find((s) => s.id === config.strategyId);
 
   const handleStrategyChange = useCallback((id: string) => {
-    const strat = STRATEGIES.find((s) => s.id === id);
+    const strat = strategies.find((s) => s.id === id);
     setConfig((prev) => ({
       ...prev,
       strategyId: id,
       params: strat ? { ...strat.defaultParams } : prev.params,
     }));
-  }, []);
+  }, [strategies]);
 
   const handleParamChange = useCallback((key: string, value: string) => {
     setConfig((prev) => ({
@@ -88,10 +180,9 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
     setError(null);
 
     try {
-      const { BASE_URL } = await import("@/lib/api");
-      const response = await fetch(`${BASE_URL}/api/backtest/run`, {
+      // POST to launch backtest — returns 202 with backtest_id
+      const launch = await apiFetch<{ backtest_id: string }>("/api/backtest/run", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           strategy_id: config.strategyId,
           start_date: config.startDate,
@@ -101,59 +192,41 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`Server responded ${response.status}: ${await response.text()}`);
-      }
+      const backtestId = launch.backtest_id;
 
-      // Poll for progress if using SSE or simulate progress
-      const reader = response.body?.getReader();
-      if (reader) {
-        const decoder = new TextDecoder();
-        let accumulated = "";
-        let done = false;
+      // Poll for completion every 2s
+      for (let attempt = 0; attempt < 300; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
 
-        while (!done) {
-          const chunk = await reader.read();
-          done = chunk.done;
-          if (chunk.value) {
-            accumulated += decoder.decode(chunk.value, { stream: true });
-          }
-          // Simulate progress based on accumulated length
-          setProgress(Math.min(95, progress + 10));
+        const poll = await apiFetch<{
+          status: string;
+          error: string | null;
+          progress: number;
+          result: any | null;
+        }>(`/api/backtest/${backtestId}/status`);
+
+        setProgress(poll.progress ?? 0);
+
+        if (poll.status === "completed" && poll.result) {
+          const mapped = mapBacktestResult(poll.result);
+          setProgress(100);
+          setStatus("complete");
+          onComplete?.(mapped);
+          return;
         }
 
-        const result = JSON.parse(accumulated);
-        setProgress(100);
-        setStatus("complete");
-        onComplete?.(result);
-      } else {
-        const result = await response.json();
-        setProgress(100);
-        setStatus("complete");
-        onComplete?.(result);
+        if (poll.status === "failed") {
+          throw new Error(poll.error || "Backtest failed");
+        }
       }
+
+      throw new Error("Backtest timed out after 10 minutes");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // If fetch fails (server not running), simulate a backtest run
-      if (msg.includes("fetch") || msg.includes("Failed") || msg.includes("NetworkError")) {
-        // Simulate progress
-        for (let i = 0; i <= 100; i += 5) {
-          await new Promise((r) => setTimeout(r, 80));
-          setProgress(i);
-        }
-        setStatus("complete");
-        onComplete?.({
-          totalReturn: 6.09,
-          sharpe: 1.87,
-          maxDD: 2.05,
-          totalTrades: 93,
-        });
-      } else {
-        setError(msg);
-        setStatus("error");
-      }
+      setError(msg);
+      setStatus("error");
     }
-  }, [config, onComplete, progress]);
+  }, [config, onComplete]);
 
   const handleReset = useCallback(() => {
     setStatus("configuring");
@@ -163,23 +236,36 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
 
   return (
     <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto">
-      <h2 className="text-sm font-bold uppercase tracking-widest text-gray-100">
+      <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
         Backtest Runner
       </h2>
 
       {/* Strategy selector */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-terminal-muted">Strategy</label>
-        <select
-          value={config.strategyId}
-          onChange={(e) => handleStrategyChange(e.target.value)}
-          disabled={status === "running"}
-          className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-terminal-accent disabled:opacity-50"
-        >
-          {STRATEGIES.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
+        {strategiesLoading ? (
+          <div className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-terminal-muted animate-pulse">
+            Loading strategies...
+          </div>
+        ) : strategiesError ? (
+          <div className="rounded border border-terminal-loss/40 bg-terminal-loss/10 px-3 py-2 text-xs text-terminal-loss">
+            {strategiesError}
+          </div>
+        ) : (
+          <select
+            value={config.strategyId}
+            onChange={(e) => handleStrategyChange(e.target.value)}
+            disabled={status === "running"}
+            className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-terminal-text focus:outline-none focus:border-terminal-accent disabled:opacity-50"
+          >
+            {strategies.length === 0 && (
+              <option value="">No strategies available</option>
+            )}
+            {strategies.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Date range */}
@@ -191,7 +277,7 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
             value={config.startDate}
             onChange={(e) => setConfig((p) => ({ ...p, startDate: e.target.value }))}
             disabled={status === "running"}
-            className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
+            className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-terminal-text font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
           />
         </div>
         <div className="space-y-1">
@@ -201,7 +287,7 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
             value={config.endDate}
             onChange={(e) => setConfig((p) => ({ ...p, endDate: e.target.value }))}
             disabled={status === "running"}
-            className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
+            className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-terminal-text font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
           />
         </div>
       </div>
@@ -215,7 +301,7 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
           onChange={(e) => setConfig((p) => ({ ...p, initialCapital: Number(e.target.value) }))}
           disabled={status === "running"}
           step={100000}
-          className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-gray-100 font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
+          className="w-full rounded bg-terminal-surface border border-terminal-border px-3 py-2 text-sm text-terminal-text font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
         />
       </div>
 
@@ -233,7 +319,7 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
                   onChange={(e) => handleParamChange(key, e.target.value)}
                   disabled={status === "running"}
                   step={typeof val === "number" ? (val < 1 ? 0.1 : 1) : undefined}
-                  className="w-full rounded bg-terminal-bg border border-terminal-border px-2 py-1.5 text-xs text-gray-100 font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
+                  className="w-full rounded bg-terminal-bg border border-terminal-border px-2 py-1.5 text-xs text-terminal-text font-mono focus:outline-none focus:border-terminal-accent disabled:opacity-50"
                 />
               </div>
             ))}
@@ -269,7 +355,8 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
         {(status === "configuring" || status === "error") && (
           <button
             onClick={handleRun}
-            className="flex-1 rounded-md bg-terminal-accent px-4 py-2.5 text-sm font-bold text-white uppercase tracking-wider hover:bg-terminal-accent-dim transition-colors"
+            disabled={!config.strategyId}
+            className="flex-1 rounded-md bg-terminal-accent px-4 py-2.5 text-sm font-bold text-white uppercase tracking-wider hover:bg-terminal-accent-dim transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Run Backtest
           </button>
@@ -292,7 +379,7 @@ export function BacktestRunner({ onComplete }: BacktestRunnerProps) {
               onClick={handleReset}
               className={cn(
                 "rounded-md px-4 py-2.5 text-xs font-semibold",
-                "bg-terminal-surface border border-terminal-border text-gray-200 hover:bg-terminal-panel transition-colors",
+                "bg-terminal-surface border border-terminal-border text-terminal-text-secondary hover:bg-terminal-panel transition-colors",
               )}
             >
               New Run

@@ -1,5 +1,5 @@
 {
-  "name": "brahmastra-terminal",
+  "name": "quantlaxmi-terminal",
   "private": true,
   "version": "0.2.0",
   "type": "module",
@@ -26,6 +26,7 @@
     "jotai": "^2.10.0",
     "lightweight-charts": "^4.2.0",
     "lucide-react": "^0.460.0",
+    "puppeteer": "^24.37.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-grid-layout": "^1.4.4",

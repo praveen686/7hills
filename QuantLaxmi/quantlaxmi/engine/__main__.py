@@ -189,6 +189,51 @@ def cmd_status(args: argparse.Namespace) -> None:
             )
 
 
+def cmd_live(args: argparse.Namespace) -> None:
+    """Run live trading mode with real-time Kite WebSocket feed."""
+    import asyncio
+    from quantlaxmi.data.store import MarketDataStore
+    from quantlaxmi.strategies.registry import StrategyRegistry
+    from quantlaxmi.engine.live.live_engine import LiveEngine
+
+    store = MarketDataStore()
+    registry = StrategyRegistry()
+    registry.discover()
+
+    if len(registry) == 0:
+        print("No strategies discovered! Check strategy module paths.")
+        return
+
+    print(f"Discovered {len(registry)} strategies: {registry.list_ids()}")
+    print(f"Mode: {args.mode}")
+
+    engine = LiveEngine(
+        store=store,
+        registry=registry,
+        state_file=Path(args.state_file),
+        mode=args.mode,
+    )
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        loop.run_until_complete(engine.start())
+        print(
+            f"LiveEngine running (mode={args.mode}, "
+            f"tokens={len(engine.token_map)}, "
+            f"strategies={len(registry)}). "
+            f"Press Ctrl+C to stop."
+        )
+        loop.run_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        loop.run_until_complete(engine.stop())
+    finally:
+        store.close()
+        loop.close()
+
+
 def _print_summary(summary: dict) -> None:
     """Pretty-print orchestrator summary."""
     regime = summary.get("regime", {})
@@ -270,8 +315,12 @@ def main() -> None:
         help="Verify hash chain on reference WAL",
     )
 
-    # live (placeholder)
-    sub.add_parser("live", help="Live trading mode (requires QUANTLAXMI_MODE=live)")
+    # live
+    p_live = sub.add_parser("live", help="Live trading mode")
+    p_live.add_argument(
+        "--mode", choices=["paper", "live"], default="paper",
+        help="Trading mode: paper (simulated fills) or live (real orders)",
+    )
 
     args = parser.parse_args()
 
@@ -290,11 +339,7 @@ def main() -> None:
     elif args.command == "status":
         cmd_status(args)
     elif args.command == "live":
-        raise NotImplementedError(
-            "Live trading mode is not yet implemented.\n"
-            "Requires: Kite WebSocket feed, OMS integration, and risk guard rails.\n"
-            "Use 'engine paper' for paper trading."
-        )
+        cmd_live(args)
     else:
         parser.print_help()
 

@@ -7,6 +7,7 @@ import {
   symbolSearchOpenAtom,
   type WorkspaceId,
 } from "@/stores/workspace";
+import { pageAtom } from "@/stores/auth";
 
 // ---------------------------------------------------------------------------
 // Keyboard shortcut map
@@ -26,6 +27,7 @@ export function KeyboardNavigator() {
   const setWorkspace = useSetAtom(activeWorkspaceAtom);
   const setCommandPalette = useSetAtom(commandPaletteOpenAtom);
   const setSymbolSearch = useSetAtom(symbolSearchOpenAtom);
+  const setPage = useSetAtom(pageAtom);
 
   useEffect(() => {
     const WORKSPACE_MAP: Record<string, WorkspaceId> = {
@@ -40,11 +42,19 @@ export function KeyboardNavigator() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
+      // Alt+0 — dashboard
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key === "0") {
+        e.preventDefault();
+        setPage("dashboard");
+        return;
+      }
+
       // Alt+1..4 — workspace switching
       if (e.altKey && !e.ctrlKey && !e.metaKey) {
         const ws = WORKSPACE_MAP[e.key];
         if (ws) {
           e.preventDefault();
+          setPage("terminal");
           setWorkspace(ws);
           return;
         }
@@ -65,7 +75,7 @@ export function KeyboardNavigator() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setWorkspace, setCommandPalette, setSymbolSearch]);
+  }, [setWorkspace, setCommandPalette, setSymbolSearch, setPage]);
 
   // Render nothing
   return null;

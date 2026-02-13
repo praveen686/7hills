@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTauriStream } from "@/hooks/useTauriStream";
+import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -16,6 +17,20 @@ export interface Signal {
   regime?: string;
 }
 
+/** Shape returned by GET /api/signals */
+interface SignalOut {
+  id: string;
+  timestamp: string;
+  instrument: string;
+  symbol: string;
+  direction: string;
+  strength: number;
+  strategy_id: string;
+  strategy_name: string;
+  price: number;
+  regime: string;
+}
+
 interface SignalFeedProps {
   onSignalClick?: (signal: Signal) => void;
   maxItems?: number;
@@ -25,15 +40,6 @@ interface SignalFeedProps {
 // Demo data
 // ---------------------------------------------------------------------------
 
-const DEMO_SIGNALS: Signal[] = [
-  { id: "sig-1", timestamp: Date.now() / 1000 - 10, strategy: "S25 DFF", symbol: "NIFTY", direction: "BUY", conviction: 0.82, regime: "trending" },
-  { id: "sig-2", timestamp: Date.now() / 1000 - 45, strategy: "S4 IV-MR", symbol: "BANKNIFTY", direction: "SELL", conviction: 0.67, regime: "mean-rev" },
-  { id: "sig-3", timestamp: Date.now() / 1000 - 120, strategy: "S5 Hawkes", symbol: "NIFTY", direction: "BUY", conviction: 0.91, regime: "jump" },
-  { id: "sig-4", timestamp: Date.now() / 1000 - 300, strategy: "S1 VRP", symbol: "BANKNIFTY", direction: "SELL", conviction: 0.54, regime: "vol-crush" },
-  { id: "sig-5", timestamp: Date.now() / 1000 - 600, strategy: "S11 Pairs", symbol: "RELIANCE", direction: "BUY", conviction: 0.73 },
-  { id: "sig-6", timestamp: Date.now() / 1000 - 900, strategy: "S25 DFF", symbol: "BANKNIFTY", direction: "BUY", conviction: 0.78, regime: "trending" },
-  { id: "sig-7", timestamp: Date.now() / 1000 - 1800, strategy: "S6 Multi-Factor", symbol: "NIFTY", direction: "SELL", conviction: 0.61 },
-];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -116,7 +122,7 @@ function SignalRow({
     >
       {/* Time */}
       <div className="flex flex-col items-end min-w-[52px]">
-        <span className="text-2xs font-mono text-gray-300">{formatTime(signal.timestamp)}</span>
+        <span className="text-2xs font-mono text-terminal-text-secondary">{formatTime(signal.timestamp)}</span>
         <span className="text-2xs font-mono text-terminal-muted">{timeAgo(signal.timestamp)}</span>
       </div>
 
@@ -126,7 +132,7 @@ function SignalRow({
       </span>
 
       {/* Symbol */}
-      <span className="text-xs font-mono text-gray-100 min-w-[72px]">{signal.symbol}</span>
+      <span className="text-xs font-mono text-terminal-text min-w-[72px]">{signal.symbol}</span>
 
       {/* Direction badge */}
       <DirectionBadge direction={signal.direction} />
@@ -168,7 +174,7 @@ function FilterBar({
       <select
         value={selectedStrategy}
         onChange={(e) => onStrategyChange(e.target.value)}
-        className="rounded bg-terminal-surface border border-terminal-border px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-terminal-accent"
+        className="rounded bg-terminal-surface border border-terminal-border px-2 py-1 text-xs text-terminal-text-secondary focus:outline-none focus:border-terminal-accent"
       >
         <option value="ALL">All Strategies</option>
         {strategies.map((s) => (
@@ -185,7 +191,7 @@ function FilterBar({
               "px-2 py-1 text-2xs font-semibold transition-colors",
               directionFilter === d
                 ? "bg-terminal-accent text-white"
-                : "bg-terminal-surface text-terminal-muted hover:text-gray-200",
+                : "bg-terminal-surface text-terminal-muted hover:text-terminal-text-secondary",
             )}
           >
             {d}
@@ -201,12 +207,12 @@ function FilterBar({
 // ---------------------------------------------------------------------------
 
 export function SignalFeed({ onSignalClick, maxItems = 50 }: SignalFeedProps) {
-  const [signals, setSignals] = useState<Signal[]>(DEMO_SIGNALS);
+  const [signals, setSignals] = useState<Signal[]>([]);
   const [strategyFilter, setStrategyFilter] = useState("ALL");
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>("ALL");
   const newIdsRef = useRef<Set<string>>(new Set());
 
-  // Listen for real-time signals
+  // Listen for real-time signals via WebSocket
   useTauriStream<Signal>("signal", (signal) => {
     newIdsRef.current.add(signal.id);
     setSignals((prev) => [signal, ...prev].slice(0, maxItems));
@@ -215,6 +221,52 @@ export function SignalFeed({ onSignalClick, maxItems = 50 }: SignalFeedProps) {
       newIdsRef.current.delete(signal.id);
     }, 500);
   });
+
+  // REST fetch on mount + periodic polling every 10s as fallback
+  useEffect(() => {
+    const mapSignal = (s: SignalOut): Signal | null => {
+      if (s.direction === "HOLD") return null;
+      return {
+        id: s.id,
+        timestamp: new Date(s.timestamp).getTime() / 1000,
+        strategy: s.strategy_name || s.strategy_id,
+        symbol: s.symbol,
+        direction: s.direction as "BUY" | "SELL",
+        conviction: s.strength,
+        regime: s.regime || undefined,
+      };
+    };
+
+    const fetchSignals = async (isInitial: boolean) => {
+      try {
+        const data = await apiFetch<SignalOut[]>("/api/signals");
+        const mapped = data
+          .map(mapSignal)
+          .filter((s): s is Signal => s !== null);
+
+        if (isInitial) {
+          setSignals((prev) =>
+            prev.length === 0
+              ? mapped.slice(0, maxItems)
+              : prev,
+          );
+        } else {
+          setSignals((prev) => {
+            const existingIds = new Set(prev.map((s) => s.id));
+            const newSignals = mapped.filter((s) => !existingIds.has(s.id));
+            if (newSignals.length === 0) return prev;
+            return [...newSignals, ...prev].slice(0, maxItems);
+          });
+        }
+      } catch {
+        // API may be unavailable — silently ignore, WS will provide data
+      }
+    };
+
+    fetchSignals(true);
+    const interval = setInterval(() => fetchSignals(false), 10_000);
+    return () => clearInterval(interval);
+  }, [maxItems]);
 
   const handleClick = useCallback(
     (signal: Signal) => {
@@ -236,7 +288,7 @@ export function SignalFeed({ onSignalClick, maxItems = 50 }: SignalFeedProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-gray-100">
+        <h2 className="text-sm font-bold uppercase tracking-widest text-terminal-text">
           Signal Feed
         </h2>
         <span className="text-2xs font-mono text-terminal-muted">{filtered.length} signals</span>

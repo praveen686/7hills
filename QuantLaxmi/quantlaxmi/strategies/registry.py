@@ -46,6 +46,8 @@ _KNOWN_MODULES = [
     # Advanced strategies
     "quantlaxmi.strategies.s25_divergence_flow.strategy",
     "quantlaxmi.strategies.s26_crypto_flow.strategy",
+    # ML strategies
+    "quantlaxmi.models.ml.tft.production.strategy_adapter",
 ]
 
 

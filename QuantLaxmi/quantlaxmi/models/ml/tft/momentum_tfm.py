@@ -2037,17 +2037,7 @@ def main():
     # X-Trend + RL path: full integrated pipeline
     # ------------------------------------------------------------------
     if args.model == "xtrend-rl":
-        from quantlaxmi.models.rl.integration.pipeline import run_integrated_backtest
-
-        print(f"\n{'='*60}")
-        print(f"X-Trend + RL: Integrated multi-asset backtest")
-        print(f"{'='*60}")
-
-        all_results = run_integrated_backtest(
-            start=args.start,
-            end=args.end,
-        )
-        return all_results
+        raise NotImplementedError("xtrend-rl removed. Use 'xtrend'.")
 
     # ------------------------------------------------------------------
     # X-Trend path: multi-asset joint training

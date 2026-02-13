@@ -43,7 +43,7 @@ export function PanelFrame({
           {onMaximize && (
             <button
               onClick={onMaximize}
-              className="p-1 rounded hover:bg-terminal-border text-terminal-muted hover:text-gray-300 transition-colors"
+              className="p-1 rounded hover:bg-terminal-border text-terminal-muted hover:text-terminal-text-secondary transition-colors"
               aria-label={`Maximize ${title}`}
             >
               <Maximize2 size={12} />

@@ -33,7 +33,7 @@ const columns: ColumnDef<Position>[] = [
     header: "Symbol",
     size: 100,
     cell: ({ getValue }) => (
-      <span className="font-semibold text-gray-100">{getValue<string>()}</span>
+      <span className="font-semibold text-terminal-text">{getValue<string>()}</span>
     ),
   },
   {
@@ -77,7 +77,7 @@ const columns: ColumnDef<Position>[] = [
     header: "LTP",
     size: 80,
     cell: ({ getValue }) => (
-      <span className="tabular-nums text-gray-100 font-semibold">
+      <span className="tabular-nums text-terminal-text font-semibold">
         {formatPrice(getValue<number>())}
       </span>
     ),
@@ -192,7 +192,7 @@ export function PositionsTable() {
                     className={cn(
                       "px-2 py-1.5 text-left text-2xs text-terminal-muted font-normal",
                       "border-b border-terminal-border select-none",
-                      header.column.getCanSort() && "cursor-pointer hover:text-gray-300",
+                      header.column.getCanSort() && "cursor-pointer hover:text-terminal-text-secondary",
                     )}
                     style={{ width: header.getSize() }}
                     onClick={header.column.getToggleSortingHandler()}
@@ -260,7 +260,7 @@ export function PositionsTable() {
         </div>
         <div className="flex items-center gap-4 text-2xs font-mono">
           <span className="text-terminal-muted">Exposure</span>
-          <span className="text-gray-200">{formatINR(totalExposure)}</span>
+          <span className="text-terminal-text-secondary">{formatINR(totalExposure)}</span>
         </div>
       </div>
     </div>
