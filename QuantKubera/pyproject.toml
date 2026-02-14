@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantkubera"
+version = "0.1.0"
+description = "Institutional-grade quantitative trading platform with ML capabilities."
+authors = [
+  { name = "QuantKubera Team", email = "team@quantkubera.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "tensorflow>=2.10.0",  # Using modern TF
+    "keras-tuner",
+    "matplotlib",
+    "seaborn",
+    "hydra-core",
+    "mlflow",             # Experiment tracking
+    "pytest",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "flake8",
+    "isort",
+    "mypy",
+    "pytest-cov",
+    "jupyter",
+]
+
+[tool.pytest.ini_options]
+addopts = "--cov=quantkubera"
+testpaths = [
+    "tests",
+]

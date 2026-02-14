@@ -1,0 +1,20 @@
+defaults:
+  - _self_
+  - override hydra/job_logging: disabled
+  - override hydra/hydra_logging: disabled
+
+project:
+  name: "QuantKubera"
+  version: "0.1.0"
+  random_seed: 42
+
+paths:
+  data_dir: "${hydra:runtime.cwd}/data"
+  output_dir: "${hydra:runtime.cwd}/reports"
+  model_dir: "${hydra:runtime.cwd}/src/quantkubera/models"
+
+training:
+  batch_size: 64
+  epochs: 100
+  learning_rate: 0.001
+  early_stopping_patience: 10
